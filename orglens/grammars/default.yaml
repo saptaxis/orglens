@@ -1,0 +1,54 @@
+version: 1
+
+entity_types:
+  research-program:
+    parent_dir: research
+    required_files:
+      - research-question.md
+      - research-program-state.md
+    directories:
+      - specs
+      - literature
+      - directions
+      - brainstorms
+    children:
+      - experiment
+    state_file: research-program-state.md
+
+  experiment:
+    parent_of: research-program
+    dir_pattern: "expt-{n}-{name}"
+    required_files:
+      - design.md
+    directories:
+      - plans
+      - logs
+      - findings
+
+  project:
+    parent_dir: projects
+    required_files:
+      - overview.md
+    directories:
+      - specs
+      - plans
+      - logs
+    state_file: overview.md
+
+  client:
+    parent_dir: clients
+    required_files:
+      - overview.md
+    directories: []
+    state_file: overview.md
+
+artifacts:
+  plan:
+    directory: plans
+    pattern: "{NN}-{topic}-{MonDDYYYY}.md"
+  log:
+    directory: logs
+    pattern: "{NN}-{topic}-{MonDDYYYY}-log.md"
+  spec:
+    directory: specs
+    pattern: "{topic}.md"
