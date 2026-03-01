@@ -47,6 +47,30 @@ class TestSnapshotGeneration:
         snapshot = generate_snapshot(topo, config)
         assert "Entity Types" in snapshot or "Grammar" in snapshot
 
+    def test_snapshot_attributes_artifacts_to_experiments(self, topo, config):
+        """Artifacts under a research program should show which experiment they're from."""
+        snapshot = generate_snapshot(topo, config)
+        # After fix, experiment artifacts should be labeled with experiment name
+        # e.g. "**Plans** (expt-1-agent-behavior): 2"
+        # rather than just "**Plans:** 2" with no attribution
+        lines = snapshot.split("\n")
+        for line in lines:
+            if "01-testbed-Feb032026.md" in line:
+                # Find the artifact header above this line
+                idx = lines.index(line)
+                header_found = False
+                for j in range(idx, max(0, idx-4), -1):
+                    if lines[j].startswith("**") and "expt-1-agent-behavior" in lines[j]:
+                        header_found = True
+                        break
+                assert header_found, (
+                    f"Plan artifact not attributed to experiment in header. "
+                    f"Context: {lines[max(0,idx-3):idx+1]}"
+                )
+                break
+        else:
+            pytest.fail("Plan artifact not found in snapshot at all")
+
     def test_writes_to_file(self, topo, config, tmp_path):
         snapshot_path = tmp_path / "snapshot.md"
         generate_snapshot(topo, config, output_path=snapshot_path)
