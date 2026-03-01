@@ -84,15 +84,42 @@ def generate_snapshot(topo: Topology, config: Config, output_path: Path | None =
                         lines.append(f"- {child.name}{child_status_str}")
                     lines.append("")
 
-            # List recent artifacts
+            # List recent artifacts, grouped by source entity
             for at_name, at in topo.grammar.artifact_types.items():
-                artifacts = topo._find_artifacts_in(at, entity.path, entity.name)
-                if artifacts:
-                    lines.append(f"**{at_name.title()}s:** {len(artifacts)}")
-                    # Show most recent 3
-                    for a in artifacts[-3:]:
-                        lines.append(f"- `{a.name}`")
+                # Direct artifacts on this entity
+                direct_artifacts = []
+                target_dir = entity.path / at.directory
+                if target_dir.exists():
+                    for f in sorted(target_dir.iterdir()):
+                        if f.is_file() and f.suffix == ".md":
+                            parsed = at.parse_name(f.name)
+                            if parsed is not None:
+                                direct_artifacts.append(f.name)
+
+                if direct_artifacts:
+                    lines.append(f"**{at_name.title()}s:** {len(direct_artifacts)}")
+                    for name in direct_artifacts[-3:]:
+                        lines.append(f"- `{name}`")
                     lines.append("")
+
+                # Child entity artifacts (experiments within research programs)
+                if etype == "research-program":
+                    children = by_type.get("experiment", [])
+                    rp_children = [c for c in children if c.parent_name == entity.name]
+                    for child in rp_children:
+                        child_dir = child.path / at.directory
+                        if child_dir.exists():
+                            child_artifacts = []
+                            for f in sorted(child_dir.iterdir()):
+                                if f.is_file() and f.suffix == ".md":
+                                    parsed = at.parse_name(f.name)
+                                    if parsed is not None:
+                                        child_artifacts.append(f.name)
+                            if child_artifacts:
+                                lines.append(f"**{at_name.title()}s** ({child.name}): {len(child_artifacts)}")
+                                for name in child_artifacts[-3:]:
+                                    lines.append(f"- `{name}`")
+                                lines.append("")
 
         lines.append("---")
         lines.append("")
