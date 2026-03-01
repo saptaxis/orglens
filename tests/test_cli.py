@@ -47,6 +47,27 @@ class TestStatusCommand:
         assert "clipcompose" in result.output
         assert "active" in result.output.lower() or "Active" in result.output
 
+    def test_status_truncates_long_status(self, runner, cli_env, docs_tree):
+        """Long multi-clause statuses should be truncated to first clause."""
+        # Write a long status to a project
+        overview = docs_tree / "projects" / "clipcompose" / "overview.md"
+        overview.write_text(
+            "# Overview\n\n"
+            "> **Status:** Plans 01-04 complete; v2 plan on branch v2-plan1\n"
+        )
+        result = runner.invoke(cli, ["status"], env=cli_env)
+        assert result.exit_code == 0
+        # Should show truncated, not the full multi-clause string
+        assert "Plans 01-04 complete" in result.output
+        assert "v2 plan on branch" not in result.output
+
+    def test_status_no_title_casing(self, runner, cli_env):
+        """Status should capitalize first letter only, not .title() every word."""
+        result = runner.invoke(cli, ["status"], env=cli_env)
+        assert result.exit_code == 0
+        # "Active" not "ACTIVE" or weirdly cased
+        assert "Active" in result.output
+
 
 class TestFindCommand:
     def test_find_plans(self, runner, cli_env):
