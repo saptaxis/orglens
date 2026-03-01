@@ -70,6 +70,25 @@ orglens snapshot --stdout     # prints to stdout
 | `orglens new TYPE NAME [TOPIC]` | Create a new entity or artifact with correct naming |
 | `orglens snapshot [--stdout]` | Generate a topology snapshot (markdown) |
 
+## Claude Code Plugin
+
+orglens ships as a Claude Code plugin. The plugin provides an `org-context` skill that loads topology awareness at session start.
+
+```bash
+# Load as a Claude Code plugin
+claude --plugin-dir /path/to/orglens
+```
+
+When loaded, the skill triggers on questions like "what projects exist?", "create a new plan for X", or "what's the status of Y" — and uses the CLI to answer from the topology rather than scanning directories.
+
+**Plugin structure:**
+
+```
+.claude-plugin/plugin.json          # plugin manifest
+skills/org-context/SKILL.md         # session-start skill (lean, ~80 lines)
+skills/org-context/references/      # detailed grammar reference (progressive disclosure)
+```
+
 ## Grammar
 
 orglens discovers entities by scanning the filesystem against a YAML grammar (`orglens/grammars/default.yaml`). No registry or database — the directory tree is the data.
@@ -102,6 +121,17 @@ The grammar is data, not code — entity and artifact types can be added or chan
 
 Status is extracted from `> **Status:** ...` badges in entity state files (e.g. `overview.md`).
 
+## Demo
+
+Run the included demo to validate the full flow:
+
+```bash
+./demo.sh          # interactive walkthrough (6 steps)
+./demo.sh 3        # run a single step
+```
+
+Steps: install, configure, CLI commands, snapshot, plugin validation, test suite.
+
 ## Ecosystem
 
 orglens is part of a two-tool ecosystem:
@@ -116,12 +146,12 @@ orglens is part of a two-tool ecosystem:
 pip install pytest
 python -m pytest tests/ -v
 
-# Current: 82 tests
+# Current: 87 tests
 ```
 
 ## Status
 
-- **v1** (current): Grammar, topology, state aggregation, snapshot, CLI, awareness skill
+- **v1.1** (current): Grammar, topology, state aggregation, snapshot, CLI, Claude Code plugin with org-context skill, demo script
 - **v2** (planned): Org-mode backend for structured state tracking
 
 ## License
