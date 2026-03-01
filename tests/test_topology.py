@@ -145,17 +145,35 @@ class TestArtifactOperations:
         assert nn == 1
 
     def test_scaffold_artifact(self, topo, docs_tree):
+        from datetime import date
         path = topo.scaffold_artifact("plan", "clipcompose", "agent-integration")
         assert path.exists()
-        assert path.name == "02-agent-integration-Feb272026.md"
+        today = date.today().strftime("%b%d%Y")
+        assert path.name == f"02-agent-integration-{today}.md"
         content = path.read_text()
         assert "# 02" in content
 
     def test_scaffold_log(self, topo, docs_tree):
+        from datetime import date
         path = topo.scaffold_artifact("log", "expt-1-agent-behavior", "testbed")
-        assert path.name == "02-testbed-Feb272026-log.md"
+        today = date.today().strftime("%b%d%Y")
+        assert path.name == f"02-testbed-{today}-log.md"
 
     def test_scaffold_spec(self, topo, docs_tree):
         path = topo.scaffold_artifact("spec", "orglens", "system-design-v2")
         assert path.name == "system-design-v2.md"
         assert path.parent.name == "specs"
+
+    def test_find_all_plans_no_duplicates(self, topo):
+        """Global find must not return experiment artifacts twice."""
+        plans = topo.find_artifacts("plan")
+        paths = [str(p.path) for p in plans]
+        assert len(paths) == len(set(paths)), (
+            f"Duplicate artifacts found: {[p for p in paths if paths.count(p) > 1]}"
+        )
+
+    def test_find_all_logs_no_duplicates(self, topo):
+        """Global find must not return experiment logs twice."""
+        logs = topo.find_artifacts("log")
+        paths = [str(p.path) for p in logs]
+        assert len(paths) == len(set(paths))

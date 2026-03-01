@@ -191,9 +191,13 @@ class Topology:
             entity = self.resolve(entity_name)
             return self._find_artifacts_in(at, entity.path, entity.name)
         else:
-            # Search everywhere
+            # Search everywhere, but skip child entity types —
+            # parent's recursive search already covers them
             artifacts = []
             for entity in self.list_entities():
+                et = self.grammar.entity_types[entity.entity_type]
+                if et.parent_of:
+                    continue
                 artifacts.extend(self._find_artifacts_in(at, entity.path, entity.name))
             return artifacts
 
