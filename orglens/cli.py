@@ -105,7 +105,13 @@ def status():
                 state_file = e.path / et.state_file
                 if state_file.exists():
                     status = extract_status(state_file.read_text())
-            status_str = status.title() if status else "—"
+            if status:
+                # Truncate after first semicolon
+                truncated = status.split(";")[0].strip()
+                # Capitalize first letter only
+                status_str = truncated[0].upper() + truncated[1:] if truncated else "—"
+            else:
+                status_str = "—"
 
             # Count artifacts
             plan_count = len(topo.find_artifacts("plan", e.name))
