@@ -12,7 +12,7 @@ Requires Python 3.11+.
 
 ```bash
 # Clone and install in a virtualenv
-git clone https://github.com/vignesh-saptarishi/orglens.git
+git clone git@github.com:saptaxis/orglens.git
 cd orglens
 python -m venv .venv && source .venv/bin/activate
 pip install -e .

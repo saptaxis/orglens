@@ -5,3 +5,15 @@ dist/
 build/
 .pytest_cache/
 scad-orglens.yml
+
+# macOS
+.DS_Store
+
+# Domain-deck state and outputs — version skills and config, not artifacts
+work/
+**/work/
+**/versions/
+*.png
+*.jpg
+*.jpeg
+!**/packs/**/*.png
