@@ -1,0 +1,32 @@
+# orgdeck grammar — how orglens sees this bank.
+# v1 sketch; evolves as decks reveal their shape (harvest, don't over-specify).
+version: 1
+
+entity_types:
+  deck:
+    parent_dir: decks
+    required_files:
+      - DECK.md
+    directories:
+      - operators     # method-deck cards (may be absent on a domain deck)
+      - skills        # domain-deck cards (may be absent on a method deck)
+      - packs
+      - agents
+    state_file: DECK.md
+
+artifacts:
+  operator:
+    directory: operators
+    pattern: "{name}.md"
+  skill:
+    directory: skills
+    pattern: "{name}/SKILL.md"
+  agent:
+    directory: agents
+    pattern: "{name}.md"
+  bias-pack:
+    directory: packs/bias
+    pattern: "{name}.md"
+  voice-pack:
+    directory: packs/voice
+    pattern: "{name}.md"
