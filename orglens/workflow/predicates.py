@@ -14,6 +14,7 @@ PREDICATE_NAMES = frozenset(
         "brief_exists",
         "brief_published",
         "artifact_exists",
+        "artifact_noncanonical",
         "no_rounds",
         "open_round",
         "no_open_round",
@@ -80,6 +81,8 @@ def evaluate(snapshot: PacketSnapshot) -> dict[str, bool]:
         "brief_exists": snapshot.brief is not None,
         "brief_published": bool(snapshot.brief_frontmatter.get("published")),
         "artifact_exists": snapshot.artifact is not None,
+        "artifact_noncanonical": snapshot.artifact is not None
+        and not snapshot.artifact_canonical,
         "no_rounds": latest is None,
         "open_round": open_round,
         "no_open_round": not open_round,

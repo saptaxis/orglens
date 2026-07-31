@@ -47,6 +47,13 @@ WORKFLOW = {
 }
 
 
+import copy
+
+WORKFLOW_NONCANON = copy.deepcopy(WORKFLOW)
+for _n in ("critique", "revise", "audit"):
+    WORKFLOW_NONCANON["nodes"][_n]["guard"]["none"] = ["artifact_noncanonical"]
+
+
 def derive(tmp_path: Path):
     return derive_next_node(tmp_path, WORKFLOW)
 
@@ -190,3 +197,28 @@ def test_result_carries_facts_and_reason(tmp_path: Path):
     r = derive(tmp_path)
     assert r.facts["brief_exists"] is False
     assert r.reason
+
+
+def test_noncanonical_artifact_routes_to_adopt(tmp_path: Path):
+    """Defect 9, found the first time this ran on a real directory.
+
+    A packet with draft-v1/draft-v2 was indistinguishable from a fresh
+    canonical one — the family rule accepts draft-v2.md as the artifact, so
+    `critique` fired and `adopt` never ran for exactly the case it exists for.
+    This workflow always writes canonically (I1a), so a non-canonical artifact
+    is evidence something else produced it.
+    """
+    (tmp_path / "writing-brief.md").write_text("# Brief")
+    (tmp_path / "draft-v1.md").write_text("one")
+    (tmp_path / "draft-v2.md").write_text("two")
+    r = derive_next_node(tmp_path, WORKFLOW_NONCANON)
+    assert r.outcome == Outcome.ADOPTABLE
+    assert r.node == "adopt"
+
+
+def test_canonical_artifact_still_routes_to_critique(tmp_path: Path):
+    (tmp_path / "writing-brief.md").write_text("# Brief")
+    (tmp_path / "draft.md").write_text("prose")
+    r = derive_next_node(tmp_path, WORKFLOW_NONCANON)
+    assert r.outcome == Outcome.RUNNABLE
+    assert r.node == "critique"

@@ -30,6 +30,7 @@ class PacketSnapshot:
     brief: str | None = None
     brief_frontmatter: dict = field(default_factory=dict)
     artifact: str | None = None
+    artifact_canonical: bool = True
     rounds: dict[int, RoundInfo] = field(default_factory=dict)
     adoption: AdoptionInfo | None = None
     runs: list[dict] = field(default_factory=list)
@@ -107,6 +108,10 @@ def read_packet(root: Path, workflow: dict) -> PacketSnapshot:
             snap.adoption = AdoptionInfo(
                 sections=_parse_sections((root / name).read_text())
             )
+
+    canonical = workflow.get("artifact", {}).get("canonical")
+    if snap.artifact is not None and canonical:
+        snap.artifact_canonical = snap.artifact == canonical
 
     runs_path = root / "runs.jsonl"
     if runs_path.exists():
