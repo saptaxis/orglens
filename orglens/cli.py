@@ -12,6 +12,7 @@ from orglens.config import Config
 from orglens.snapshot import generate_snapshot
 from orglens.state import extract_status
 from orglens.topology import Topology
+from orglens.workflow.cli import workflow as workflow_group
 
 
 def _load_config() -> Config:
@@ -33,6 +34,9 @@ def _load_topo() -> tuple[Topology, Config]:
 def cli():
     """orglens — organizational lens for AI agents."""
     pass
+
+
+cli.add_command(workflow_group, name="workflow")
 
 
 @cli.command()
