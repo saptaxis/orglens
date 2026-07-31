@@ -17,3 +17,6 @@ work/
 *.jpg
 *.jpeg
 !**/packs/**/*.png
+
+# kimi session state
+.kimi-code/
