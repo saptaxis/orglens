@@ -146,3 +146,25 @@ def test_record_rejects_an_unknown_node(tmp_path: Path):
     )
     assert result.exit_code == 2
     assert "nonesuch" in result.output
+
+
+def test_a_failed_postcondition_is_itself_recorded(tmp_path: Path):
+    """Append-only means the log must explain itself. Two identical
+    node_completed facts cannot distinguish a retry from a double-run."""
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    (packet / "writing-brief.md").write_text("# Brief")
+    (packet / "draft.md").write_text("prose")
+    (packet / "decisions-01.md").write_text("## Accept\n- a\n")
+    wf = write_workflow(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--node", "critique"],
+    )
+    assert result.exit_code == 1
+
+    facts = [json.loads(line) for line in (packet / "runs.jsonl").read_text().splitlines()]
+    assert [f["type"] for f in facts] == ["node_completed", "postcondition_failed"]
+    assert facts[-1]["expected"] == "waiting"
+    assert facts[-1]["derived"] == "revise"

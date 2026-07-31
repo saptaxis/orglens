@@ -118,6 +118,16 @@ def record(packet: str, workflow_path: str, node: str, agent: str | None,
         click.echo(f"recorded {node}; packet derives to {actual} as expected")
         raise SystemExit(0)
 
+    append_fact(
+        Path(packet),
+        {
+            "type": "postcondition_failed",
+            "node": node,
+            "expected": expected,
+            "derived": actual,
+            "workflow_version": workflow_version(Path(workflow_path)),
+        },
+    )
     click.echo(f"POSTCONDITION FAILED for {node}")
     click.echo(f"  expected {expected}, got {actual}")
     click.echo(f"  derivation: {result.outcome} {result.node or '-'}")
