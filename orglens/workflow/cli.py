@@ -6,7 +6,6 @@ exiting, so --json is the primary interface.
 
 from __future__ import annotations
 
-import fnmatch
 import json as json_module
 import subprocess
 import uuid
@@ -133,9 +132,16 @@ def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | N
     """Record a completed pass.
 
     Invoked after a pass that already ran outside this loop's view, once it
-    is done writing. Writes the completion fact — what it wrote, what it was
-    handed to read — then raises exactly one gate: `--question` if given,
-    otherwise the node's declared review gate, never both.
+    is done writing. Writes the completion fact — what it wrote, and what it
+    read — then raises exactly one gate: `--question` if given, otherwise
+    the node's declared review gate, never both.
+
+    Unlike `step`, which resolves a job's reads before dispatching it, this
+    command has no "before" to resolve against — it only runs after the
+    pass is already done. Its "read" is therefore resolved against the
+    directory as it stands right now, at record time, which can include
+    something the pass itself just wrote, not a snapshot of what the pass
+    actually had in front of it when it ran.
     """
     definition = _load_workflow_or_exit(workflow_path)
 
@@ -263,14 +269,20 @@ def job(packet: str, workflow_path: str, deck: str, node: str | None, as_json: b
     click.echo(f"node:   {resolved.node}")
     click.echo(f"role:   {resolved.role}")
 
+    # Every declared glob's outcome, reported against `Job.unmatched` — the
+    # same verdict `resolve_job` already reached — rather than a second,
+    # independent match computed here. A glob that resolved is re-listed
+    # through the identical call `resolve_job` made (`Path.glob`, not a
+    # basename comparison), so a glob naming a subdirectory reports
+    # correctly instead of always missing.
     declared_reads = definition.get("nodes", {}).get(chosen, {}).get("reads") or []
+    packet_path = Path(packet)
     for glob in declared_reads:
-        matched = [p for p in resolved.reads if fnmatch.fnmatch(Path(p).name, glob)]
-        if matched:
-            for path in matched:
-                click.echo(f"read:   {glob} -> {path}")
-        else:
+        if glob in resolved.unmatched:
             click.echo(f"read:   {glob} (no match)")
+            continue
+        for path in sorted(str(p.resolve()) for p in packet_path.glob(glob)):
+            click.echo(f"read:   {glob} -> {path}")
 
     for path in resolved.writes:
         click.echo(f"write:  {path}")

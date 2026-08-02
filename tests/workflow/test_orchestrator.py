@@ -132,3 +132,17 @@ def test_every_fact_the_orchestrator_writes_is_valid(repo_packet):
     run(repo_packet, writes_findings)
     for entry in read_entries(packet):
         assert validate_entry(entry) == [], entry
+
+
+# --- fix round 1 ------------------------------------------------------------
+# Finding 3: `"read" in fact` is satisfied by `read: []`. Pin the content —
+# `critique` declares two read globs and only one of them matches anything
+# in the fixture packet, so this also confirms an unmatched glob contributes
+# nothing to `read` rather than, say, its own literal name.
+
+
+def test_the_completion_fact_names_exactly_what_was_read(repo_packet):
+    packet, _, _ = repo_packet
+    run(repo_packet, writes_findings)
+    fact = read_entries(packet)[0]
+    assert fact["read"] == ["writing-brief.md"]

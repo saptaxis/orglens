@@ -363,3 +363,61 @@ def test_record_stores_what_was_read_and_written(repo_packet):
     fact = json.loads((packet / "runs.jsonl").read_text().splitlines()[0])
     assert fact["wrote"] == ["findings.md"]
     assert "read" in fact
+
+
+# --- fix round 1 ------------------------------------------------------------
+# Finding 1: the glob report matched declared globs against `Job.reads` with
+# `fnmatch` on the basename alone, silently dropping any directory segment —
+# a different, weaker algorithm than the one `resolve_job` actually used
+# (`Path.glob`). A path-bearing glob that genuinely resolved was reported as
+# `(no match)` and its file omitted entirely.
+# Finding 3: `"read" in fact` is satisfied by `read: []`. Pin the content.
+
+
+def test_job_reports_a_path_bearing_glob_that_did_resolve(tmp_path: Path):
+    """Regression for the basename-only match: a glob naming a
+    subdirectory, like a real deck's `references/smell-patterns.md`, must
+    be reported by what `Job.unmatched` says, not recomputed and lost."""
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    (packet / "references").mkdir()
+    (packet / "references" / "smell-patterns.md").write_text("residues")
+
+    deck = tmp_path / "deck"
+    deck.mkdir()
+
+    workflow_path = tmp_path / "WORKFLOW.yaml"
+    workflow_path.write_text(
+        yaml.safe_dump(
+            {
+                "nodes": {
+                    "audit": {
+                        "role": "self",
+                        "reads": ["references/smell-patterns.md"],
+                        "writes": [],
+                        "guard": {"all": ["after:nothing"]},
+                    }
+                },
+            }
+        )
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "job", str(packet), "--workflow", str(workflow_path),
+         "--deck", str(deck), "--node", "audit"],
+    )
+    assert result.exit_code == 0
+    assert "(no match)" not in result.output
+    assert "references/smell-patterns.md" in result.output
+
+
+def test_record_names_exactly_what_it_read(repo_packet):
+    packet, deck, wf = repo_packet
+    (packet / "findings.md").write_text("f")
+    CliRunner().invoke(
+        cli, ["workflow", "record", str(packet), "--workflow", str(wf),
+              "--deck", str(deck), "--node", "critique"],
+    )
+    fact = json.loads((packet / "runs.jsonl").read_text().splitlines()[0])
+    assert fact["read"] == ["writing-brief.md"]
