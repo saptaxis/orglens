@@ -1,13 +1,11 @@
-"""The outcome of deriving what runs next, and the record of how it was
-decided.
+"""The four shapes derivation can answer with, and nothing else.
 
-Five outcomes cover every packet: one names a node to run, one says the
-packet is done, one says the log disagrees with the files on disk, one says
-two nodes claimed the same packet at once, and one says the layout does not
-match anything the workflow declares. That last one names no node — a
-directory the workflow does not recognise is not made to fit; it is simply
-not derivable, and something other than this module decides what happens to
-it next.
+A derivation either names exactly one node to run, names none because a
+terminal value already holds, names none because more than one node's guard
+matched, or names none because nothing matched at all. Those four shapes are
+closed: :class:`Outcome` has no fifth member, and no member here is a
+permanent verdict about the packet — every one of them is recomputed fresh
+from the packet's current shape each time derivation runs.
 """
 
 from __future__ import annotations
@@ -19,9 +17,8 @@ from enum import StrEnum
 class Outcome(StrEnum):
     RUNNABLE = "runnable"
     TERMINAL = "terminal"
-    UNKNOWN = "unknown"
-    MALFORMED = "malformed"
     AMBIGUOUS = "ambiguous"
+    UNKNOWN = "unknown"
 
 
 @dataclass
