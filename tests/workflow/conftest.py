@@ -1,7 +1,10 @@
-"""Shared fixture: a committed packet in a real git repo.
+"""Shared fixture: a packet committed in a real git repo.
 
-effects.check_delta diffs against HEAD, so a packet outside a repo reports no
-violations and every verification test would pass vacuously.
+The engine itself no longer consults git at all — verification is gone, so
+nothing here needs a "before" state to judge a pass against. The fixture
+stays git-backed anyway because that is the real operating model this plan
+targets: a pass that overreaches is a diff to look at, not something this
+fixture has to simulate.
 """
 
 from __future__ import annotations
@@ -12,49 +15,45 @@ from pathlib import Path
 import pytest
 import yaml
 
+# `after:`-chained guards throughout, no `mutates`/`diagnoses`/`expect`/
+# `must_not_modify`/`marker` — those concepts do not exist anymore.
+#
+# `critique` is reachable straight from an empty run log (the fixture packet
+# starts with its brief and draft already in place, as if the packet were
+# handed over mid-flight). `revise` follows either a `critique` or an
+# `audit`, and `audit` follows a `revise` — a real loop. `brief` is declared
+# but not reachable through any guard here; it exists only as a target a
+# human can move the cursor to by hand.
+#
+# `critique`'s second read glob matches nothing in the fixture packet on
+# purpose, so a glob report has something to report as unmatched.
 ORCHESTRATOR_WORKFLOW = {
-    "marker": "writing.yaml",
-    "brief": "*-brief.md",
-    "artifact": {"family": "draft", "canonical": "draft.md"},
-    "terminal": {"published": "brief_published"},
+    "terminal": {"done": "exists:PUBLISHED"},
     "nodes": {
         "critique": {
             "role": "critic.md",
-            "reads": ["@brief", "@artifact"],
+            "reads": ["writing-brief.md", "notes-*.md"],
             "writes": ["findings.md"],
-            "must_not_modify": ["**"],
-            "diagnoses": True,
             "human_review": True,
-            "expect": "revise",
-            "guard": {
-                "all": ["brief_exists", "artifact_exists"],
-                "none": [
-                    "artifact_noncanonical",
-                    "awaiting_mutation",
-                    "last_diagnostic_is_critique",
-                ],
-            },
+            "guard": {"all": ["after:nothing"]},
         },
         "revise": {
             "role": "liner.md",
-            "reads": ["@artifact"],
+            "reads": ["draft.md"],
             "writes": ["draft.md"],
-            "must_not_modify": ["writing-brief.md"],
-            "mutates": True,
-            "expect": "audit",
-            "guard": {"all": ["awaiting_mutation"], "none": ["artifact_noncanonical"]},
+            "guard": {"any": ["after:critique", "after:audit"]},
         },
         "audit": {
             "role": "smell.md",
-            "reads": ["@artifact"],
+            "reads": ["draft.md"],
             "writes": ["findings.md"],
-            "must_not_modify": ["**"],
-            "diagnoses": True,
-            "expect": "revise",
-            "guard": {
-                "all": ["brief_exists", "artifact_exists", "last_diagnostic_is_critique"],
-                "none": ["artifact_noncanonical", "awaiting_mutation"],
-            },
+            "guard": {"all": ["after:revise"]},
+        },
+        "brief": {
+            "role": "self",
+            "reads": [],
+            "writes": ["writing-brief.md"],
+            "guard": {"all": ["after:brief"]},
         },
     },
 }
@@ -71,9 +70,6 @@ def repo_packet(tmp_path: Path):
     _git(tmp_path, "config", "user.email", "t@example.com")
     _git(tmp_path, "config", "user.name", "t")
 
-    (tmp_path / "writing.yaml").write_text(
-        "default: portfolio\nprofiles:\n  portfolio: {}\n"
-    )
     packet = tmp_path / "a-piece"
     packet.mkdir()
     (packet / "writing-brief.md").write_text("# Brief")

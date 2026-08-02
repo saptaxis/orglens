@@ -1,11 +1,12 @@
 """CLI for the workflow face.
 
-`derive` is what role files call to check their own postcondition before
+`derive` is what a role card checks to confirm its own next step before
 exiting, so --json is the primary interface.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import json as json_module
 import subprocess
 import uuid
@@ -14,11 +15,10 @@ from pathlib import Path
 
 import click
 
-from orglens.workflow import blocking
+from orglens.workflow import blocking, orchestrator
 from orglens.workflow.definition import load_workflow
 from orglens.workflow.derive import derive_next_node
-from orglens.workflow.job import Job, resolve_job
-from orglens.workflow.orchestrator import record_and_verify, step
+from orglens.workflow.job import resolve_job
 from orglens.workflow.result import Outcome
 from orglens.workflow.runstate import (
     append_fact,
@@ -27,13 +27,13 @@ from orglens.workflow.runstate import (
 )
 from orglens.workflow.validate import validate_definition
 
-FAILING = {Outcome.MALFORMED, Outcome.AMBIGUOUS, Outcome.UNKNOWN}
+FAILING = {Outcome.AMBIGUOUS, Outcome.UNKNOWN}
 
 DEFAULT_MAX_TURNS = 200
 
 
 def _load_workflow_or_exit(workflow_path: str) -> dict:
-    """Read and validate a WORKFLOW.yaml, or exit with a clean message.
+    """Read and validate a workflow definition, or exit with a clean message.
 
     Shared by every command that derives against a definition: a missing
     file or a definition that names an unknown predicate must be reported,
@@ -64,7 +64,7 @@ def workflow():
 @workflow.command()
 @click.argument("packet", type=click.Path(exists=True, file_okay=False))
 @click.option("--workflow", "workflow_path", required=True,
-              help="Path to WORKFLOW.yaml.")
+              help="Path to the workflow definition.")
 @click.option("--json", "as_json", is_flag=True, help="Emit the full result as JSON.")
 def derive(packet: str, workflow_path: str, as_json: bool):
     """Report which node runs next for PACKET."""
@@ -99,7 +99,7 @@ def derive(packet: str, workflow_path: str, as_json: bool):
 
 @workflow.command()
 @click.option("--workflow", "workflow_path", required=True,
-              help="Path to WORKFLOW.yaml.")
+              help="Path to the workflow definition.")
 def check(workflow_path: str):
     """Validate a workflow definition's structure."""
     try:
@@ -121,78 +121,73 @@ def check(workflow_path: str):
 @workflow.command()
 @click.argument("packet", type=click.Path(exists=True, file_okay=False))
 @click.option("--workflow", "workflow_path", required=True,
-              help="Path to WORKFLOW.yaml.")
+              help="Path to the workflow definition.")
+@click.option("--deck", required=True, help="Deck root, for role and read resolution.")
 @click.option("--node", required=True, help="The node that just ran.")
 @click.option("--agent", default=None, help="Which family performed the pass.")
 @click.option("--session", default=None, help="Session id of the performer.")
 @click.option("--question", default=None,
               help="Raise a gate after recording — how a stuck pass blocks itself.")
-def record(packet: str, workflow_path: str, node: str, agent: str | None,
+def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | None,
            session: str | None, question: str | None):
-    """Record a completed pass, then confirm the packet derives to `expect`.
+    """Record a completed pass.
 
-    A node that writes files and exits has no idea whether what it wrote is
-    well-formed. This is where it finds out, while the context that could fix
-    it still exists.
-
-    This command is invoked after a pass that already ran outside its view,
-    with no "before" state available to it — so, unlike `orglens workflow
-    run` (which verifies what a dispatch changed against its declaration
-    before recording, see `orchestrator.step`), `record` does not check the
-    packet's changes at all and never reverts anything. A hand-driven pass
-    is trusted to have respected its own declaration; rule 6 is why the
-    check that cannot be attributed correctly is not attempted here (see
-    `orchestrator.record_and_verify`).
-
-    Raises exactly one gate: `--question` if given, otherwise the node's
-    declared `human_review` gate — never both.
+    Invoked after a pass that already ran outside this loop's view, once it
+    is done writing. Writes the completion fact — what it wrote, what it was
+    handed to read — then raises exactly one gate: `--question` if given,
+    otherwise the node's declared review gate, never both.
     """
     definition = _load_workflow_or_exit(workflow_path)
 
-    spec = definition.get("nodes", {}).get(node)
-    if spec is None:
+    if node not in definition.get("nodes", {}):
         click.echo(f"no node {node!r} in this workflow")
         raise SystemExit(2)
 
-    job = Job(
-        node=node,
-        role=None,
-        profile="",
-        reads=[],
-        writes=list(spec.get("writes") or []),
-        must_not_modify=[],
-        requires=spec.get("requires") or {},
-        human_review=bool(spec.get("human_review", False)),
-        expect=spec.get("expect"),
-    )
-    result = record_and_verify(
-        Path(packet), definition, Path(workflow_path), job,
+    resolved = resolve_job(Path(packet), Path(deck), definition, node)
+    result = orchestrator.record(
+        Path(packet), definition, Path(workflow_path), resolved,
         agent=agent, by=session, question=question,
     )
 
-    actual = result.detail
-
-    if result.postcondition_failed:
-        expected_text = " or ".join(result.expect or [])
-        click.echo(f"POSTCONDITION FAILED for {node}")
-        click.echo(f"  expected {expected_text}, got {actual}")
-        raise SystemExit(1)
-
-    if not result.expect:
-        click.echo(f"recorded {node}; no expect declared, nothing to check")
-    else:
-        click.echo(f"recorded {node}; packet derives to {actual} as expected")
-
+    click.echo(f"recorded {result.node}")
     if question:
         click.echo(f"raised a gate: {question}")
+    elif resolved.human_review:
+        click.echo("raised the declared review gate")
 
     raise SystemExit(0)
 
 
 @workflow.command()
 @click.argument("packet", type=click.Path(exists=True, file_okay=False))
+@click.option("--workflow", "workflow_path", required=True,
+              help="Path to the workflow definition.")
+@click.option("--node", required=True, help="Where the cursor moves to.")
+@click.option("--note", required=True, help="Why a human moved it. Free text.")
+def goto(packet: str, workflow_path: str, node: str, note: str):
+    """Move the cursor by hand — jump forward, skip a stage, or redo one.
+
+    Appends a `resumed_at` fact naming NODE as the new cursor. The only
+    thing this refuses is a target that is not declared; moving backwards to
+    redo a stage is ordinary use, not a special case. The only thing this
+    forbids outright is moving without a reason, which is why --note is
+    required.
+    """
+    definition = _load_workflow_or_exit(workflow_path)
+
+    if node not in definition.get("nodes", {}):
+        click.echo(f"no node {node!r} in this workflow")
+        raise SystemExit(2)
+
+    append_fact(Path(packet), {"type": "resumed_at", "node": node, "note": note})
+    click.echo(f"cursor moved to {node}: {note}")
+    raise SystemExit(0)
+
+
+@workflow.command()
+@click.argument("packet", type=click.Path(exists=True, file_okay=False))
 @click.option("--workflow", "workflow_path", required=True)
-@click.option("--deck", required=True, help="Deck root, for role and profile paths.")
+@click.option("--deck", required=True, help="Deck root, for role and read resolution.")
 @click.option("--dispatch", "dispatch_cmd", default=None,
               help="Command receiving the job as JSON on stdin. Omit to print and stop.")
 @click.option("--once", is_flag=True, help="One turn, then exit.")
@@ -232,7 +227,9 @@ def run(packet: str, workflow_path: str, deck: str, dispatch_cmd: str | None, on
             )
             raise SystemExit(1)
 
-        outcome = step(Path(packet), Path(deck), definition, Path(workflow_path), dispatch)
+        outcome = orchestrator.step(
+            Path(packet), Path(deck), definition, Path(workflow_path), dispatch
+        )
         click.echo(f"{outcome.status}: {outcome.node or '-'}  {outcome.detail}")
         if outcome.status != "completed" or once:
             raise SystemExit(0 if outcome.status in ("completed", "terminal", "blocked") else 1)
@@ -241,7 +238,7 @@ def run(packet: str, workflow_path: str, deck: str, dispatch_cmd: str | None, on
 @workflow.command()
 @click.argument("packet", type=click.Path(exists=True, file_okay=False))
 @click.option("--workflow", "workflow_path", required=True)
-@click.option("--deck", required=True, help="Deck root, for role and profile paths.")
+@click.option("--deck", required=True, help="Deck root, for role and read resolution.")
 @click.option("--node", default=None, help="Override; otherwise derive.")
 @click.option("--json", "as_json", is_flag=True)
 def job(packet: str, workflow_path: str, deck: str, node: str | None, as_json: bool):
@@ -261,13 +258,22 @@ def job(packet: str, workflow_path: str, deck: str, node: str | None, as_json: b
     resolved = resolve_job(Path(packet), Path(deck), definition, chosen)
     if as_json:
         click.echo(json_module.dumps(resolved.to_dict(), indent=2))
-    else:
-        click.echo(f"node:   {resolved.node}")
-        click.echo(f"role:   {resolved.role}")
-        for path in resolved.reads:
-            click.echo(f"read:   {path}")
-        for path in resolved.writes:
-            click.echo(f"write:  {path}")
+        raise SystemExit(0)
+
+    click.echo(f"node:   {resolved.node}")
+    click.echo(f"role:   {resolved.role}")
+
+    declared_reads = definition.get("nodes", {}).get(chosen, {}).get("reads") or []
+    for glob in declared_reads:
+        matched = [p for p in resolved.reads if fnmatch.fnmatch(Path(p).name, glob)]
+        if matched:
+            for path in matched:
+                click.echo(f"read:   {glob} -> {path}")
+        else:
+            click.echo(f"read:   {glob} (no match)")
+
+    for path in resolved.writes:
+        click.echo(f"write:  {path}")
     raise SystemExit(0)
 
 
