@@ -51,8 +51,16 @@ def _next_round(snapshot) -> int:
     return (max(snapshot.rounds) + 1) if snapshot.rounds else 1
 
 
+def _round_files(packet: Path, workflow: dict) -> list[str]:
+    from orglens.workflow.snapshot import _round_pattern
+
+    pattern = _round_pattern(workflow)
+    return [p.name for p in packet.iterdir() if p.is_file() and pattern.fullmatch(p.name)]
+
+
 def _resolve_read(
-    ref: str, packet: Path, deck: Path, snapshot, profile_config: dict
+    ref: str, packet: Path, deck: Path, snapshot, profile_config: dict,
+    workflow: dict
 ) -> list[str]:
     if ref == "@brief":
         return [str(packet / snapshot.brief)] if snapshot.brief else []
@@ -61,11 +69,9 @@ def _resolve_read(
     if ref == "@runstate":
         return [str(packet / "runs.jsonl")]
     if ref == "@rounds":
-        return sorted(
-            str(packet / name)
-            for name in snapshot.files
-            if name not in (snapshot.brief, snapshot.artifact)
-        )
+        # the declared round records only — not "everything else", which swept
+        # up adoption.md, stray drafts, and the run log
+        return sorted(str(packet / name) for name in _round_files(packet, workflow))
     if ref == "@adoption":
         target = packet / "adoption.md"
         return [str(target)] if target.exists() else []
@@ -94,7 +100,11 @@ def resolve_job(packet: Path, deck: Path, workflow: dict, node: str) -> Job:
 
     reads: list[str] = []
     for ref in spec.get("reads") or []:
-        reads.extend(_resolve_read(ref, packet, deck, snapshot, profile_config))
+        for path in _resolve_read(
+            ref, packet, deck, snapshot, profile_config, workflow
+        ):
+            if path not in reads:          # a file named twice is read once
+                reads.append(path)
 
     next_round = _next_round(snapshot)
     writes = [

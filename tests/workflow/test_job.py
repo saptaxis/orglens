@@ -93,3 +93,22 @@ def test_declaration_fields_carry_through(tmp_path: Path):
     assert job.human_review is True
     assert job.expect == "revise"
     assert job.profile == "portfolio"
+
+
+def test_rounds_resolves_to_declared_round_records_only(tmp_path: Path):
+    """@rounds meant 'everything that is not the brief or artifact', which
+    swept up adoption.md, stray drafts, and the run log."""
+    packet, deck = build(tmp_path)
+    (packet / "decisions-01.md").write_text("x")
+    (packet / "adoption.md").write_text("x")
+    (packet / "draft-v1.md").write_text("superseded")
+    wf = {**WORKFLOW, "nodes": {"n": {"reads": ["@rounds"], "writes": []}}}
+    job = resolve_job(packet, deck, wf, "n")
+    assert [Path(p).name for p in job.reads] == ["decisions-01.md"]
+
+
+def test_a_file_named_twice_is_read_once(tmp_path: Path):
+    packet, deck = build(tmp_path)
+    wf = {**WORKFLOW, "nodes": {"n": {"reads": ["@brief", "@brief"], "writes": []}}}
+    job = resolve_job(packet, deck, wf, "n")
+    assert len(job.reads) == 1

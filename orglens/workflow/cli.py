@@ -98,8 +98,10 @@ def check(workflow_path: str):
 @click.option("--node", required=True, help="The node that just ran.")
 @click.option("--agent", default=None, help="Which family performed the pass.")
 @click.option("--session", default=None, help="Session id of the performer.")
+@click.option("--round", "round_number", type=int, default=None,
+              help="Round this pass belongs to. Required for nodes that open or close rounds.")
 def record(packet: str, workflow_path: str, node: str, agent: str | None,
-           session: str | None):
+           session: str | None, round_number: int | None):
     """Record a completed pass, then confirm the packet derives to `expect`.
 
     A node that writes files and exits has no idea whether what it wrote is
@@ -126,6 +128,8 @@ def record(packet: str, workflow_path: str, node: str, agent: str | None,
         fact["agent"] = agent
     if session:
         fact["by"] = session
+    if round_number is not None:
+        fact["round"] = round_number
     append_fact(Path(packet), fact)
 
     result = derive_next_node(Path(packet), definition)
