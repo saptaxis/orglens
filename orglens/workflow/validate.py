@@ -29,6 +29,8 @@ def validate_definition(workflow: dict) -> list[str]:
     problems: list[str] = []
 
     raw_nodes = workflow.get("nodes")
+    if raw_nodes is not None and not isinstance(raw_nodes, dict):
+        problems.append(f"nodes must be a mapping, got {raw_nodes!r}")
     nodes = raw_nodes if isinstance(raw_nodes, dict) else {}
     declared = {name for name in nodes if isinstance(name, str)}
 
@@ -59,17 +61,30 @@ def validate_definition(workflow: dict) -> list[str]:
         writes = node.get("writes", [])
         if isinstance(writes, list):
             for entry in writes:
-                if isinstance(entry, str) and _has_glob_character(entry):
+                if not isinstance(entry, str):
+                    continue
+                if _has_glob_character(entry):
                     problems.append(
                         f"node {label!r} writes a glob, not a literal name: "
                         f"{entry!r}"
                     )
+                if "/" in entry:
+                    problems.append(
+                        f"node {label!r} writes a path, not a flat name: "
+                        f"{entry!r}"
+                    )
+        elif writes is not None:
+            problems.append(
+                f"node {label!r} writes must be a list of names, got {writes!r}"
+            )
 
     terminal = workflow.get("terminal")
     if isinstance(terminal, dict):
         for key, literal in terminal.items():
             owner = f"terminal[{key!r}]"
             problems.extend(_check_literal(owner, literal, declared))
+    elif terminal is not None:
+        problems.append(f"terminal must be a mapping, got {terminal!r}")
 
     roots = workflow.get("roots")
     if roots is not None and (
@@ -100,6 +115,14 @@ def _check_literal(owner: str, literal: object, declared: set[str]) -> list[str]
         literal.startswith(EXISTS) or literal.startswith(AFTER)
     ):
         return [f"{owner} names an unrecognized literal: {literal!r}"]
+
+    if literal.startswith(EXISTS):
+        glob = literal[len(EXISTS):]
+        if "/" in glob:
+            return [
+                f"{owner} declares {literal!r} — exists: only matches a "
+                "flat name, never a path"
+            ]
 
     if literal.startswith(AFTER):
         target = literal[len(AFTER):]

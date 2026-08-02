@@ -121,3 +121,86 @@ def test_a_guard_with_no_recognized_clause_is_reported():
     }
     problems = validate_definition(broken)
     assert any("brief" in p and "guard" in p for p in problems)
+
+
+# --- final review: `exists:` and `writes` must agree on what a glob means ---
+# `snapshot.py` lists flat filenames only; `job.py` expands a `reads` glob
+# with `Path.glob`, which traverses subdirectories. A `/` in an `exists:`
+# literal or a `writes` entry is therefore permanently unmatchable by one
+# reading and matchable by the other — forbid the divergent shape outright.
+
+
+def test_an_exists_glob_with_a_path_segment_is_reported():
+    broken = {
+        "nodes": {
+            **BASE["nodes"],
+            "audit": {
+                "guard": {"all": ["exists:refs/notes.md"]},
+                "writes": ["audit.md"],
+            },
+        }
+    }
+    problems = validate_definition(broken)
+    assert any("exists:refs/notes.md" in p and "audit" in p for p in problems)
+
+
+def test_an_exists_glob_without_a_path_segment_is_accepted():
+    ok = {
+        "nodes": {
+            "audit": {"guard": {"all": ["exists:PUBLISHED"]}, "writes": ["audit.md"]},
+        }
+    }
+    assert validate_definition(ok) == []
+
+
+def test_a_writes_entry_with_a_path_segment_is_reported():
+    broken = {
+        "nodes": {
+            **BASE["nodes"],
+            "draft": {**BASE["nodes"]["draft"], "writes": ["sub/out.md"]},
+        }
+    }
+    problems = validate_definition(broken)
+    assert any("sub/out.md" in p and "draft" in p for p in problems)
+
+
+def test_a_reads_entry_with_a_path_segment_is_untouched():
+    """`reads` expands with `Path.glob` at job-resolution time and is meant
+    to name a path — only `exists:` and `writes` disagree about `/`."""
+    ok = {
+        "nodes": {
+            "audit": {
+                "guard": {"all": ["after:nothing"]},
+                "reads": ["refs/notes.md"],
+                "writes": ["audit.md"],
+            },
+        }
+    }
+    assert validate_definition(ok) == []
+
+
+# --- final review: `validate_definition` must gate shapes that crash derive ---
+
+
+def test_nodes_that_is_not_a_mapping_is_reported():
+    broken = {"nodes": ["a", "b"]}
+    problems = validate_definition(broken)
+    assert any("nodes" in p for p in problems)
+    assert isinstance(problems, list)
+
+
+def test_terminal_that_is_not_a_mapping_is_reported():
+    broken = {**BASE, "terminal": ["exists:X"]}
+    problems = validate_definition(broken)
+    assert any("terminal" in p for p in problems)
+
+
+def test_a_writes_value_that_is_a_bare_string_is_reported():
+    broken = {
+        "nodes": {
+            **BASE["nodes"],
+            "draft": {**BASE["nodes"]["draft"], "writes": "draft.md"},
+        }
+    }
+    problems = validate_definition(broken)
+    assert any("draft" in p and "writes" in p for p in problems)
