@@ -106,3 +106,18 @@ def test_malformed_shapes_never_raise():
         {"roots": 3, "nodes": {}},
     ):
         assert isinstance(validate_definition(shape), list), shape
+
+
+# --- fix round 1 ---
+
+
+def test_a_guard_with_no_recognized_clause_is_reported():
+    """A misspelled clause key (`al` for `all`) leaves the guard dict with
+    none of `all`/`any`/`none` present. `guards.matches` returns True
+    unconditionally for such a dict, so it fires on every packet — check 1
+    exists to catch exactly this."""
+    broken = {
+        "nodes": {"brief": {"guard": {"al": ["after:nothing"]}, "writes": ["brief.md"]}}
+    }
+    problems = validate_definition(broken)
+    assert any("brief" in p and "guard" in p for p in problems)

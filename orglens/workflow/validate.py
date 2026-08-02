@@ -85,9 +85,10 @@ def validate_definition(workflow: dict) -> list[str]:
 def _is_usable_guard(guard: object) -> bool:
     if not isinstance(guard, dict) or not guard:
         return False
-    return all(
-        isinstance(guard[clause], list) for clause in _CLAUSES if clause in guard
-    )
+    present = [clause for clause in _CLAUSES if clause in guard]
+    if not present:
+        return False
+    return all(isinstance(guard[clause], list) for clause in present)
 
 
 def _has_glob_character(entry: str) -> bool:
