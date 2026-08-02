@@ -19,6 +19,11 @@ ENGINE = Path(__file__).resolve().parents[2] / "orglens" / "workflow"
 
 #: workflow.md, "Deliberately absent". A hit in the deck-agnostic engine is a
 #: concept the model does not have.
+#: Removed CONCEPTS only. Present-tense run-state keys are pinned by an
+#: equality assertion below instead: run state has to name them in order to
+#: reject them, and `next_node` as a substring also matches the model's own
+#: `derive_next_node`. A ban that forbids naming the thing you are rejecting
+#: deletes the safety check rather than the concept.
 BANNED = (
     "round",
     "disposition",
@@ -26,8 +31,6 @@ BANNED = (
     "fallback",
     "proposed",
     "decisions",
-    "current_state",
-    "next_node",
 )
 
 
@@ -78,6 +81,15 @@ def test_the_static_predicate_set_is_exactly_four():
             "artifact_exists",
             "artifact_noncanonical",
         }
+    )
+
+
+def test_run_state_forbids_exactly_the_present_tense_keys():
+    """Pinned by equality, not by a substring ban — see BANNED's note."""
+    from orglens.workflow.runstate import FORBIDDEN_KEYS
+
+    assert FORBIDDEN_KEYS == frozenset(
+        {"current_state", "status", "pending", "next_node", "state"}
     )
 
 

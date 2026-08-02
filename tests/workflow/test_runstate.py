@@ -46,6 +46,16 @@ def test_a_present_tense_projection_is_reported():
     assert any("status" in p for p in validate_entry({**OK, "status": "waiting"}))
 
 
+def test_all_five_present_tense_keys_are_forbidden():
+    from orglens.workflow.runstate import FORBIDDEN_KEYS
+
+    assert FORBIDDEN_KEYS == frozenset(
+        {"current_state", "status", "pending", "next_node", "state"}
+    )
+    for key in FORBIDDEN_KEYS:
+        assert validate_entry({**OK, key: "x"}), f"{key} was accepted"
+
+
 def test_human_resolved_must_name_what_it_resolves():
     problems = validate_entry(
         {"type": "human_resolved", "at": "t", "event_id": "e2", "note": "ok"}

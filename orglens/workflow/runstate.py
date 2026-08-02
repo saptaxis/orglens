@@ -31,7 +31,9 @@ ENTRY_TYPES: frozenset[str] = frozenset(
 # Keys that describe the present or the future rather than record a fact
 # about the past. A run-state entry is a fact that already happened; it
 # must never carry a projection of "current" state or a plan for "next".
-FORBIDDEN_KEYS: frozenset[str] = frozenset({"status", "next_node"})
+FORBIDDEN_KEYS: frozenset[str] = frozenset(
+    {"current_state", "status", "pending", "next_node", "state"}
+)
 
 _MANDATORY_KEYS: frozenset[str] = frozenset({"type", "at", "event_id"})
 
