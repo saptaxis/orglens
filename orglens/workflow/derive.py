@@ -25,17 +25,35 @@ from orglens.workflow.snapshot import read_packet
 
 
 def _unknown_reason(nodes: dict, facts: dict[str, bool]) -> str:
-    """One line per declared node, naming the guard entries that were false."""
+    """One line per declared node, naming the guard entries that blocked it.
+
+    An ``all`` entry blocks its clause when it is false. A ``none`` entry
+    blocks its clause when it is true — the opposite test, because presence
+    is what a ``none`` clause forbids. An ``any`` clause blocks only when
+    every one of its entries is false, in which case every one of them is
+    named. An entry named by more than one clause of the same guard is
+    reported once, not once per clause.
+    """
     lines = []
     for name, spec in nodes.items():
         guard = spec.get("guard", {})
-        entries = []
-        for clause in ("all", "any", "none"):
-            entries.extend(guard.get(clause, []))
-        false_entries = [
-            f"{entry}={facts.get(entry)}" for entry in entries if not facts.get(entry)
-        ]
-        lines.append(f"{name}: " + ", ".join(false_entries))
+        blocking: dict[str, bool] = {}
+
+        for entry in guard.get("all", []):
+            if not facts.get(entry):
+                blocking.setdefault(entry, facts.get(entry))
+
+        any_entries = guard.get("any", [])
+        if any_entries and not any(facts.get(entry) for entry in any_entries):
+            for entry in any_entries:
+                blocking.setdefault(entry, facts.get(entry))
+
+        for entry in guard.get("none", []):
+            if facts.get(entry):
+                blocking.setdefault(entry, facts.get(entry))
+
+        parts = [f"{entry}={value}" for entry, value in blocking.items()]
+        lines.append(f"{name}: " + ", ".join(parts))
     return "\n".join(lines)
 
 

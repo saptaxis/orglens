@@ -114,3 +114,46 @@ def test_derivation_has_no_opinion_about_humans(tmp_path: Path):
 
 def test_no_integrity_outcome_survives():
     assert not hasattr(Outcome, "MALFORMED")
+
+
+# --- fix round 1: a `none` clause must name its blocking entry too ---------
+
+
+def test_unknown_names_a_none_clause_entry_that_blocked_it(tmp_path: Path):
+    """A `none` clause blocks when its entry is true — the opposite test
+    from `all`/`any`. The reason must still name it, with its true value."""
+    workflow = {
+        "nodes": {
+            "revise": {
+                "guard": {
+                    "all": ["after:critique"],
+                    "none": ["exists:LOCK"],
+                }
+            }
+        }
+    }
+    (tmp_path / "runs.jsonl").write_text(
+        '{"type":"node_completed","node":"critique","at":"t","event_id":"1"}\n'
+    )
+    (tmp_path / "LOCK").write_text("")
+    r = derive_next_node(tmp_path, workflow)
+    assert r.outcome == Outcome.UNKNOWN
+    assert "exists:LOCK=True" in r.reason
+
+
+def test_an_entry_named_by_two_clauses_prints_once(tmp_path: Path):
+    """An entry that blocks via more than one clause of the same guard is
+    named once in the reason, not once per clause."""
+    workflow = {
+        "nodes": {
+            "x": {
+                "guard": {
+                    "all": ["exists:GATE"],
+                    "any": ["exists:GATE", "exists:OTHER"],
+                }
+            }
+        }
+    }
+    r = derive_next_node(tmp_path, workflow)
+    assert r.outcome == Outcome.UNKNOWN
+    assert r.reason.count("exists:GATE=") == 1
