@@ -1,12 +1,12 @@
 """Facts about a packet, answered from a snapshot and the deck alone.
 
-There is no round vocabulary here. Artifacts are one canonical file with git
-as their history, so the only questions worth asking of the run log are
-sequence questions: has a diagnostic completed since the last mutation
-(``awaiting_mutation``), and which one it was (``last_diagnostic_is_{node}``).
-The deck says which of its nodes mutate the artifact and which diagnose it;
-this module never learns a node's name of its own, and generates the
-sequence predicates fresh from whatever the deck declares.
+Artifacts are one canonical file with git as their history, so the only
+questions worth asking of the run log are sequence questions: has a
+diagnosing node completed since the last mutating one (``awaiting_mutation``),
+and which one it was (``last_diagnostic_is_{node}``). The deck says which of
+its nodes mutate the artifact and which diagnose it; this module never
+learns a node's name of its own, and generates the sequence predicates
+fresh from whatever the deck declares.
 """
 
 from __future__ import annotations
