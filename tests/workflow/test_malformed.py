@@ -41,7 +41,7 @@ def test_round_both_critiqued_and_audited(tmp_path: Path):
 
 
 def test_rounds_without_artifact(tmp_path: Path):
-    (tmp_path / "decisions-01.md").write_text("## Proposed\n- a\n")
+    (tmp_path / "decisions-01.md").write_text("anything at all")
     assert detect(snap(tmp_path)) == "rounds_without_artifact"
 
 
