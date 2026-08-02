@@ -8,7 +8,6 @@ from enum import StrEnum
 
 class Outcome(StrEnum):
     RUNNABLE = "runnable"
-    WAITING = "waiting"
     TERMINAL = "terminal"
     AMBIGUOUS = "ambiguous"
     MALFORMED = "malformed"

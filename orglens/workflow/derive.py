@@ -2,9 +2,14 @@
 
 Reads a packet, returns one classified outcome. Never writes, never launches.
 
-Precedence is fixed and is not a priority list. Between malformed and
-fallback, exactly one node guard may match; two matching is an error, not a
-tiebreak, because whichever a session picked first would be arbitrary.
+Precedence is fixed and is not a priority list: malformed, terminal, node
+guards, fallback. Between malformed and fallback, exactly one node guard may
+match; two matching is an error, not a tiebreak, because whichever a session
+picked first would be arbitrary.
+
+Derivation has no opinion about humans. It always returns a node or a reason it
+cannot; whether that node may run is the orchestrator's question, answered by
+blocking.check().
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ FALLBACK = "fallback"
 
 def derive_next_node(root: Path, workflow: dict) -> DerivationResult:
     snapshot = read_packet(root, workflow)
-    facts = evaluate(snapshot)
+    facts = evaluate(snapshot, workflow)
     nodes = workflow.get("nodes", {})
 
     # 1. malformed — before anything else, and before fallback especially
@@ -44,19 +49,7 @@ def derive_next_node(root: Path, workflow: dict) -> DerivationResult:
                 facts=facts,
             )
 
-    # 3. the adoption gate — blocks the whole packet, does not compete with
-    #    content routing. As an ordinary predicate it made every packet with an
-    #    unresolved adoption.md ambiguous: `wait` fired, and so did `brief` or
-    #    `critique` depending on what else was present.
-    if facts.get("adoption_unresolved"):
-        return DerivationResult(
-            outcome=Outcome.WAITING,
-            node=_waiting_node(nodes),
-            reason="adoption proposal awaiting the author",
-            facts=facts,
-        )
-
-    # 4. node guards — exactly one may match
+    # 3. node guards — exactly one may match
     fallback_nodes = [n for n, d in nodes.items() if d.get("guard") == FALLBACK]
     matched = [
         name
@@ -75,16 +68,14 @@ def derive_next_node(root: Path, workflow: dict) -> DerivationResult:
     if len(matched) == 1:
         node = matched[0]
         return DerivationResult(
-            outcome=Outcome.WAITING
-            if node == _waiting_node(nodes)
-            else Outcome.RUNNABLE,
+            outcome=Outcome.RUNNABLE,
             node=node,
             reason=_reason_for(node, facts),
             matched=matched,
             facts=facts,
         )
 
-    # 5. fallback — only over a layout no known-state guard claimed
+    # 4. fallback — only over a layout no known-state guard claimed
     if fallback_nodes:
         return DerivationResult(
             outcome=Outcome.ADOPTABLE,
@@ -98,19 +89,6 @@ def derive_next_node(root: Path, workflow: dict) -> DerivationResult:
         reason="no guard matched and no fallback node is declared",
         facts=facts,
     )
-
-
-def _waiting_node(nodes: dict) -> str | None:
-    """The resting node, identified by its declaration rather than its name.
-
-    A node with `role: none` performs no pass; it is where the loop rests.
-    Reading it from the definition keeps `wait` from being a magic string the
-    deriver has to know.
-    """
-    for name, spec in nodes.items():
-        if isinstance(spec, dict) and spec.get("role") == "none":
-            return name
-    return None
 
 
 def _reason_for(node: str, facts: dict[str, bool]) -> str:

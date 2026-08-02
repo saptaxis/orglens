@@ -43,6 +43,6 @@ def test_unknown_predicate_raises():
 
 
 def test_result_defaults():
-    r = DerivationResult(outcome=Outcome.WAITING, node=None, reason="gate")
-    assert r.outcome == "waiting"
+    r = DerivationResult(outcome=Outcome.TERMINAL, node=None, reason="gate")
+    assert r.outcome == "terminal"
     assert r.matched == []

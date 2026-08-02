@@ -7,7 +7,7 @@ from orglens.workflow.result import Outcome
 
 WORKFLOW = {
     "artifact": {"family": "draft", "canonical": "draft.md", "history": "git"},
-    "rounds": {"record": "decisions-{NN}.md"},
+    "rounds": {"record": "decisions-{NN}.md", "closed_by": ["revise"]},
     "terminal": {"published": "brief_published"},
     "malformed": [
         "log_names_missing_file",
@@ -21,27 +21,22 @@ WORKFLOW = {
         "draft": {"guard": {"all": ["brief_exists"], "none": ["artifact_exists"]}},
         "critique": {
             "guard": {
-                "all": ["brief_exists", "artifact_exists", "no_open_round"],
-                "any": ["no_rounds", "last_round_audited"],
+                "all": ["brief_exists", "artifact_exists"],
+                "any": ["no_rounds", "round_closed"],
+                "none": ["artifact_noncanonical", "last_round_diagnosed_by_critique"],
             }
         },
-        "revise": {"guard": {"all": ["open_round", "round_actionable"]}},
+        "revise": {"guard": {"all": ["round_open"], "none": ["artifact_noncanonical"]}},
         "audit": {
             "guard": {
                 "all": [
                     "brief_exists",
                     "artifact_exists",
-                    "no_open_round",
-                    "last_round_critiqued",
-                ]
+                    "round_closed",
+                    "last_round_diagnosed_by_critique",
+                ],
+                "none": ["artifact_noncanonical"],
             }
-        },
-        # `role: none` is what identifies the resting node to the deriver.
-        # Without it _waiting_node() returns None and `wait` classifies as
-        # runnable instead of waiting.
-        "wait": {
-            "role": "none",
-            "guard": {"any": ["round_unresolved", "adoption_unresolved"]},
         },
     },
 }
@@ -77,48 +72,57 @@ def test_draft_without_rounds_routes_to_critique(tmp_path: Path):
     assert r.node == "critique"
 
 
-def test_unresolved_round_waits(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "decisions-01.md").write_text("## Proposed\n- a\n")
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.WAITING
-    assert r.node == "wait"
+def test_waiting_is_not_a_derivation_outcome():
+    from orglens.workflow.result import Outcome
+
+    assert not hasattr(Outcome, "WAITING")
 
 
-def test_ratified_round_routes_to_revise(tmp_path: Path):
+def test_an_open_round_routes_to_the_closing_node(tmp_path: Path):
+    """No `wait`. Whether it may RUN is the orchestrator's question."""
     (tmp_path / "writing-brief.md").write_text("# Brief")
     (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "decisions-01.md").write_text("## Accept\n- a\n")
+    (tmp_path / "decisions-01.md").write_text("anything")
     r = derive(tmp_path)
+    assert r.outcome == Outcome.RUNNABLE
     assert r.node == "revise"
 
 
-def test_revised_critique_round_routes_to_audit(tmp_path: Path):
-    """The unreachable-audit defect. This is the regression test for it."""
+def test_a_closed_round_routes_to_the_next_diagnostic(tmp_path: Path):
     (tmp_path / "writing-brief.md").write_text("# Brief")
     (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "decisions-01.md").write_text("## Accept\n- a\n")
+    (tmp_path / "decisions-01.md").write_text("anything")
     (tmp_path / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"critique","round":1}\n'
-        '{"type":"node_completed","node":"revise","round":1}\n'
+        '{"type":"node_completed","node":"critique","round":1,"at":"t","event_id":"1"}\n'
+        '{"type":"node_completed","node":"revise","round":1,"at":"t","event_id":"2"}\n'
     )
     r = derive(tmp_path)
-    assert r.outcome == Outcome.RUNNABLE
     assert r.node == "audit"
 
 
 def test_reject_only_round_continues_to_next_diagnostic(tmp_path: Path):
-    """The dead state. Rejecting every finding must not wedge the packet."""
+    """The dead state. A round whose findings were all rejected must not wedge
+    the packet — the revise pass had nothing to apply and completed anyway, so
+    the round is closed and the loop moves to the other diagnostic."""
     (tmp_path / "writing-brief.md").write_text("# Brief")
     (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "decisions-01.md").write_text("## Reject\n- a\n")
+    (tmp_path / "decisions-01.md").write_text("anything")
     (tmp_path / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"audit","round":1}\n'
+        '{"type":"node_completed","node":"audit","round":1,"at":"t","event_id":"1"}\n'
+        '{"type":"node_completed","node":"revise","round":1,"at":"t","event_id":"2"}\n'
     )
     r = derive(tmp_path)
     assert r.outcome == Outcome.RUNNABLE
     assert r.node == "critique"
+
+
+def test_adoption_is_not_special_cased_in_derivation(tmp_path: Path):
+    """An adoption.md is just a file. Blocking is the orchestrator's job."""
+    (tmp_path / "writing-brief.md").write_text("# Brief")
+    (tmp_path / "draft-v2.md").write_text("prose")
+    (tmp_path / "adoption.md").write_text("anything")
+    r = derive(tmp_path)
+    assert r.outcome == Outcome.ADOPTABLE
 
 
 def test_artifact_without_brief_is_not_ambiguous(tmp_path: Path):
@@ -141,42 +145,10 @@ def test_published_packet_is_terminal(tmp_path: Path):
 
 def test_malformed_beats_fallback(tmp_path: Path):
     """A broken packet must be reported, never silently adopted."""
-    (tmp_path / "decisions-01.md").write_text("## Proposed\n- a\n")
+    (tmp_path / "decisions-01.md").write_text("anything")
     r = derive(tmp_path)
     assert r.outcome == Outcome.MALFORMED
     assert "rounds_without_artifact" in r.reason
-
-
-def test_unrecognised_layout_is_adoptable(tmp_path: Path):
-    """A closed round with no run log — hand-made, predating the workflow.
-    Not malformed, and no node guard claims it, so it adopts."""
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "decisions-01.md").write_text("## Reject\n- a\n")
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.ADOPTABLE
-    assert r.node == "adopt"
-
-
-def test_unresolved_adoption_blocks_everything(tmp_path: Path):
-    """Adoption is a gate on the packet, not a competitor to content routing.
-    Before this was promoted to a precedence level, `wait` and `critique` both
-    fired here and the result was ambiguous."""
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "adoption.md").write_text("## Proposed\n- classify\n")
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.WAITING
-    assert "adoption" in r.reason
-
-
-def test_resolved_adoption_stops_blocking(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "adoption.md").write_text("## Accept\n- classify\n")
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.RUNNABLE
-    assert r.node == "critique"
 
 
 def test_ambiguity_is_reported_not_resolved(tmp_path: Path):

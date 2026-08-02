@@ -13,10 +13,11 @@ from tests.workflow.test_derive import WORKFLOW
 
 def write_workflow(root: Path) -> Path:
     # `expect` is what `record` checks a pass against. The deriver ignores it,
-    # so carrying the deck's value for `critique` here leaves every other test
-    # in this module unchanged.
+    # so declaring one for `critique` here leaves every other test in this
+    # module unchanged. A critique opens a round, and an open round routes to
+    # the node that closes it.
     definition = copy.deepcopy(WORKFLOW)
-    definition["nodes"]["critique"]["expect"] = "waiting"
+    definition["nodes"]["critique"]["expect"] = "revise"
 
     path = root / "WORKFLOW.yaml"
     path.write_text(yaml.safe_dump(definition))
@@ -39,19 +40,22 @@ def test_derive_reports_runnable_as_json(tmp_path: Path):
     assert payload["node"] == "critique"
 
 
-def test_derive_reports_waiting(tmp_path: Path):
+def test_derive_reports_an_open_round_as_runnable(tmp_path: Path):
+    """An open round is a node to run, not a state to sit in."""
     packet = tmp_path / "packet"
     packet.mkdir()
     (packet / "writing-brief.md").write_text("# Brief")
     (packet / "draft.md").write_text("prose")
-    (packet / "decisions-01.md").write_text("## Proposed\n- a\n")
+    (packet / "decisions-01.md").write_text("anything at all")
     wf = write_workflow(tmp_path)
 
     result = CliRunner().invoke(
         cli, ["workflow", "derive", str(packet), "--workflow", str(wf), "--json"]
     )
     assert result.exit_code == 0
-    assert json.loads(result.output)["outcome"] == "waiting"
+    payload = json.loads(result.output)
+    assert payload["outcome"] == "runnable"
+    assert payload["node"] == "revise"
 
 
 def test_malformed_exits_nonzero(tmp_path: Path):
@@ -99,7 +103,7 @@ def test_record_appends_a_fact_and_confirms_expect(tmp_path: Path):
     packet.mkdir()
     (packet / "writing-brief.md").write_text("# Brief")
     (packet / "draft.md").write_text("prose")
-    (packet / "decisions-01.md").write_text("## Proposed\n- a\n")
+    (packet / "decisions-01.md").write_text("anything at all")
     wf = write_workflow(tmp_path)
 
     result = CliRunner().invoke(
@@ -118,13 +122,13 @@ def test_record_appends_a_fact_and_confirms_expect(tmp_path: Path):
 
 
 def test_record_fails_when_the_packet_does_not_match_expect(tmp_path: Path):
-    """critique expects `waiting`. A round with nothing proposed derives
-    elsewhere, which means the pass wrote something malformed."""
+    """critique expects `revise`. A pass that recorded itself without opening
+    a round leaves the packet deriving back to critique, which means the pass
+    wrote nothing the workflow can see."""
     packet = tmp_path / "packet"
     packet.mkdir()
     (packet / "writing-brief.md").write_text("# Brief")
     (packet / "draft.md").write_text("prose")
-    (packet / "decisions-01.md").write_text("## Accept\n- a\n")
     wf = write_workflow(tmp_path)
 
     result = CliRunner().invoke(
@@ -132,7 +136,7 @@ def test_record_fails_when_the_packet_does_not_match_expect(tmp_path: Path):
         ["workflow", "record", str(packet), "--workflow", str(wf), "--node", "critique"],
     )
     assert result.exit_code == 1
-    assert "expected waiting" in result.output
+    assert "expected revise" in result.output
     assert "runnable" in result.output
 
 
@@ -155,7 +159,6 @@ def test_a_failed_postcondition_is_itself_recorded(tmp_path: Path):
     packet.mkdir()
     (packet / "writing-brief.md").write_text("# Brief")
     (packet / "draft.md").write_text("prose")
-    (packet / "decisions-01.md").write_text("## Accept\n- a\n")
     wf = write_workflow(tmp_path)
 
     result = CliRunner().invoke(
@@ -166,5 +169,5 @@ def test_a_failed_postcondition_is_itself_recorded(tmp_path: Path):
 
     facts = [json.loads(line) for line in (packet / "runs.jsonl").read_text().splitlines()]
     assert [f["type"] for f in facts] == ["node_completed", "postcondition_failed"]
-    assert facts[-1]["expected"] == "waiting"
-    assert facts[-1]["derived"] == "revise"
+    assert facts[-1]["expected"] == "revise"
+    assert facts[-1]["derived"] == "critique"
