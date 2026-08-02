@@ -11,9 +11,16 @@ This module is the one place that knows what a valid fact looks like
 stamps the mandatory bookkeeping keys and then validates what it is about to
 write, so a fact on disk is valid by construction), and the one place that
 reads them back to answer the two questions the rest of the workflow engine
-actually asks: what did the run most recently finish (``last_completed``),
-and is there an open question a human hasn't answered yet
+actually asks: where does the run stand right now (``last_routing_node``,
+the cursor), and is there an open question a human hasn't answered yet
 (``unresolved_needs_human``).
+
+A packet lives in one directory, reused indefinitely — file existence cannot
+say what comes next, because after one pass every output exists and keeps
+existing. Only the order of facts in this ledger can. Two kinds of fact move
+the cursor: a node finishing on its own (``node_completed``), and a human
+deliberately naming where work resumes (``resumed_at``). Moving the cursor
+is always a new fact appended to the end, never a field changed in place.
 """
 
 from __future__ import annotations
@@ -25,8 +32,12 @@ from datetime import datetime
 from pathlib import Path
 
 ENTRY_TYPES: frozenset[str] = frozenset(
-    {"node_completed", "needs_human", "human_resolved"}
+    {"node_completed", "resumed_at", "needs_human", "human_resolved"}
 )
+
+# The two kinds of fact that move the cursor. Everything else records
+# something about a node without changing where the run stands.
+ROUTING_TYPES: frozenset[str] = frozenset({"node_completed", "resumed_at"})
 
 # Keys that describe the present or the future rather than record a fact
 # about the past. A run-state entry is a fact that already happened; it
@@ -39,6 +50,7 @@ _MANDATORY_KEYS: frozenset[str] = frozenset({"type", "at", "event_id"})
 
 _REQUIRED_BY_TYPE: dict[str, frozenset[str]] = {
     "node_completed": frozenset({"node"}),
+    "resumed_at": frozenset({"node"}),
     "needs_human": frozenset({"node", "question"}),
     "human_resolved": frozenset({"resolves"}),
 }
@@ -126,12 +138,16 @@ def unresolved_needs_human(entries: list[dict]) -> dict | None:
     return outstanding[-1] if outstanding else None
 
 
-def last_completed(entries: list[dict], nodes: set[str]) -> str | None:
-    """Return the node of the most recent ``node_completed`` fact whose
-    node is in ``nodes``, or ``None`` if none of them has completed yet.
+def last_routing_node(entries: list[dict]) -> str | None:
+    """Return the node of the most recent routing fact, or ``None``.
+
+    This is the cursor: the node of the most recent entry whose type is in
+    ``ROUTING_TYPES``. A ``needs_human`` or ``human_resolved`` fact leaves
+    the cursor where it was — asking a question and answering it do not by
+    themselves move the run forward.
     """
     for entry in reversed(entries):
-        if entry.get("type") == "node_completed" and entry.get("node") in nodes:
+        if entry.get("type") in ROUTING_TYPES:
             return entry["node"]
     return None
 

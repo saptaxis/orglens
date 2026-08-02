@@ -8,7 +8,6 @@ import pytest
 from orglens.workflow.runstate import (
     ENTRY_TYPES,
     append_fact,
-    last_completed,
     read_entries,
     unresolved_needs_human,
     validate_entry,
@@ -22,10 +21,72 @@ OK = {
 }
 
 
-def test_exactly_three_kinds():
+def test_exactly_four_kinds():
     assert ENTRY_TYPES == frozenset(
-        {"node_completed", "needs_human", "human_resolved"}
+        {"node_completed", "resumed_at", "needs_human", "human_resolved"}
     )
+
+
+def test_only_two_kinds_move_the_cursor():
+    from orglens.workflow.runstate import ROUTING_TYPES
+
+    assert ROUTING_TYPES == frozenset({"node_completed", "resumed_at"})
+
+
+def test_resumed_at_must_name_a_node():
+    problems = validate_entry({"type": "resumed_at", "at": "t", "event_id": "e"})
+    assert any("node" in p for p in problems)
+
+
+def test_the_cursor_is_empty_on_a_new_packet():
+    from orglens.workflow.runstate import last_routing_node
+
+    assert last_routing_node([]) is None
+
+
+def test_a_completion_moves_the_cursor():
+    from orglens.workflow.runstate import last_routing_node
+
+    entries = [{"type": "node_completed", "node": "draft"}]
+    assert last_routing_node(entries) == "draft"
+
+
+def test_the_most_recent_routing_fact_wins():
+    from orglens.workflow.runstate import last_routing_node
+
+    entries = [
+        {"type": "node_completed", "node": "draft"},
+        {"type": "node_completed", "node": "critique"},
+    ]
+    assert last_routing_node(entries) == "critique"
+
+
+def test_a_human_can_move_the_cursor_backwards():
+    """goto is how you re-run a stage. It is a fact, not a setting."""
+    from orglens.workflow.runstate import last_routing_node
+
+    entries = [
+        {"type": "node_completed", "node": "audit"},
+        {"type": "resumed_at", "node": "draft", "note": "starting over"},
+    ]
+    assert last_routing_node(entries) == "draft"
+
+
+def test_gates_do_not_move_the_cursor():
+    from orglens.workflow.runstate import last_routing_node
+
+    entries = [
+        {"type": "node_completed", "node": "critique"},
+        {"type": "needs_human", "node": "critique", "question": "q"},
+        {"type": "human_resolved", "resolves": "x", "note": "ok"},
+    ]
+    assert last_routing_node(entries) == "critique"
+
+
+def test_a_resumed_at_round_trips_through_append(tmp_path: Path):
+    stamped = append_fact(tmp_path, {"type": "resumed_at", "node": "audit"})
+    assert validate_entry(stamped) == []
+    assert stamped["node"] == "audit"
 
 
 def test_a_well_formed_entry_has_no_problems():
@@ -114,20 +175,3 @@ def test_the_most_recent_unresolved_wins():
     assert unresolved_needs_human(entries)["question"] == "second"
 
 
-def test_last_completed_picks_the_most_recent_of_a_set():
-    entries = [
-        {"type": "node_completed", "node": "critique"},
-        {"type": "node_completed", "node": "revise"},
-        {"type": "node_completed", "node": "audit"},
-    ]
-    assert last_completed(entries, {"critique", "audit"}) == "audit"
-    assert last_completed(entries, {"revise"}) == "revise"
-    assert last_completed(entries, {"brief"}) is None
-
-
-def test_last_completed_ignores_other_kinds():
-    entries = [
-        {"type": "node_completed", "node": "critique"},
-        {"type": "needs_human", "node": "revise", "question": "q"},
-    ]
-    assert last_completed(entries, {"critique", "revise"}) == "critique"
