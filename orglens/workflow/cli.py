@@ -7,14 +7,19 @@ exiting, so --json is the primary interface.
 from __future__ import annotations
 
 import json as json_module
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 import click
 
+from orglens.workflow import blocking
 from orglens.workflow.definition import load_workflow
 from orglens.workflow.derive import derive_next_node
+from orglens.workflow.job import resolve_job
 from orglens.workflow.result import Outcome
 from orglens.workflow.runlog import append_fact, workflow_version
+from orglens.workflow.runstate import read_entries, unresolved_needs_human
 from orglens.workflow.validate import validate_definition
 
 FAILING = {Outcome.MALFORMED, Outcome.AMBIGUOUS, Outcome.UNKNOWN}
@@ -40,11 +45,27 @@ def derive(packet: str, workflow_path: str, as_json: bool):
 
     result = derive_next_node(Path(packet), definition)
 
+    block = blocking.check(Path(packet))
+    payload = result.to_dict()
+    payload["blocked"] = block is not None
+    payload["block"] = (
+        {
+            "question": block.question,
+            "node": block.node,
+            "raised_by": block.raised_by,
+            "event_id": block.event_id,
+        }
+        if block
+        else None
+    )
+
     if as_json:
-        click.echo(json_module.dumps(result.to_dict(), indent=2))
+        click.echo(json_module.dumps(payload, indent=2))
     else:
         click.echo(f"{result.outcome}: {result.node or '-'}")
         click.echo(f"  {result.reason}")
+        if block:
+            click.echo(f"  blocked on {block.node}: {block.question}")
 
     raise SystemExit(1 if result.outcome in FAILING else 0)
 
@@ -135,3 +156,57 @@ def record(packet: str, workflow_path: str, node: str, agent: str | None,
     click.echo("  the output this pass wrote does not leave the packet in the")
     click.echo("  state the workflow expects. Fix it and re-derive.")
     raise SystemExit(1)
+
+
+@workflow.command()
+@click.argument("packet", type=click.Path(exists=True, file_okay=False))
+@click.option("--workflow", "workflow_path", required=True)
+@click.option("--deck", required=True, help="Deck root, for role and profile paths.")
+@click.option("--node", default=None, help="Override; otherwise derive.")
+@click.option("--json", "as_json", is_flag=True)
+def job(packet: str, workflow_path: str, deck: str, node: str | None, as_json: bool):
+    """Emit a fully resolved job for PACKET — absolute paths, no templates."""
+    definition = load_workflow(Path(workflow_path))
+    chosen = node
+    if chosen is None:
+        result = derive_next_node(Path(packet), definition)
+        if result.outcome != Outcome.RUNNABLE:
+            click.echo(f"{result.outcome}: {result.reason}")
+            raise SystemExit(1)
+        chosen = result.node
+
+    resolved = resolve_job(Path(packet), Path(deck), definition, chosen)
+    if as_json:
+        click.echo(json_module.dumps(resolved.to_dict(), indent=2))
+    else:
+        click.echo(f"node:   {resolved.node}")
+        click.echo(f"role:   {resolved.role}")
+        for path in resolved.reads:
+            click.echo(f"read:   {path}")
+        for path in resolved.writes:
+            click.echo(f"write:  {path}")
+    raise SystemExit(0)
+
+
+@workflow.command()
+@click.argument("packet", type=click.Path(exists=True, file_okay=False))
+@click.option("--note", required=True, help="What you decided. Free text.")
+def resolve(packet: str, note: str):
+    """Clear the outstanding question. No dispositions — just a note."""
+    outstanding = unresolved_needs_human(read_entries(Path(packet)))
+    if outstanding is None:
+        click.echo("nothing outstanding to resolve")
+        raise SystemExit(1)
+
+    append_fact(
+        Path(packet),
+        {
+            "type": "human_resolved",
+            "event_id": uuid.uuid4().hex[:12],
+            "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "resolves": outstanding.get("event_id"),
+            "note": note,
+        },
+    )
+    click.echo(f"resolved {outstanding.get('event_id')}")
+    raise SystemExit(0)

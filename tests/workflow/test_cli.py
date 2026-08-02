@@ -171,3 +171,51 @@ def test_a_failed_postcondition_is_itself_recorded(tmp_path: Path):
     assert [f["type"] for f in facts] == ["node_completed", "postcondition_failed"]
     assert facts[-1]["expected"] == "revise"
     assert facts[-1]["derived"] == "critique"
+
+
+def test_derive_reports_a_block_before_a_node(tmp_path: Path):
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    (packet / "writing-brief.md").write_text("# Brief")
+    (packet / "draft.md").write_text("prose")
+    (packet / "runs.jsonl").write_text(
+        '{"type":"needs_human","event_id":"n1","node":"critique",'
+        '"raised_by":"node","question":"does finding 3 count?","at":"t"}\n'
+    )
+    wf = write_workflow(tmp_path)
+    result = CliRunner().invoke(
+        cli, ["workflow", "derive", str(packet), "--workflow", str(wf), "--json"]
+    )
+    payload = json.loads(result.output)
+    assert payload["blocked"] is True
+    assert "finding 3" in payload["block"]["question"]
+
+
+def test_resolve_unblocks_and_appends(tmp_path: Path):
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    (packet / "runs.jsonl").write_text(
+        '{"type":"needs_human","event_id":"n1","node":"critique",'
+        '"raised_by":"node","question":"q","at":"t"}\n'
+    )
+    result = CliRunner().invoke(
+        cli, ["workflow", "resolve", str(packet), "--note", "yes, keep it"]
+    )
+    assert result.exit_code == 0
+    entries = [
+        json.loads(line)
+        for line in (packet / "runs.jsonl").read_text().splitlines()
+    ]
+    assert entries[-1]["type"] == "human_resolved"
+    assert entries[-1]["resolves"] == "n1"
+    assert entries[-1]["note"] == "yes, keep it"
+
+
+def test_resolve_with_nothing_outstanding_is_an_error(tmp_path: Path):
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    result = CliRunner().invoke(
+        cli, ["workflow", "resolve", str(packet), "--note", "x"]
+    )
+    assert result.exit_code == 1
+    assert "nothing outstanding" in result.output
