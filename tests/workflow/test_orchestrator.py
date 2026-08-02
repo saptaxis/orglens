@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
+
+import yaml
 
 from orglens.workflow.orchestrator import step
 from orglens.workflow.runstate import append_fact, read_entries, validate_entry
@@ -71,22 +74,92 @@ def test_an_undeclared_modification_is_reverted_and_blocks(repo_packet):
     assert read_entries(packet)[-1]["type"] == "needs_human"
 
 
-def test_a_missed_postcondition_raises_a_question_not_a_fourth_fact(repo_packet):
-    packet, _, _ = repo_packet
+def test_verification_that_cannot_run_does_not_complete(tmp_path: Path):
+    """Outside a git repo, `effects.check_delta` cannot tell whether
+    anything protected changed. That is ignorance, not safety — the
+    orchestrator must not record the pass as completed on the strength of
+    a check that never ran, even though this packet is otherwise identical
+    to a real one and the pass genuinely wrote what it declared."""
+    (tmp_path / "writing.yaml").write_text(
+        "default: portfolio\nprofiles:\n  portfolio: {}\n"
+    )
+    packet = tmp_path / "a-piece"
+    packet.mkdir()
+    (packet / "writing-brief.md").write_text("# Brief")
+    (packet / "draft.md").write_text("original prose\n")
+    deck = tmp_path / "deck"
+    deck.mkdir()
+    for card in ("critic.md", "liner.md", "smell.md"):
+        (deck / card).write_text(f"# {card}")
+    workflow_path = tmp_path / "WORKFLOW.yaml"
+    workflow_path.write_text(yaml.safe_dump(WORKFLOW))
+    # Deliberately no `git init` — this is the whole point of the test.
+
+    result = step(packet, deck, WORKFLOW, workflow_path, writes_findings)
+    assert result.status != "completed"
+    assert "node_completed" not in {e["type"] for e in read_entries(packet)}
+    last = read_entries(packet)[-1]
+    assert last["type"] == "needs_human"
+    assert last["raised_by"] == "verification"
+
+
+def test_a_dispatch_that_writes_nothing_does_not_complete(repo_packet):
+    """The other half of verify: declared writes must exist. A diagnosing
+    node that dispatches and writes nothing must not be recorded as a
+    completed pass — that is a silent no-op wearing a success status."""
+    packet, deck, workflow_path = repo_packet
 
     def writes_nothing(job):
         pass
 
     result = run(repo_packet, writes_nothing)
-    assert result.status == "completed"
+    assert result.status != "completed"
+    assert "node_completed" not in {e["type"] for e in read_entries(packet)}
     last = read_entries(packet)[-1]
     assert last["type"] == "needs_human"
+    assert "findings.md" in last["question"]
+
+
+def test_a_missed_postcondition_raises_a_question_not_a_fourth_fact(repo_packet):
+    """Genuinely trips the postcondition branch: the dispatch writes
+    everything critique declares (so verification's write-existence check
+    passes and a completion fact is recorded), but the workflow's own
+    `expect` is deliberately wrong against what the sequence predicates
+    actually derive — the same technique a lying node's declaration would
+    produce. `raised_by` pins this to the postcondition branch so it can
+    never be confused with the ratification gate (`raised_by: "declaration"`),
+    which both fire a `needs_human` and both can mention the derived node."""
+    packet, deck, workflow_path = repo_packet
+
+    lying_workflow = copy.deepcopy(WORKFLOW)
+    lying_workflow["nodes"]["critique"]["expect"] = "audit"  # real derivation is "revise"
+
+    result = step(packet, deck, lying_workflow, workflow_path, writes_findings)
+    assert result.status == "completed"
+    assert read_entries(packet)[0]["type"] == "node_completed"
+
+    last = read_entries(packet)[-1]
+    assert last["type"] == "needs_human"
+    assert last["raised_by"] == "postcondition"
     assert "revise" in last["question"]
     assert {e["type"] for e in read_entries(packet)} <= {
         "node_completed",
         "needs_human",
         "human_resolved",
     }
+
+
+def test_the_ratification_gate_is_raised_by_declaration(repo_packet):
+    """The other branch of the same if/elif: `expect` matches the real
+    derivation, so it is `human_review` alone that raises the gate. Pinned
+    on `raised_by` so this can never be mistaken for the postcondition
+    branch above, even though both mention the same derived node."""
+    packet, _, _ = repo_packet
+    result = run(repo_packet, writes_findings)
+    assert result.status == "completed"
+    last = read_entries(packet)[-1]
+    assert last["type"] == "needs_human"
+    assert last["raised_by"] == "declaration"
 
 
 def test_a_terminal_packet_stops_without_dispatching(repo_packet):

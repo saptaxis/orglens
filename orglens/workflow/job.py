@@ -121,8 +121,7 @@ def _expand_read(
     if ref == "@runstate":
         return [str((packet / "runs.jsonl").resolve())]
     if ref.startswith("@profile."):
-        key = ref.split(".", 1)[1]
-        return [str((deck / profile_config[key]).resolve())]
+        return [_require_profile_path(ref, deck, profile_config)]
     if ref.startswith("@"):
         raise KeyError(f"unknown structural reference: {ref!r}; known: {STRUCTURAL}")
     if _is_glob(ref):
@@ -134,6 +133,28 @@ def _require(packet: Path, name: str | None, label: str) -> str:
     if name is None:
         raise FileNotFoundError(f"packet has no {label}: {packet}")
     return str((packet / name).resolve())
+
+
+def _require_profile_path(ref: str, deck: Path, profile_config: dict) -> str:
+    """Resolve ``@profile.<key>`` against the deck and fail loudly rather
+    than hand back a path nobody checked. A value the profile does not
+    carry, or a value that does not name a file the deck actually has, is
+    a marker defect, and a silent nonexistent path in ``reads`` is how one
+    reaches a live run undetected.
+    """
+    key = ref.split(".", 1)[1]
+    if key not in profile_config:
+        raise KeyError(
+            f"profile has no {key!r}; known keys: {sorted(profile_config)}"
+        )
+    value = profile_config[key]
+    resolved = (deck / value).resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(
+            f"@profile.{key} = {value!r} resolves to {resolved}, which does "
+            f"not exist under deck root {deck}"
+        )
+    return str(resolved)
 
 
 def _is_glob(ref: str) -> bool:

@@ -9,6 +9,11 @@ This exists for the one thing an agent interpreter does that a deterministic
 one never would: help. A reviser that widens a frozen brief while applying a
 ratified cut is exactly the failure the gate model prevents, and no amount of
 prose in a role file reliably stops it.
+
+Bound: `git diff --name-only HEAD` reports changes to tracked files only. A
+pass that creates a brand-new file inside a packet declaring everything
+protected leaves no trace here — the file is untracked, not modified, and no
+diff line names it.
 """
 
 from __future__ import annotations
@@ -16,6 +21,13 @@ from __future__ import annotations
 import fnmatch
 import subprocess
 from pathlib import Path
+
+
+class VerificationUnavailable(RuntimeError):
+    """Raised when whether anything protected changed cannot be determined —
+    for example, the packet is not inside a git repository. A caller must
+    not treat this the same as "checked, and nothing changed."
+    """
 
 
 def _modified_tracked_files(packet: Path) -> list[str]:
@@ -28,7 +40,10 @@ def _modified_tracked_files(packet: Path) -> list[str]:
         check=False,
     )
     if result.returncode != 0:
-        return []
+        raise VerificationUnavailable(
+            f"git diff could not run against {packet} (exit {result.returncode}): "
+            f"{result.stderr.strip()}; whether anything protected changed is unknown"
+        )
     return [
         Path(line).name
         for line in result.stdout.splitlines()
@@ -47,6 +62,12 @@ def check_delta(packet: Path, node: dict) -> list[str]:
 
     `must_not_modify: ["**"]` means *everything except this node's declared
     writes* — a diagnostic node still creates what it declares.
+
+    Raises `VerificationUnavailable` if it cannot be determined whether
+    anything protected changed (for instance, `packet` is not inside a git
+    repository). An empty list means checked and clean, never "could not
+    check" — those are not the same outcome and a caller must not confuse
+    them.
     """
     protected = node.get("must_not_modify") or []
     if not protected:

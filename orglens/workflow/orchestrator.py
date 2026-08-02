@@ -59,11 +59,46 @@ def step(
     dispatch(job)
 
     # 5. verify — before recording, because an overreaching pass has not
-    #    completed, it has damaged the packet.
-    violations = effects.check_delta(
-        packet,
-        {"must_not_modify": _names(job.must_not_modify), "writes": _names(job.writes)},
-    )
+    #    completed, it has damaged the packet. Two clauses: the declared
+    #    writes exist, and nothing outside must_not_modify moved.
+
+    missing = [n for n in job.writes if not Path(n).exists()]
+    if missing:
+        append_fact(
+            packet,
+            {
+                "type": "needs_human",
+                "node": job.node,
+                "raised_by": "verification",
+                "question": (
+                    f"{job.node} did not write {', '.join(_names(missing))}, "
+                    "which its declaration promised."
+                ),
+                "workflow_version": version,
+            },
+        )
+        return StepResult("incomplete", job.node, ", ".join(_names(missing)))
+
+    try:
+        violations = effects.check_delta(
+            packet,
+            {"must_not_modify": _names(job.must_not_modify), "writes": _names(job.writes)},
+        )
+    except effects.VerificationUnavailable as exc:
+        append_fact(
+            packet,
+            {
+                "type": "needs_human",
+                "node": job.node,
+                "raised_by": "verification",
+                "question": (
+                    f"{job.node}'s changes could not be verified: {exc}"
+                ),
+                "workflow_version": version,
+            },
+        )
+        return StepResult("unverifiable", job.node, str(exc))
+
     if violations:
         effects.revert(packet, violations)
         append_fact(
