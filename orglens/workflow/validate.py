@@ -18,6 +18,16 @@ from __future__ import annotations
 from orglens.workflow.predicates import predicate_names
 
 _OUTCOME_NAMES = frozenset({"runnable", "terminal", "ambiguous", "malformed", "unknown"})
+_GLOB_CHARS = ("*", "?", "[")
+
+
+def _expect_entries(expect) -> list:
+    """``expect`` names either one acceptable successor or several — a node
+    with two legitimate successors (a diagnostic reachable from either of
+    two cycles) cannot be pinned to just one. Both forms are checked the
+    same way, entry by entry.
+    """
+    return expect if isinstance(expect, list) else [expect]
 
 
 def _guard_predicates(guard: dict, node: str, problems: list[str]) -> set[str]:
@@ -78,13 +88,22 @@ def validate_definition(workflow: dict) -> list[str]:
 
         expect = spec.get("expect")
         if expect is not None:
-            if expect == name:
-                problems.append(f"node {name!r} names itself in expect: {expect!r}")
-            elif expect not in declared and expect not in _OUTCOME_NAMES:
-                problems.append(
-                    f"node {name!r} expects {expect!r}, which is neither a declared "
-                    "node nor an outcome"
-                )
+            for entry in _expect_entries(expect):
+                if entry == name:
+                    problems.append(f"node {name!r} names itself in expect: {entry!r}")
+                elif entry not in declared and entry not in _OUTCOME_NAMES:
+                    problems.append(
+                        f"node {name!r} expects {entry!r}, which is neither a declared "
+                        "node nor an outcome"
+                    )
+
+        writes = spec.get("writes")
+        if isinstance(writes, list):
+            for entry in writes:
+                if isinstance(entry, str) and any(ch in entry for ch in _GLOB_CHARS):
+                    problems.append(
+                        f"node {name!r} writes a glob, not a literal path: {entry!r}"
+                    )
 
     terminal = workflow.get("terminal")
     if terminal is not None and not isinstance(terminal, dict):

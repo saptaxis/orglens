@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -10,6 +11,10 @@ from click.testing import CliRunner
 from orglens.cli import cli
 from tests.workflow.conftest import ORCHESTRATOR_WORKFLOW
 from tests.workflow.test_derive import WORKFLOW
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
 
 
 def write_workflow(root: Path) -> Path:
@@ -108,6 +113,11 @@ def test_check_reports_an_unknown_predicate(tmp_path: Path):
 
 
 def test_record_appends_a_fact_and_confirms_expect(repo_packet):
+    """I2: `record` now runs the same postcondition check `orchestrator.step`
+    does, including `human_review` — critique declares it, so a completed
+    critique also raises the ratification gate, the same as it would under
+    `run --dispatch`. Before I2, `record` ignored `human_review` entirely
+    and this second fact never appeared."""
     packet, deck, wf = repo_packet
     (packet / "findings.md").write_text("## Findings\n- something\n")
 
@@ -119,12 +129,16 @@ def test_record_appends_a_fact_and_confirms_expect(repo_packet):
     assert result.exit_code == 0
 
     lines = (packet / "runs.jsonl").read_text().splitlines()
-    fact = json.loads(lines[-1])
+    fact = json.loads(lines[0])
     assert fact["type"] == "node_completed"
     assert fact["node"] == "critique"
     assert fact["agent"] == "codex"
     assert fact["wrote"] == ["findings.md"]
     assert fact["workflow_version"].startswith("sha256:")
+
+    gate = json.loads(lines[-1])
+    assert gate["type"] == "needs_human"
+    assert gate["raised_by"] == "declaration"
 
 
 def test_record_fails_when_the_packet_does_not_match_expect(repo_packet):
@@ -272,6 +286,60 @@ def test_record_raises_a_gate_with_a_question(repo_packet):
     assert entries[0]["type"] == "node_completed"
     assert entries[-1]["type"] == "needs_human"
     assert "finding 3" in entries[-1]["question"]
+
+
+def test_run_stops_after_max_turns_on_a_self_perpetuating_definition(tmp_path: Path):
+    """I4: `cli.run`'s loop had no iteration cap. A node whose guard does
+    not depend on anything its own completion changes — no `mutates`, no
+    `diagnoses`, a guard over a fact that stays true forever — derives to
+    itself indefinitely, and would dispatch forever unattended without a
+    bound."""
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "t")
+
+    (tmp_path / "writing.yaml").write_text("default: portfolio\nprofiles:\n  portfolio: {}\n")
+    packet = tmp_path / "a-piece"
+    packet.mkdir()
+    (packet / "some-brief.md").write_text("# Brief")
+    deck = tmp_path / "deck"
+    deck.mkdir()
+
+    workflow_path = tmp_path / "WORKFLOW.yaml"
+    workflow_path.write_text(
+        yaml.safe_dump(
+            {
+                "marker": "writing.yaml",
+                "brief": "*-brief.md",
+                "nodes": {
+                    "loop": {
+                        "role": "self",
+                        "reads": [],
+                        "writes": [],
+                        "guard": {"all": ["brief_exists"]},
+                    }
+                },
+            }
+        )
+    )
+
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "init")
+
+    script = tmp_path / "noop.sh"
+    script.write_text("#!/bin/sh\ncat >/dev/null\n")
+    script.chmod(0o755)
+
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "run", str(packet), "--workflow", str(workflow_path),
+         "--deck", str(deck), "--dispatch", str(script), "--max-turns", "5"],
+    )
+    assert result.exit_code == 1
+    assert "5 turns" in result.output
+
+    entries = [json.loads(line) for line in (packet / "runs.jsonl").read_text().splitlines()]
+    assert len([e for e in entries if e["type"] == "node_completed"]) == 5
 
 
 def test_record_no_longer_accepts_a_round(repo_packet):

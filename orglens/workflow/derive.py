@@ -27,13 +27,27 @@ from orglens.workflow.snapshot import PacketSnapshot, read_packet
 
 
 def _unbacked_write(snapshot: PacketSnapshot) -> str | None:
-    """Name a file a completed step claims to have produced that is not
-    present, or ``None`` if every such claim is backed up by a file on
-    disk. A step that named nothing to check is not examined.
+    """Name a file a node's most recent completion claims to have produced
+    that is not present, or ``None`` if every such claim is backed up by a
+    file on disk.
+
+    Only the latest ``node_completed`` per node is examined. A node can
+    legitimately complete more than once — a diagnostic overwriting
+    `findings.md`, say — and an earlier claim a later one has superseded is
+    not a defect; scanning every claim ever made would condemn a packet
+    forever the moment any node's declared write was consumed and removed
+    by a later, unrelated pass. A step that named nothing to check is not
+    examined.
     """
+    latest_by_node: dict[str, dict] = {}
     for entry in snapshot.runs:
         if entry.get("type") != "node_completed":
             continue
+        node = entry.get("node")
+        if node is not None:
+            latest_by_node[node] = entry
+
+    for entry in latest_by_node.values():
         written = entry.get("wrote")
         if not written:
             continue

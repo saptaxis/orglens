@@ -57,6 +57,48 @@ def _matches_any(name: str, patterns: list[str]) -> bool:
     )
 
 
+def dirty_files(packet: Path) -> frozenset[str]:
+    """Names of tracked files already modified relative to HEAD, at the
+    moment this is called.
+
+    A baseline the caller takes *before* dispatching a pass, so a violation
+    found afterward can be judged against what changed because of the pass,
+    not against everything that was already dirty when it started. Without
+    this, a pre-existing uncommitted edit inside the packet is indistinguishable
+    from one the pass just made, and gets attributed — and reverted — as if
+    the pass had caused it.
+    """
+    return frozenset(_modified_tracked_files(Path(packet)))
+
+
+def file_hash(packet: Path, name: str) -> str | None:
+    """The content hash of ``packet / name`` right now, or ``None`` if the
+    file does not exist.
+
+    Computed with ``git hash-object`` rather than opening the file from
+    Python, matching how every other check in this module goes through git
+    instead of reading a document body directly. Two calls at two different
+    times that return the same hash mean the file did not change between
+    them, even though both may differ from ``HEAD``.
+    """
+    path = Path(packet) / name
+    if not path.exists():
+        return None
+    result = subprocess.run(
+        ["git", "hash-object", "--", name],
+        cwd=packet,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise VerificationUnavailable(
+            f"git hash-object could not run against {path} (exit {result.returncode}): "
+            f"{result.stderr.strip()}; whether anything protected changed is unknown"
+        )
+    return result.stdout.strip()
+
+
 def check_delta(packet: Path, node: dict) -> list[str]:
     """Files modified in violation of the node's `must_not_modify`.
 

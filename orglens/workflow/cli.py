@@ -18,7 +18,7 @@ from orglens.workflow import blocking
 from orglens.workflow.definition import load_workflow
 from orglens.workflow.derive import derive_next_node
 from orglens.workflow.job import resolve_job
-from orglens.workflow.orchestrator import step
+from orglens.workflow.orchestrator import record_and_verify, step
 from orglens.workflow.result import Outcome
 from orglens.workflow.runstate import (
     append_fact,
@@ -29,6 +29,32 @@ from orglens.workflow.runstate import (
 from orglens.workflow.validate import validate_definition
 
 FAILING = {Outcome.MALFORMED, Outcome.AMBIGUOUS, Outcome.UNKNOWN}
+
+DEFAULT_MAX_TURNS = 200
+
+
+def _load_workflow_or_exit(workflow_path: str) -> dict:
+    """Read and validate a WORKFLOW.yaml, or exit with a clean message.
+
+    Shared by every command that derives against a definition: a missing
+    file or a definition that names an unknown predicate must be reported,
+    never crash the caller with a raw traceback (a definition problem like
+    that is exactly what `validate_definition` exists to catch).
+    """
+    try:
+        definition = load_workflow(Path(workflow_path))
+    except FileNotFoundError as exc:
+        click.echo(str(exc))
+        raise SystemExit(2)
+
+    problems = validate_definition(definition)
+    if problems:
+        click.echo(f"{workflow_path} has problems:")
+        for problem in problems:
+            click.echo(f"  {problem}")
+        raise SystemExit(2)
+
+    return definition
 
 
 @click.group()
@@ -43,11 +69,7 @@ def workflow():
 @click.option("--json", "as_json", is_flag=True, help="Emit the full result as JSON.")
 def derive(packet: str, workflow_path: str, as_json: bool):
     """Report which node runs next for PACKET."""
-    try:
-        definition = load_workflow(Path(workflow_path))
-    except FileNotFoundError as exc:
-        click.echo(str(exc))
-        raise SystemExit(2)
+    definition = _load_workflow_or_exit(workflow_path)
 
     result = derive_next_node(Path(packet), definition)
 
@@ -113,61 +135,46 @@ def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | N
 
     A node that writes files and exits has no idea whether what it wrote is
     well-formed. This is where it finds out, while the context that could fix
-    it still exists.
+    it still exists. The verification and the postcondition check are the
+    same ones `orglens workflow run` applies after a dispatch it controls
+    (`orchestrator.record_and_verify`) — the one difference is that this
+    command has no window before the pass to have taken a baseline in, so
+    every protected file it finds changed is attributed to the pass, the
+    same way a bare `git diff HEAD` always has been.
     """
-    try:
-        definition = load_workflow(Path(workflow_path))
-    except FileNotFoundError as exc:
-        click.echo(str(exc))
-        raise SystemExit(2)
+    definition = _load_workflow_or_exit(workflow_path)
 
     spec = definition.get("nodes", {}).get(node)
     if spec is None:
         click.echo(f"no node {node!r} in this workflow")
         raise SystemExit(2)
 
-    version = workflow_version(Path(workflow_path))
     resolved = resolve_job(Path(packet), Path(deck), definition, node)
-    wrote = [Path(p).name for p in resolved.writes if Path(p).exists()]
+    result = record_and_verify(
+        Path(packet), definition, Path(workflow_path), resolved, agent=agent, by=session
+    )
 
-    fact = {
-        "type": "node_completed",
-        "node": node,
-        "wrote": wrote,
-        "workflow_version": version,
-    }
-    if agent:
-        fact["agent"] = agent
-    if session:
-        fact["by"] = session
-    append_fact(Path(packet), fact)
-
-    result = derive_next_node(Path(packet), definition)
-    expected = spec.get("expect")
-    actual = result.node if result.outcome == Outcome.RUNNABLE else str(result.outcome)
-
-    if expected is not None and actual != expected:
-        append_fact(
-            Path(packet),
-            {
-                "type": "needs_human",
-                "node": node,
-                "raised_by": "postcondition",
-                "question": (
-                    f"{node} expected the packet to derive to {expected}, "
-                    f"but it derives to {actual}. What it wrote does not leave "
-                    "the packet in the state the workflow expects."
-                ),
-                "workflow_version": version,
-            },
-        )
-        click.echo(f"POSTCONDITION FAILED for {node}")
-        click.echo(f"  expected {expected}, got {actual}")
-        click.echo(f"  derivation: {result.outcome} {result.node or '-'}")
-        click.echo(f"  {result.reason}")
+    if result.status == "unverifiable":
+        click.echo(f"could not verify {node}'s changes: {result.detail}")
+        raise SystemExit(1)
+    if result.status == "reverted":
+        click.echo(f"{node} modified {result.detail}, which its declaration protects")
+        click.echo("the changes were reverted")
+        raise SystemExit(1)
+    if result.status == "flagged":
+        click.echo(f"{node} modified {result.detail}, already dirty before it ran")
+        click.echo("left alone for a human to sort out, not reverted")
         raise SystemExit(1)
 
-    if expected is None:
+    actual = result.detail
+
+    if result.postcondition_failed:
+        expected_text = " or ".join(result.expect or [])
+        click.echo(f"POSTCONDITION FAILED for {node}")
+        click.echo(f"  expected {expected_text}, got {actual}")
+        raise SystemExit(1)
+
+    if not result.expect:
         click.echo(f"recorded {node}; no expect declared, nothing to check")
     else:
         click.echo(f"recorded {node}; packet derives to {actual} as expected")
@@ -180,7 +187,7 @@ def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | N
                 "node": node,
                 "raised_by": "node",
                 "question": question,
-                "workflow_version": version,
+                "workflow_version": workflow_version(Path(workflow_path)),
             },
         )
         click.echo(f"raised a gate: {question}")
@@ -195,9 +202,12 @@ def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | N
 @click.option("--dispatch", "dispatch_cmd", default=None,
               help="Command receiving the job as JSON on stdin. Omit to print and stop.")
 @click.option("--once", is_flag=True, help="One turn, then exit.")
-def run(packet: str, workflow_path: str, deck: str, dispatch_cmd: str | None, once: bool):
+@click.option("--max-turns", "max_turns", default=DEFAULT_MAX_TURNS, show_default=True,
+              help="Stop after this many turns rather than loop forever.")
+def run(packet: str, workflow_path: str, deck: str, dispatch_cmd: str | None, once: bool,
+        max_turns: int):
     """Drive the loop until it stops. The driver holds nothing."""
-    definition = load_workflow(Path(workflow_path))
+    definition = _load_workflow_or_exit(workflow_path)
 
     if dispatch_cmd is None:
         result = derive_next_node(Path(packet), definition)
@@ -217,7 +227,17 @@ def run(packet: str, workflow_path: str, deck: str, dispatch_cmd: str | None, on
             check=True,
         )
 
+    turns = 0
     while True:
+        turns += 1
+        if turns > max_turns:
+            click.echo(
+                f"stopped after {max_turns} turns without completing; a guard that "
+                "never changes under its own node's completion would otherwise "
+                "dispatch forever unattended. Pass --max-turns to raise the bound."
+            )
+            raise SystemExit(1)
+
         outcome = step(Path(packet), Path(deck), definition, Path(workflow_path), dispatch)
         click.echo(f"{outcome.status}: {outcome.node or '-'}  {outcome.detail}")
         if outcome.status != "completed" or once:
@@ -232,7 +252,7 @@ def run(packet: str, workflow_path: str, deck: str, dispatch_cmd: str | None, on
 @click.option("--json", "as_json", is_flag=True)
 def job(packet: str, workflow_path: str, deck: str, node: str | None, as_json: bool):
     """Emit a fully resolved job for PACKET — absolute paths, no templates."""
-    definition = load_workflow(Path(workflow_path))
+    definition = _load_workflow_or_exit(workflow_path)
     chosen = node
     if chosen is None:
         result = derive_next_node(Path(packet), definition)

@@ -60,7 +60,12 @@ def test_resolving_the_gate_lets_the_loop_continue(repo_packet):
 
 
 def test_an_undeclared_modification_is_reverted_and_blocks(repo_packet):
-    """Rule 6: the orchestrator verifies. A pass that dies validates nothing."""
+    """Rule 6: the orchestrator verifies. A pass that dies validates nothing.
+
+    C1, case 1 (clean-then-violation): the packet is clean when this pass
+    starts, so any protected file it modifies is unambiguously its own
+    doing, and reverting it destroys nothing but the pass's own overreach.
+    """
     packet, _, _ = repo_packet
 
     def overreach(job):
@@ -72,6 +77,50 @@ def test_an_undeclared_modification_is_reverted_and_blocks(repo_packet):
     assert "writing-brief.md" in result.detail
     assert (packet / "writing-brief.md").read_text() == "# Brief"
     assert read_entries(packet)[-1]["type"] == "needs_human"
+
+
+def test_a_pre_existing_dirty_file_left_untouched_is_not_a_violation(repo_packet):
+    """C1, case 2: an author's uncommitted edit to a protected file, sitting
+    there before this pass ever starts and left alone by it, must not be
+    attributed to the pass — and must not be reverted. Before the fix,
+    `effects.check_delta` diffed only against `HEAD`, with no baseline taken
+    before dispatch, so this pre-existing edit looked identical to a
+    violation the pass had just made and `git checkout HEAD --` destroyed
+    it."""
+    packet, _, _ = repo_packet
+    (packet / "draft.md").write_text("the author's own half-finished edit\n")
+
+    result = run(repo_packet, writes_findings)
+
+    assert result.status == "completed"
+    assert (packet / "draft.md").read_text() == "the author's own half-finished edit\n"
+    assert not any(
+        e["type"] == "needs_human" and e.get("raised_by") == "verification"
+        for e in read_entries(packet)
+    )
+
+
+def test_a_pre_existing_dirty_file_further_modified_is_flagged_not_reverted(repo_packet):
+    """C1, case 3: the pass compounds its own change on top of an edit that
+    predates it. This is a real violation — the pass touched a protected
+    file — but reverting it to `HEAD` would destroy the author's
+    pre-existing work along with the pass's own overreach, so it must be
+    left alone and a human told, not silently wiped."""
+    packet, _, _ = repo_packet
+    (packet / "draft.md").write_text("the author's own half-finished edit\n")
+
+    def compounds(job):
+        writes_findings(job)
+        (packet / "draft.md").write_text("the pass piled on top\n")
+
+    result = run(repo_packet, compounds)
+
+    assert result.status == "flagged"
+    assert "draft.md" in result.detail
+    assert (packet / "draft.md").read_text() == "the pass piled on top\n"
+    last = [e for e in read_entries(packet) if e["type"] == "needs_human"][-1]
+    assert last["raised_by"] == "verification"
+    assert "draft.md" in last["question"]
 
 
 def test_verification_that_cannot_run_does_not_complete(tmp_path: Path):

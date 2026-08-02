@@ -46,6 +46,49 @@ def test_a_generated_predicate_is_known():
     assert validate_definition(ok) == []
 
 
+def test_a_glob_in_writes_is_reported():
+    """Rule 4: reads loose, writes exact. A `writes` entry is a literal
+    filename decided before the pass runs, never a pattern resolved after."""
+    broken = {
+        "nodes": {**BASE["nodes"], "revise": {**BASE["nodes"]["revise"], "writes": ["draft-*.md"]}}
+    }
+    assert any("glob" in p for p in validate_definition(broken))
+
+
+@pytest.mark.parametrize("entry", ["draft-*.md", "draft?.md", "draft-[0-9].md"])
+def test_every_glob_character_in_writes_is_reported(entry: str):
+    broken = {"nodes": {**BASE["nodes"], "revise": {**BASE["nodes"]["revise"], "writes": [entry]}}}
+    assert any("glob" in p for p in validate_definition(broken))
+
+
+def test_a_literal_write_is_not_reported():
+    ok = {"nodes": {**BASE["nodes"], "revise": {**BASE["nodes"]["revise"], "writes": ["draft.md"]}}}
+    assert validate_definition(ok) == []
+
+
+def test_an_expect_list_names_every_acceptable_successor():
+    """I1: `expect` may be a single node name or a list of them — a node
+    with two legitimate successors (revise, reachable from either a
+    critique or an audit cycle) cannot be pinned to just one."""
+    ok = {
+        "nodes": {
+            **BASE["nodes"],
+            "revise": {**BASE["nodes"]["revise"], "expect": ["critique", "revise"]},
+        }
+    }
+    # "revise" names itself — every entry in the list is checked, not just
+    # the first.
+    assert any("itself" in p for p in validate_definition(ok))
+
+    sound = {
+        "nodes": {
+            **BASE["nodes"],
+            "revise": {**BASE["nodes"]["revise"], "expect": ["critique"]},
+        }
+    }
+    assert validate_definition(sound) == []
+
+
 def test_a_node_that_expects_itself_is_reported():
     """The livelock check. adopt declared expect: adoptable and ran forever."""
     broken = {

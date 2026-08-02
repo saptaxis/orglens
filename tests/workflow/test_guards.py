@@ -32,9 +32,12 @@ def test_empty_guard_never_matches():
     assert matches({}, FACTS) is False
 
 
-def test_fallback_string_never_matches_directly():
-    """`fallback` is positional, resolved by precedence, not by evaluation."""
-    assert matches("fallback", FACTS) is False
+def test_a_bare_string_is_not_a_guard():
+    """`matches` only ever accepts `all` / `any` / `none` over a closed
+    predicate vocabulary — no parsing, no expression language. A bare
+    string carries no clauses to evaluate, so it can never match, no
+    matter what it says."""
+    assert matches("anything", FACTS) is False
 
 
 def test_unknown_predicate_raises():

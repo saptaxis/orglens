@@ -37,7 +37,7 @@ class Job:
     must_not_modify: list[str]
     requires: dict = field(default_factory=dict)
     human_review: bool = False
-    expect: str | None = None
+    expect: str | list[str] | None = None
 
     def to_dict(self) -> dict:
         return {
