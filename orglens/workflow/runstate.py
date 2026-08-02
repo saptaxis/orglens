@@ -155,8 +155,12 @@ def last_routing_node(entries: list[dict]) -> str | None:
 def workflow_version(path: Path) -> str:
     """Content-address a workflow definition file.
 
-    Every recorded fact can name the definition it obeyed by this value, so
-    a fact stays meaningful even after the workflow definition changes.
+    `append_fact` stamps this value onto every recorded fact — a note of
+    which definition was in force when the fact was written, nothing more.
+    Nothing in this engine reads the stamp back: no comparison against the
+    current definition, no check, no invalidation of a cursor written under
+    an earlier one. It is bookkeeping only, until something is built to
+    consult it.
     """
     digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
     return f"sha256:{digest}"
