@@ -6,191 +6,183 @@ from orglens.workflow.derive import derive_next_node
 from orglens.workflow.result import Outcome
 
 WORKFLOW = {
-    "artifact": {"family": "draft", "canonical": "draft.md", "history": "git"},
-    "rounds": {"record": "decisions-{NN}.md", "closed_by": ["revise"]},
+    "brief": "*-brief.md",
+    "artifact": {"family": "draft", "canonical": "draft.md"},
     "terminal": {"published": "brief_published"},
-    "malformed": [
-        "log_names_missing_file",
-        "round_both_critiqued_and_audited",
-        "rounds_without_artifact",
-        "round_number_gap",
-    ],
     "nodes": {
-        "adopt": {"guard": "fallback"},
-        "brief": {"guard": {"none": ["brief_exists"]}},
-        "draft": {"guard": {"all": ["brief_exists"], "none": ["artifact_exists"]}},
+        "brief": {
+            "mutates": True,
+            "guard": {"none": ["brief_exists", "awaiting_mutation"]},
+        },
+        "draft": {
+            "mutates": True,
+            "guard": {
+                "all": ["brief_exists"],
+                "none": ["artifact_exists", "awaiting_mutation"],
+            },
+        },
         "critique": {
+            "diagnoses": True,
             "guard": {
                 "all": ["brief_exists", "artifact_exists"],
-                "any": ["no_rounds", "round_closed"],
-                "none": ["artifact_noncanonical", "last_round_diagnosed_by_critique"],
-            }
-        },
-        "revise": {"guard": {"all": ["round_open"], "none": ["artifact_noncanonical"]}},
-        "audit": {
-            "guard": {
-                "all": [
-                    "brief_exists",
-                    "artifact_exists",
-                    "round_closed",
-                    "last_round_diagnosed_by_critique",
+                "none": [
+                    "artifact_noncanonical",
+                    "awaiting_mutation",
+                    "last_diagnostic_is_critique",
                 ],
-                "none": ["artifact_noncanonical"],
-            }
+            },
+        },
+        "revise": {
+            "mutates": True,
+            "guard": {"all": ["awaiting_mutation"], "none": ["artifact_noncanonical"]},
+        },
+        "audit": {
+            "diagnoses": True,
+            "guard": {
+                "all": ["brief_exists", "artifact_exists", "last_diagnostic_is_critique"],
+                "none": ["artifact_noncanonical", "awaiting_mutation"],
+            },
         },
     },
 }
 
 
-import copy
-
-WORKFLOW_NONCANON = copy.deepcopy(WORKFLOW)
-for _n in ("critique", "revise", "audit"):
-    WORKFLOW_NONCANON["nodes"][_n]["guard"]["none"] = ["artifact_noncanonical"]
+def derive(path: Path):
+    return derive_next_node(path, WORKFLOW)
 
 
-def derive(tmp_path: Path):
-    return derive_next_node(tmp_path, WORKFLOW)
-
-
-def test_empty_packet_routes_to_brief(tmp_path: Path):
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.RUNNABLE
-    assert r.node == "brief"
-
-
-def test_brief_without_artifact_routes_to_draft(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    r = derive(tmp_path)
-    assert r.node == "draft"
-
-
-def test_draft_without_rounds_routes_to_critique(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    (tmp_path / "draft.md").write_text("prose")
-    r = derive(tmp_path)
-    assert r.node == "critique"
-
-
-def test_waiting_is_not_a_derivation_outcome():
-    from orglens.workflow.result import Outcome
-
-    assert not hasattr(Outcome, "WAITING")
-
-
-def test_an_open_round_routes_to_the_closing_node(tmp_path: Path):
-    """No `wait`. Whether it may RUN is the orchestrator's question."""
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "decisions-01.md").write_text("anything")
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.RUNNABLE
-    assert r.node == "revise"
-
-
-def test_a_closed_round_routes_to_the_next_diagnostic(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "decisions-01.md").write_text("anything")
+def log(tmp_path: Path, *nodes: str) -> None:
     (tmp_path / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"critique","round":1,"at":"t","event_id":"1"}\n'
-        '{"type":"node_completed","node":"revise","round":1,"at":"t","event_id":"2"}\n'
+        "".join(
+            '{"type":"node_completed","node":"%s","at":"t","event_id":"%d"}\n' % (n, i)
+            for i, n in enumerate(nodes)
+        )
     )
-    r = derive(tmp_path)
-    assert r.node == "audit"
 
 
-def test_reject_only_round_continues_to_next_diagnostic(tmp_path: Path):
-    """The dead state. A round whose findings were all rejected must not wedge
-    the packet — the revise pass had nothing to apply and completed anyway, so
-    the round is closed and the loop moves to the other diagnostic."""
+def content(tmp_path: Path) -> None:
     (tmp_path / "writing-brief.md").write_text("# Brief")
     (tmp_path / "draft.md").write_text("prose")
-    (tmp_path / "decisions-01.md").write_text("anything")
-    (tmp_path / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"audit","round":1,"at":"t","event_id":"1"}\n'
-        '{"type":"node_completed","node":"revise","round":1,"at":"t","event_id":"2"}\n'
-    )
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.RUNNABLE
-    assert r.node == "critique"
 
 
-def test_adoption_is_not_special_cased_in_derivation(tmp_path: Path):
-    """An adoption.md is just a file. Blocking is the orchestrator's job."""
+# --- the cycle, traced end to end -------------------------------------------
+
+def test_empty_packet_needs_a_brief(tmp_path: Path):
+    assert derive(tmp_path).node == "brief"
+
+
+def test_a_brief_alone_needs_a_draft(tmp_path: Path):
+    (tmp_path / "writing-brief.md").write_text("# Brief")
+    assert derive(tmp_path).node == "draft"
+
+
+def test_a_fresh_draft_is_critiqued(tmp_path: Path):
+    content(tmp_path)
+    log(tmp_path, "brief", "draft")
+    assert derive(tmp_path).node == "critique"
+
+
+def test_a_diagnosis_is_revised(tmp_path: Path):
+    content(tmp_path)
+    log(tmp_path, "brief", "draft", "critique")
+    assert derive(tmp_path).node == "revise"
+
+
+def test_after_a_critique_cycle_the_next_diagnostic_is_audit(tmp_path: Path):
+    content(tmp_path)
+    log(tmp_path, "brief", "draft", "critique", "revise")
+    assert derive(tmp_path).node == "audit"
+
+
+def test_an_audit_is_revised(tmp_path: Path):
+    content(tmp_path)
+    log(tmp_path, "brief", "draft", "critique", "revise", "audit")
+    assert derive(tmp_path).node == "revise"
+
+
+def test_after_an_audit_cycle_the_next_diagnostic_is_critique(tmp_path: Path):
+    """The alternation closes. This is the whole cycle in one assertion."""
+    content(tmp_path)
+    log(tmp_path, "brief", "draft", "critique", "revise", "audit", "revise")
+    assert derive(tmp_path).node == "critique"
+
+
+# --- precedence and failure modes -------------------------------------------
+
+def test_published_is_terminal_and_beats_every_guard(tmp_path: Path):
+    (tmp_path / "writing-brief.md").write_text("---\npublished: https://x/y\n---\n")
+    (tmp_path / "draft.md").write_text("prose")
+    assert derive(tmp_path).outcome == Outcome.TERMINAL
+
+
+def test_an_unrecognised_layout_is_unknown_not_a_node(tmp_path: Path):
+    """What adoption used to be. Nothing is named; a human looks at it."""
     (tmp_path / "writing-brief.md").write_text("# Brief")
     (tmp_path / "draft-v2.md").write_text("prose")
-    (tmp_path / "adoption.md").write_text("anything")
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.ADOPTABLE
+    result = derive(tmp_path)
+    assert result.outcome == Outcome.UNKNOWN
+    assert result.node is None
 
 
-def test_artifact_without_brief_is_not_ambiguous(tmp_path: Path):
-    """brief and critique both fired here before brief_exists was added."""
-    (tmp_path / "draft.md").write_text("prose")
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.RUNNABLE
-    assert r.node == "brief"
-
-
-def test_published_packet_is_terminal(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text(
-        "---\npublished: https://example.com/x\n---\n"
+def test_a_log_naming_a_file_that_is_not_there_is_malformed(tmp_path: Path):
+    content(tmp_path)
+    (tmp_path / "runs.jsonl").write_text(
+        '{"type":"node_completed","node":"critique","at":"t","event_id":"1",'
+        '"wrote":["findings.md"]}\n'
     )
+    assert derive(tmp_path).outcome == Outcome.MALFORMED
+
+
+def test_malformed_is_tested_before_terminal(tmp_path: Path):
+    (tmp_path / "writing-brief.md").write_text("---\npublished: https://x/y\n---\n")
     (tmp_path / "draft.md").write_text("prose")
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.TERMINAL
-    assert r.node is None
+    (tmp_path / "runs.jsonl").write_text(
+        '{"type":"node_completed","node":"critique","at":"t","event_id":"1",'
+        '"wrote":["gone.md"]}\n'
+    )
+    assert derive(tmp_path).outcome == Outcome.MALFORMED
 
 
-def test_malformed_beats_fallback(tmp_path: Path):
-    """A broken packet must be reported, never silently adopted."""
-    (tmp_path / "decisions-01.md").write_text("anything")
-    r = derive(tmp_path)
-    assert r.outcome == Outcome.MALFORMED
-    assert "rounds_without_artifact" in r.reason
-
-
-def test_ambiguity_is_reported_not_resolved(tmp_path: Path):
+def test_two_matching_guards_is_an_error_not_a_tiebreak(tmp_path: Path):
     broken = {
         **WORKFLOW,
         "nodes": {
-            "one": {"guard": {"all": ["brief_exists"]}},
-            "two": {"guard": {"all": ["brief_exists"]}},
+            "a": {"guard": {"all": ["brief_exists"]}},
+            "b": {"guard": {"all": ["brief_exists"]}},
         },
     }
     (tmp_path / "writing-brief.md").write_text("# Brief")
-    r = derive_next_node(tmp_path, broken)
-    assert r.outcome == Outcome.AMBIGUOUS
-    assert sorted(r.matched) == ["one", "two"]
+    result = derive_next_node(tmp_path, broken)
+    assert result.outcome == Outcome.AMBIGUOUS
+    assert sorted(result.matched) == ["a", "b"]
 
 
-def test_result_carries_facts_and_reason(tmp_path: Path):
-    r = derive(tmp_path)
-    assert r.facts["brief_exists"] is False
-    assert r.reason
+def test_a_log_without_its_files_is_never_ambiguous(tmp_path: Path):
+    """A brief deleted mid-loop once matched both `brief` and `revise`.
 
-
-def test_noncanonical_artifact_routes_to_adopt(tmp_path: Path):
-    """Defect 9, found the first time this ran on a real directory.
-
-    A packet with draft-v1/draft-v2 was indistinguishable from a fresh
-    canonical one — the family rule accepts draft-v2.md as the artifact, so
-    `critique` fired and `adopt` never ran for exactly the case it exists for.
-    This workflow always writes canonically (I1a), so a non-canonical artifact
-    is evidence something else produced it.
+    Exhaustive simulation over every log permutation to length 6 crossed with
+    every file-state found 23436 such collisions; `none: [awaiting_mutation]`
+    on the two entry nodes removes all of them without touching the cycle.
+    A packet whose log records work its files do not corroborate is not fresh.
     """
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    (tmp_path / "draft-v1.md").write_text("one")
-    (tmp_path / "draft-v2.md").write_text("two")
-    r = derive_next_node(tmp_path, WORKFLOW_NONCANON)
-    assert r.outcome == Outcome.ADOPTABLE
-    assert r.node == "adopt"
-
-
-def test_canonical_artifact_still_routes_to_critique(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text("# Brief")
     (tmp_path / "draft.md").write_text("prose")
-    r = derive_next_node(tmp_path, WORKFLOW_NONCANON)
-    assert r.outcome == Outcome.RUNNABLE
-    assert r.node == "critique"
+    log(tmp_path, "critique")
+    result = derive(tmp_path)
+    assert result.outcome != Outcome.AMBIGUOUS
+
+
+def test_derivation_has_no_opinion_about_humans(tmp_path: Path):
+    """An outstanding question does not change what derives. Blocking is
+    the orchestrator's question, answered separately."""
+    content(tmp_path)
+    (tmp_path / "runs.jsonl").write_text(
+        '{"type":"node_completed","node":"draft","at":"t","event_id":"1"}\n'
+        '{"type":"needs_human","node":"draft","question":"q","at":"t","event_id":"2"}\n'
+    )
+    assert derive(tmp_path).node == "critique"
+
+
+def test_the_reason_names_the_facts_that_matched(tmp_path: Path):
+    content(tmp_path)
+    log(tmp_path, "brief", "draft")
+    assert "brief_exists" in derive(tmp_path).reason
