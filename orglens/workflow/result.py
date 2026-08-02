@@ -13,10 +13,10 @@ it next.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class Outcome(str, Enum):
+class Outcome(StrEnum):
     RUNNABLE = "runnable"
     TERMINAL = "terminal"
     UNKNOWN = "unknown"
