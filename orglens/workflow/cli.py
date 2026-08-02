@@ -17,14 +17,13 @@ import click
 from orglens.workflow import blocking
 from orglens.workflow.definition import load_workflow
 from orglens.workflow.derive import derive_next_node
-from orglens.workflow.job import resolve_job
+from orglens.workflow.job import Job, resolve_job
 from orglens.workflow.orchestrator import record_and_verify, step
 from orglens.workflow.result import Outcome
 from orglens.workflow.runstate import (
     append_fact,
     read_entries,
     unresolved_needs_human,
-    workflow_version,
 )
 from orglens.workflow.validate import validate_definition
 
@@ -123,24 +122,30 @@ def check(workflow_path: str):
 @click.argument("packet", type=click.Path(exists=True, file_okay=False))
 @click.option("--workflow", "workflow_path", required=True,
               help="Path to WORKFLOW.yaml.")
-@click.option("--deck", required=True, help="Deck root, to resolve the pass's declared writes.")
 @click.option("--node", required=True, help="The node that just ran.")
 @click.option("--agent", default=None, help="Which family performed the pass.")
 @click.option("--session", default=None, help="Session id of the performer.")
 @click.option("--question", default=None,
               help="Raise a gate after recording — how a stuck pass blocks itself.")
-def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | None,
+def record(packet: str, workflow_path: str, node: str, agent: str | None,
            session: str | None, question: str | None):
     """Record a completed pass, then confirm the packet derives to `expect`.
 
     A node that writes files and exits has no idea whether what it wrote is
     well-formed. This is where it finds out, while the context that could fix
-    it still exists. The verification and the postcondition check are the
-    same ones `orglens workflow run` applies after a dispatch it controls
-    (`orchestrator.record_and_verify`) — the one difference is that this
-    command has no window before the pass to have taken a baseline in, so
-    every protected file it finds changed is attributed to the pass, the
-    same way a bare `git diff HEAD` always has been.
+    it still exists.
+
+    This command is invoked after a pass that already ran outside its view,
+    with no "before" state available to it — so, unlike `orglens workflow
+    run` (which verifies what a dispatch changed against its declaration
+    before recording, see `orchestrator.step`), `record` does not check the
+    packet's changes at all and never reverts anything. A hand-driven pass
+    is trusted to have respected its own declaration; rule 6 is why the
+    check that cannot be attributed correctly is not attempted here (see
+    `orchestrator.record_and_verify`).
+
+    Raises exactly one gate: `--question` if given, otherwise the node's
+    declared `human_review` gate — never both.
     """
     definition = _load_workflow_or_exit(workflow_path)
 
@@ -149,22 +154,21 @@ def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | N
         click.echo(f"no node {node!r} in this workflow")
         raise SystemExit(2)
 
-    resolved = resolve_job(Path(packet), Path(deck), definition, node)
-    result = record_and_verify(
-        Path(packet), definition, Path(workflow_path), resolved, agent=agent, by=session
+    job = Job(
+        node=node,
+        role=None,
+        profile="",
+        reads=[],
+        writes=list(spec.get("writes") or []),
+        must_not_modify=[],
+        requires=spec.get("requires") or {},
+        human_review=bool(spec.get("human_review", False)),
+        expect=spec.get("expect"),
     )
-
-    if result.status == "unverifiable":
-        click.echo(f"could not verify {node}'s changes: {result.detail}")
-        raise SystemExit(1)
-    if result.status == "reverted":
-        click.echo(f"{node} modified {result.detail}, which its declaration protects")
-        click.echo("the changes were reverted")
-        raise SystemExit(1)
-    if result.status == "flagged":
-        click.echo(f"{node} modified {result.detail}, already dirty before it ran")
-        click.echo("left alone for a human to sort out, not reverted")
-        raise SystemExit(1)
+    result = record_and_verify(
+        Path(packet), definition, Path(workflow_path), job,
+        agent=agent, by=session, question=question,
+    )
 
     actual = result.detail
 
@@ -180,16 +184,6 @@ def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | N
         click.echo(f"recorded {node}; packet derives to {actual} as expected")
 
     if question:
-        append_fact(
-            Path(packet),
-            {
-                "type": "needs_human",
-                "node": node,
-                "raised_by": "node",
-                "question": question,
-                "workflow_version": workflow_version(Path(workflow_path)),
-            },
-        )
         click.echo(f"raised a gate: {question}")
 
     raise SystemExit(0)
@@ -260,6 +254,9 @@ def job(packet: str, workflow_path: str, deck: str, node: str | None, as_json: b
             click.echo(f"{result.outcome}: {result.reason}")
             raise SystemExit(1)
         chosen = result.node
+    elif chosen not in definition.get("nodes", {}):
+        click.echo(f"no node {chosen!r} in this workflow")
+        raise SystemExit(2)
 
     resolved = resolve_job(Path(packet), Path(deck), definition, chosen)
     if as_json:

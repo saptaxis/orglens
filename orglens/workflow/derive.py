@@ -27,33 +27,30 @@ from orglens.workflow.snapshot import PacketSnapshot, read_packet
 
 
 def _unbacked_write(snapshot: PacketSnapshot) -> str | None:
-    """Name a file a node's most recent completion claims to have produced
-    that is not present, or ``None`` if every such claim is backed up by a
-    file on disk.
+    """Name a file the most recent completion claims to have produced that
+    is not present, or ``None`` if that claim is backed up by a file on
+    disk (or the most recent completion named nothing to check).
 
-    Only the latest ``node_completed`` per node is examined. A node can
-    legitimately complete more than once — a diagnostic overwriting
-    `findings.md`, say — and an earlier claim a later one has superseded is
-    not a defect; scanning every claim ever made would condemn a packet
-    forever the moment any node's declared write was consumed and removed
-    by a later, unrelated pass. A step that named nothing to check is not
-    examined.
+    Only the single most recent ``node_completed`` fact overall is
+    examined, not the latest per node. A file one node wrote can be
+    legitimately consumed and removed by a later, different node — critique
+    writes `findings.md`, revise applies it and the packet no longer needs
+    it — and that is not a defect; checking every node's own latest claim
+    would still condemn the packet forever the moment that happened, since
+    the consuming node's completion never re-claims the consumed node's
+    file. Only the most recent claim, of any node, has to still be true.
     """
-    latest_by_node: dict[str, dict] = {}
+    latest: dict | None = None
     for entry in snapshot.runs:
-        if entry.get("type") != "node_completed":
-            continue
-        node = entry.get("node")
-        if node is not None:
-            latest_by_node[node] = entry
+        if entry.get("type") == "node_completed":
+            latest = entry
 
-    for entry in latest_by_node.values():
-        written = entry.get("wrote")
-        if not written:
-            continue
-        for name in written:
-            if name not in snapshot.files:
-                return name
+    if latest is None:
+        return None
+
+    for name in latest.get("wrote") or []:
+        if name not in snapshot.files:
+            return name
     return None
 
 

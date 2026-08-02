@@ -136,9 +136,13 @@ def test_a_log_naming_a_file_that_is_not_there_is_malformed(tmp_path: Path):
 def test_a_superseded_write_does_not_condemn_the_packet_forever(tmp_path: Path):
     """A file a node completed with once, legitimately consumed and removed
     by a later pass, must not be malformed forever. `_unbacked_write` used
-    to scan every `node_completed` fact ever recorded for a node; only the
-    most recent claim per node is checked now, so an earlier claim a later
-    completion of the same node has superseded is not held against it."""
+    to scan the latest `node_completed` fact *per node*, which still
+    condemned a packet forever the moment a file one node wrote was
+    consumed and removed by a *different* later node — that node's own
+    completion never re-claims the file, so the original node's stale claim
+    stood forever. Only the single most recent completion overall is
+    checked now, so an earlier claim any later completion has superseded —
+    by the same node or a different one — is not held against it."""
     content(tmp_path)
     (tmp_path / "runs.jsonl").write_text(
         '{"type":"node_completed","node":"critique","at":"t","event_id":"1",'
@@ -152,9 +156,27 @@ def test_a_superseded_write_does_not_condemn_the_packet_forever(tmp_path: Path):
     assert derive(tmp_path).outcome != Outcome.MALFORMED
 
 
-def test_the_most_recent_claim_for_a_node_is_still_checked(tmp_path: Path):
-    """The narrowing must not become a blanket exemption: a node's *latest*
-    unbacked claim is still malformed."""
+def test_a_file_one_node_wrote_and_a_later_different_node_consumed_is_not_malformed(
+    tmp_path: Path,
+):
+    """The scenario Finding 6 named directly: critique writes `findings.md`,
+    revise applies it and the packet no longer carries the file. revise's
+    own completion names nothing to check, so it is revise's completion —
+    not critique's stale claim — that governs."""
+    content(tmp_path)
+    (tmp_path / "runs.jsonl").write_text(
+        '{"type":"node_completed","node":"critique","at":"t","event_id":"1",'
+        '"wrote":["findings.md"]}\n'
+        '{"type":"node_completed","node":"revise","at":"t","event_id":"2",'
+        '"wrote":["draft.md"]}\n'
+    )
+    # findings.md was never written to disk in this packet; draft.md was.
+    assert derive(tmp_path).outcome != Outcome.MALFORMED
+
+
+def test_the_most_recent_completion_overall_is_still_checked(tmp_path: Path):
+    """The narrowing must not become a blanket exemption: the *latest*
+    completion's unbacked claim is still malformed."""
     content(tmp_path)
     (tmp_path / "runs.jsonl").write_text(
         '{"type":"node_completed","node":"critique","at":"t","event_id":"1"}\n'

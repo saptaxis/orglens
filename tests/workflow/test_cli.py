@@ -123,7 +123,7 @@ def test_record_appends_a_fact_and_confirms_expect(repo_packet):
 
     result = CliRunner().invoke(
         cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+        ["workflow", "record", str(packet), "--workflow", str(wf),
          "--node", "critique", "--agent", "codex"],
     )
     assert result.exit_code == 0
@@ -152,7 +152,7 @@ def test_record_fails_when_the_packet_does_not_match_expect(repo_packet):
 
     result = CliRunner().invoke(
         cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+        ["workflow", "record", str(packet), "--workflow", str(wf),
          "--node", "critique"],
     )
     assert result.exit_code == 1
@@ -164,7 +164,7 @@ def test_record_rejects_an_unknown_node(repo_packet):
     packet, deck, wf = repo_packet
     result = CliRunner().invoke(
         cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+        ["workflow", "record", str(packet), "--workflow", str(wf),
          "--node", "nonesuch"],
     )
     assert result.exit_code == 2
@@ -181,7 +181,7 @@ def test_a_failed_postcondition_is_itself_recorded(repo_packet):
 
     result = CliRunner().invoke(
         cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+        ["workflow", "record", str(packet), "--workflow", str(wf),
          "--node", "critique"],
     )
     assert result.exit_code == 1
@@ -278,7 +278,7 @@ def test_record_raises_a_gate_with_a_question(repo_packet):
     packet, deck, wf = repo_packet
     result = CliRunner().invoke(
         cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+        ["workflow", "record", str(packet), "--workflow", str(wf),
          "--node", "critique", "--question", "is finding 3 in scope?"],
     )
     assert result.exit_code == 0
@@ -286,6 +286,56 @@ def test_record_raises_a_gate_with_a_question(repo_packet):
     assert entries[0]["type"] == "node_completed"
     assert entries[-1]["type"] == "needs_human"
     assert "finding 3" in entries[-1]["question"]
+
+
+def test_record_raises_exactly_one_gate_even_when_the_node_also_declares_review(
+    repo_packet,
+):
+    """Finding 3: `critique` declares `human_review: true` *and* the card
+    passes `--question` — before the fix, `record` raised both, leaving two
+    near-identical `needs_human` facts for a single pass. Exactly one must
+    be raised (the `--question` one), and a single `orglens workflow
+    resolve` must clear it — nothing left blocking behind it."""
+    packet, deck, wf = repo_packet
+
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf),
+         "--node", "critique", "--question", "is finding 3 in scope?"],
+    )
+    assert result.exit_code == 0
+
+    entries = [json.loads(line) for line in (packet / "runs.jsonl").read_text().splitlines()]
+    needs_human = [e for e in entries if e["type"] == "needs_human"]
+    assert len(needs_human) == 1
+    assert needs_human[0]["raised_by"] == "node"
+    assert "finding 3" in needs_human[0]["question"]
+
+    resolved = CliRunner().invoke(
+        cli, ["workflow", "resolve", str(packet), "--note", "yes, in scope"]
+    )
+    assert resolved.exit_code == 0
+
+    derived = CliRunner().invoke(
+        cli, ["workflow", "derive", str(packet), "--workflow", str(wf), "--json"]
+    )
+    payload = json.loads(derived.output)
+    assert payload["blocked"] is False
+
+
+def test_job_reports_an_unknown_node_cleanly(repo_packet):
+    """Finding 5: `--node ghost` used to dump a raw `KeyError` traceback
+    from `resolve_job`. It must be reported the same clean way every other
+    CLI path handles an unknown node."""
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "job", str(packet), "--workflow", str(wf), "--deck", str(deck),
+         "--node", "ghost"],
+    )
+    assert result.exit_code == 2
+    assert "ghost" in result.output
+    assert not isinstance(result.exception, KeyError)
 
 
 def test_run_stops_after_max_turns_on_a_self_perpetuating_definition(tmp_path: Path):
@@ -346,7 +396,7 @@ def test_record_no_longer_accepts_a_round(repo_packet):
     packet, deck, wf = repo_packet
     result = CliRunner().invoke(
         cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+        ["workflow", "record", str(packet), "--workflow", str(wf),
          "--node", "critique", "--round", "1"],
     )
     assert result.exit_code != 0

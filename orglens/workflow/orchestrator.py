@@ -44,34 +44,22 @@ def _expect_options(expect: str | list[str] | None) -> list[str]:
     return list(expect) if isinstance(expect, list) else [expect]
 
 
-def record_and_verify(
+def _verify_delta(
     packet: Path,
-    workflow: dict,
-    workflow_path: Path,
     job: Job,
-    *,
-    baseline: frozenset[str] = frozenset(),
-    baseline_hashes: dict[str, str | None] | None = None,
-    agent: str | None = None,
-    by: str | None = None,
-) -> StepResult:
-    """Verify what a pass changed, record that it ran, and check the
-    packet still derives where the workflow expects — the "verify" and
-    "record" steps of the loop, and rule 6 (the orchestrator verifies, not
-    the pass), in one implementation.
+    workflow_path: Path,
+    baseline: frozenset[str],
+    baseline_hashes: dict[str, str | None],
+) -> StepResult | None:
+    """Check what a dispatch just changed against the node's declaration.
 
-    `orchestrator.step` calls this after a dispatch it controlled, having
-    taken `baseline` beforehand (see `effects.dirty_files`) so a violation
-    already present before the pass started and left untouched by it is not
-    blamed on the pass, and one compounded on top of a pre-existing edit is
-    flagged rather than reverted — reverting it would destroy work that
-    predates the pass. `cli.record` calls this with no baseline, because it
-    is invoked after a pass that already happened outside its view; every
-    violation it finds is attributed to the pass, exactly as a bare `git
-    diff HEAD` always has been.
+    Only `step` calls this — it is the half of rule 6 that requires a
+    "before" state to judge against, and `step` is the only caller that has
+    one, taken as `baseline` before it dispatched. Returns a `StepResult`
+    if verification stops here (unverifiable, or a violation reverted or
+    flagged), or `None` if the pass's changes were clean and recording may
+    proceed.
     """
-    packet = Path(packet)
-    baseline_hashes = baseline_hashes or {}
     version = workflow_version(Path(workflow_path))
 
     try:
@@ -142,8 +130,40 @@ def record_and_verify(
         return StepResult("reverted", job.node, ", ".join(reverted))
     if flagged:
         return StepResult("flagged", job.node, ", ".join(flagged))
+    return None
 
-    # record
+
+def record_and_verify(
+    packet: Path,
+    workflow: dict,
+    workflow_path: Path,
+    job: Job,
+    *,
+    agent: str | None = None,
+    by: str | None = None,
+    question: str | None = None,
+) -> StepResult:
+    """Record that a pass ran and confirm the packet still derives where the
+    workflow expects — the "record" step of the loop, and the half of rule
+    6 both callers share.
+
+    This does not check what the pass changed against its declaration —
+    that is `step`'s job alone (see `_verify_delta`), because it needs a
+    "before" state to judge against and this function is invoked only
+    *after* a pass has already written, whether that pass was dispatched
+    under `step`'s control (which has already run `_verify_delta` by the
+    time this runs) or driven by hand through `cli.record` (which has no
+    "before" state to have taken a baseline in, and trusts the pass to have
+    respected its own declaration).
+
+    Raises exactly one gate after recording: `question` if the caller gave
+    one, otherwise the node's declared `human_review` gate. Never both — a
+    single pass raising two near-identical `needs_human` facts would leave
+    the packet blocked after the author's one `resolve`.
+    """
+    packet = Path(packet)
+    version = workflow_version(Path(workflow_path))
+
     fact = {
         "type": "node_completed",
         "node": job.node,
@@ -180,6 +200,17 @@ def record_and_verify(
             },
         )
         step_result.postcondition_failed = True
+    elif question is not None:
+        append_fact(
+            packet,
+            {
+                "type": "needs_human",
+                "node": job.node,
+                "raised_by": "node",
+                "question": question,
+                "workflow_version": version,
+            },
+        )
     elif job.human_review:
         append_fact(
             packet,
@@ -224,6 +255,7 @@ def step(
     # dispatch must be judged against this, not against HEAD alone.
     try:
         baseline = effects.dirty_files(packet)
+        baseline_hashes = {name: effects.file_hash(packet, name) for name in baseline}
     except effects.VerificationUnavailable as exc:
         append_fact(
             packet,
@@ -236,7 +268,6 @@ def step(
             },
         )
         return StepResult("unverifiable", job.node, str(exc))
-    baseline_hashes = {name: effects.file_hash(packet, name) for name in baseline}
 
     # 4. dispatch
     dispatch(job)
@@ -262,13 +293,13 @@ def step(
         )
         return StepResult("incomplete", job.node, ", ".join(_names(missing)))
 
-    # 6. verify what changed and record — one implementation, shared with
-    #    `cli.record` (I2).
-    return record_and_verify(
-        packet,
-        workflow,
-        workflow_path,
-        job,
-        baseline=baseline,
-        baseline_hashes=baseline_hashes,
-    )
+    # 6. verify what changed against the declaration — the half of rule 6
+    #    only `step` can do, since only `step` has a baseline to judge
+    #    against (C1).
+    delta_result = _verify_delta(packet, job, workflow_path, baseline, baseline_hashes)
+    if delta_result is not None:
+        return delta_result
+
+    # 7. record — the completion-fact and postcondition-check logic, shared
+    #    with `cli.record` (I2).
+    return record_and_verify(packet, workflow, workflow_path, job)
