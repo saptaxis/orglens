@@ -156,9 +156,9 @@ def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | N
     )
 
     click.echo(f"recorded {result.node}")
-    if question:
+    if result.gate == "question":
         click.echo(f"raised a gate: {question}")
-    elif resolved.human_review:
+    elif result.gate == "declaration":
         click.echo("raised the declared review gate")
 
     raise SystemExit(0)

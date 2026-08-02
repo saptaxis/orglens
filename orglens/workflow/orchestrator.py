@@ -8,9 +8,14 @@ happened.
 There is no verification step here anymore. Protection is a sentence in a
 role card now, and recovery from a pass that overreaches is git, not this
 module: nothing here takes a snapshot before a dispatch or inspects what
-changed afterward. If a pass writes nothing it declared, the next node's
-guard simply does not fire and the packet stalls in a visible, diagnosable
-way — the guard graph is the check.
+changed afterward. Nothing checks a pass's output against what it declared,
+either. `record` stamps `wrote` onto the completion fact — the declared
+writes that exist right now — but nothing reads that value back to decide
+anything: the cursor is the node named by the most recent fact, full stop,
+and `record` appends that fact unconditionally once a dispatch returns. A
+pass that runs and writes nothing it declared still advances the cursor,
+and the next node still fires if its guard only asks `after:` the node that
+just ran. Git is the recovery, not a guard that silently catches this.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ class StepResult:
     status: str
     node: str | None = None
     detail: str = ""
+    gate: str | None = None
 
 
 def _names(paths: list[str]) -> list[str]:
@@ -62,7 +68,9 @@ def record(
     Raises exactly one gate after recording: `question` if the caller gave
     one, otherwise the node's declared review gate. Never both, and this
     function never re-derives to check anything — there is no postcondition
-    left to fail.
+    left to fail. Which gate it raised, if either, comes back on the
+    returned `StepResult.gate` (`"question"`, `"declaration"`, or `None`) so
+    a caller can report it without re-testing the same condition itself.
     """
     packet = Path(packet)
     version = workflow_version(Path(workflow_path))
@@ -93,6 +101,7 @@ def record(
                 "workflow_version": version,
             },
         )
+        result.gate = "question"
     elif job.human_review:
         append_fact(
             packet,
@@ -104,6 +113,7 @@ def record(
                 "workflow_version": version,
             },
         )
+        result.gate = "declaration"
 
     return result
 

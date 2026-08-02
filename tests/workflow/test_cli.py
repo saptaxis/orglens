@@ -412,6 +412,43 @@ def test_job_reports_a_path_bearing_glob_that_did_resolve(tmp_path: Path):
     assert "references/smell-patterns.md" in result.output
 
 
+# --- final review: `cli.record` reports the gate `orchestrator.record`
+# raised rather than recomputing the same branch itself ---------------------
+
+
+def test_record_prints_the_question_gate_it_raised(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+         "--node", "critique", "--question", "is finding 3 in scope?"],
+    )
+    assert result.exit_code == 0
+    assert "raised a gate: is finding 3 in scope?" in result.output
+
+
+def test_record_prints_the_declared_gate_it_raised(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+         "--node", "critique"],
+    )
+    assert result.exit_code == 0
+    assert "raised the declared review gate" in result.output
+
+
+def test_record_prints_no_gate_line_when_none_was_raised(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+         "--node", "revise"],
+    )
+    assert result.exit_code == 0
+    assert "raised" not in result.output
+
+
 def test_record_names_exactly_what_it_read(repo_packet):
     packet, deck, wf = repo_packet
     (packet / "findings.md").write_text("f")

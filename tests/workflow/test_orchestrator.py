@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from orglens.workflow import orchestrator
+from orglens.workflow.job import resolve_job
 from orglens.workflow.orchestrator import StepResult, step
 from orglens.workflow.runstate import append_fact, read_entries, validate_entry
 
@@ -146,3 +148,40 @@ def test_the_completion_fact_names_exactly_what_was_read(repo_packet):
     run(repo_packet, writes_findings)
     fact = read_entries(packet)[0]
     assert fact["read"] == ["writing-brief.md"]
+
+
+# --- final review: one gate predicate, reported on the result rather than
+# recomputed by a caller (`cli.record` used to re-test `resolved.human_review`
+# itself; it now reads `StepResult.gate` instead) ---------------------------
+
+
+def test_the_result_names_the_declared_gate(repo_packet):
+    packet, _, _ = repo_packet
+    result = run(repo_packet, writes_findings)
+    assert result.gate == "declaration"
+
+
+def test_the_result_names_the_question_gate(repo_packet):
+    packet, deck, wf = repo_packet
+    job = resolve_job(packet, deck, WORKFLOW, "critique")
+    result = orchestrator.record(
+        packet, WORKFLOW, wf, job, question="does finding 3 count?"
+    )
+    assert result.gate == "question"
+
+
+def test_the_result_carries_no_gate_when_none_was_raised(repo_packet):
+    packet, _, _ = repo_packet
+    run(repo_packet, writes_findings)
+    outstanding = [e for e in read_entries(packet) if e["type"] == "needs_human"][-1]
+    append_fact(
+        packet,
+        {"type": "human_resolved", "resolves": outstanding["event_id"], "note": "ok"},
+    )
+
+    def revise(job):
+        Path(job.writes[0]).write_text("revised prose\n")
+
+    result = run(repo_packet, revise)
+    assert result.status == "completed"
+    assert result.gate is None
