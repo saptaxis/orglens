@@ -1,15 +1,19 @@
-"""Packet snapshot — filenames, frontmatter, and recorded facts.
+"""A read-only picture of a packet directory.
 
-The engine does not open a file it did not write. What a document *says* is
-data for the next node; the only things routing may see are which files exist,
-what their frontmatter declares, and what run state records.
+A packet is a directory on disk. The snapshot never invents a filename: the
+brief is found by the glob the deck declares in ``workflow["brief"]``, and
+the artifact is found by the family it declares in ``workflow["artifact"]``.
+The only filename this module names itself is ``runs.jsonl``, and it does
+not even open that file directly — ``read_entries`` does.
 
-That line is why `SECTION_NAMES` and a `decisions-NN` regex used to live here
-and no longer do: both made the deck-agnostic layer know what an essay is.
+Artifacts are one canonical file with git as their history: each write lands
+on the same name, and the history lives in the commits. A file the deck did
+not declare is just a name in ``files``; the engine never opens it.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,10 +22,7 @@ import yaml
 
 from orglens.workflow.runstate import read_entries
 
-
-@dataclass
-class RoundInfo:
-    number: int
+_FRONTMATTER = re.compile(r"\A---\n(.*?)\n---", re.DOTALL)
 
 
 @dataclass
@@ -31,77 +32,85 @@ class PacketSnapshot:
     brief: str | None = None
     brief_frontmatter: dict = field(default_factory=dict)
     artifact: str | None = None
-    artifact_canonical: bool = True
-    rounds: dict[int, RoundInfo] = field(default_factory=dict)
+    artifact_canonical: bool = False
     runs: list[dict] = field(default_factory=list)
 
 
 def _parse_frontmatter(text: str) -> dict:
-    if not text.startswith("---"):
-        return {}
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}
-    return yaml.safe_load(text[3:end]) or {}
-
-
-def _artifact_family_match(name: str, family: str) -> int | None:
-    """Version number if `name` belongs to the artifact family.
-
-    Permissive per I1a: draft.md, draft2.md, draft-v2.md all parse, and a bare
-    name is version 1.
-    """
-    match = re.fullmatch(rf"{re.escape(family)}[-_]?v?(\d*)\.md", name)
+    """Parse the leading ``---`` block. Absent or malformed yields ``{}``."""
+    match = _FRONTMATTER.match(text)
     if not match:
-        return None
-    return int(match.group(1)) if match.group(1) else 1
+        return {}
+    try:
+        data = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
-def _round_pattern(workflow: dict) -> re.Pattern:
-    """Compile the deck's declared round record pattern.
-
-    `decisions-{NN}.md` -> decisions-(\\d+)\\.md. The engine has no default;
-    a deck that records rounds must say how.
+def _family_version(name: str, family: str) -> int | None:
+    """Return ``name``'s version within ``family``, or ``None`` if it is not
+    a member. A bare family name (``draft.md``) is version 1; ``draft2.md``
+    and ``draft-v2.md`` are both version 2.
     """
-    record = workflow.get("rounds", {}).get("record")
-    if not record:
-        return re.compile(r"(?!)")  # matches nothing
-    escaped = re.escape(record).replace(re.escape("{NN}"), r"(\d+)")
-    return re.compile(escaped)
+    match = re.fullmatch(rf"{re.escape(family)}(?:-?v?(\d+))?\.md", name)
+    if match is None:
+        return None
+    digits = match.group(1)
+    return int(digits) if digits else 1
 
 
 def read_packet(root: Path, workflow: dict) -> PacketSnapshot:
-    root = Path(root)
-    snap = PacketSnapshot(root=root)
+    """Read the filenames present in ``root`` and classify them by the
+    roles ``workflow`` declares. A missing or non-directory ``root`` yields
+    an empty snapshot rather than an error. A file fills at most one role:
+    the brief is checked first, then the artifact family.
+    """
     if not root.is_dir():
-        return snap
+        return PacketSnapshot(root=root)
 
-    snap.files = sorted(p.name for p in root.iterdir() if p.is_file())
+    files = sorted(p.name for p in root.iterdir() if p.is_file())
 
-    family = workflow.get("artifact", {}).get("family", "draft")
-    canonical = workflow.get("artifact", {}).get("canonical")
-    round_pattern = _round_pattern(workflow)
-    best_version = -1
+    brief_glob = workflow.get("brief")
+    brief = None
+    if brief_glob:
+        for name in files:
+            if fnmatch.fnmatch(name, brief_glob):
+                brief = name
+                break
 
-    for name in snap.files:
-        if name.endswith("-brief.md") or name == "brief.md":
-            snap.brief = name
-            snap.brief_frontmatter = _parse_frontmatter((root / name).read_text())
-            continue
+    brief_frontmatter: dict = {}
+    if brief is not None:
+        brief_frontmatter = _parse_frontmatter((root / brief).read_text())
 
-        version = _artifact_family_match(name, family)
-        if version is not None and version > best_version:
-            best_version = version
-            snap.artifact = name
-            continue
+    artifact_config = workflow.get("artifact") or {}
+    family = artifact_config.get("family")
 
-        round_match = round_pattern.fullmatch(name)
-        if round_match:
-            number = int(round_match.group(1))
-            snap.rounds[number] = RoundInfo(number=number)
+    artifact = None
+    best_version: int | None = None
+    if family:
+        for name in files:
+            if name == brief:
+                continue
+            version = _family_version(name, family)
+            if version is None:
+                continue
+            if best_version is None or version > best_version:
+                best_version = version
+                artifact = name
 
-    if snap.artifact is not None and canonical:
-        snap.artifact_canonical = snap.artifact == canonical
+    artifact_canonical = artifact is not None and artifact == artifact_config.get(
+        "canonical"
+    )
 
-    snap.runs = read_entries(root)
-    return snap
+    runs = read_entries(root)
+
+    return PacketSnapshot(
+        root=root,
+        files=files,
+        brief=brief,
+        brief_frontmatter=brief_frontmatter,
+        artifact=artifact,
+        artifact_canonical=artifact_canonical,
+        runs=runs,
+    )

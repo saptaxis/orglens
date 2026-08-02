@@ -2,33 +2,74 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orglens.workflow.predicates import PREDICATE_NAMES, evaluate
+from orglens.workflow.predicates import STATIC_PREDICATES, evaluate, predicate_names
 from orglens.workflow.snapshot import read_packet
 
 WORKFLOW = {
-    "artifact": {"family": "draft", "canonical": "draft.md", "history": "git"},
-    "rounds": {"record": "decisions-{NN}.md", "closed_by": ["revise"]},
+    "brief": "*-brief.md",
+    "artifact": {"family": "draft", "canonical": "draft.md"},
+    "nodes": {
+        "brief": {"mutates": True},
+        "draft": {"mutates": True},
+        "critique": {"diagnoses": True},
+        "revise": {"mutates": True},
+        "audit": {"diagnoses": True},
+    },
 }
 
 
 def facts(tmp_path: Path) -> dict[str, bool]:
-    return evaluate(read_packet(tmp_path, WORKFLOW))
+    return evaluate(read_packet(tmp_path, WORKFLOW), WORKFLOW)
+
+
+def log(tmp_path: Path, *nodes: str) -> None:
+    (tmp_path / "runs.jsonl").write_text(
+        "".join(
+            '{"type":"node_completed","node":"%s","at":"t","event_id":"%d"}\n' % (n, i)
+            for i, n in enumerate(nodes)
+        )
+    )
+
+
+def content(tmp_path: Path) -> None:
+    (tmp_path / "writing-brief.md").write_text("# Brief")
+    (tmp_path / "draft.md").write_text("prose")
+
+
+def test_the_static_set_is_four():
+    assert len(STATIC_PREDICATES) == 4
+
+
+def test_the_generated_names_come_from_the_deck():
+    assert predicate_names(WORKFLOW) == STATIC_PREDICATES | {
+        "awaiting_mutation",
+        "last_diagnostic_is_critique",
+        "last_diagnostic_is_audit",
+    }
+
+
+def test_a_deck_with_different_node_names_gets_different_predicates():
+    """The engine knows no node names of its own."""
+    other = {"nodes": {"inspect": {"diagnoses": True}, "fix": {"mutates": True}}}
+    assert "last_diagnostic_is_inspect" in predicate_names(other)
+    assert not any("critique" in n for n in predicate_names(other))
+
+
+def test_every_declared_predicate_is_returned(tmp_path: Path):
+    assert set(facts(tmp_path)) == set(predicate_names(WORKFLOW))
 
 
 def test_empty_packet(tmp_path: Path):
     f = facts(tmp_path)
     assert f["brief_exists"] is False
     assert f["artifact_exists"] is False
-    assert f["no_rounds"] is True
-    assert f["round_open"] is False
+    assert f["awaiting_mutation"] is False
 
 
-def test_brief_and_artifact_present(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    (tmp_path / "draft.md").write_text("prose")
+def test_brief_and_artifact(tmp_path: Path):
+    content(tmp_path)
     f = facts(tmp_path)
-    assert f["brief_exists"] is True
-    assert f["artifact_exists"] is True
+    assert f["brief_exists"] and f["artifact_exists"]
     assert f["artifact_noncanonical"] is False
 
 
@@ -39,50 +80,41 @@ def test_noncanonical_artifact(tmp_path: Path):
 
 
 def test_published_frontmatter(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text(
-        "---\npublished: https://example.com/x\n---\n"
-    )
+    (tmp_path / "writing-brief.md").write_text("---\npublished: https://x/y\n---\n")
     assert facts(tmp_path)["brief_published"] is True
 
 
-def test_a_round_with_no_closing_node_is_open(tmp_path: Path):
-    """Open/closed comes from run state, never from what the round says."""
-    (tmp_path / "decisions-01.md").write_text("anything")
+def test_a_diagnostic_since_the_last_mutation(tmp_path: Path):
+    content(tmp_path)
+    log(tmp_path, "draft", "critique")
     f = facts(tmp_path)
-    assert f["round_open"] is True
-    assert f["round_closed"] is False
+    assert f["awaiting_mutation"] is True
+    assert f["last_diagnostic_is_critique"] is True
+    assert f["last_diagnostic_is_audit"] is False
 
 
-def test_a_round_a_closing_node_completed_is_closed(tmp_path: Path):
-    (tmp_path / "decisions-01.md").write_text("anything")
-    (tmp_path / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"revise","round":1,"at":"t","event_id":"1"}\n'
-    )
+def test_a_mutation_since_the_last_diagnostic(tmp_path: Path):
+    content(tmp_path)
+    log(tmp_path, "draft", "critique", "revise")
     f = facts(tmp_path)
-    assert f["round_open"] is False
-    assert f["round_closed"] is True
+    assert f["awaiting_mutation"] is False
+    assert f["last_diagnostic_is_critique"] is True
 
 
-def test_which_node_opened_the_last_round(tmp_path: Path):
-    (tmp_path / "decisions-01.md").write_text("anything")
-    (tmp_path / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"critique","round":1,"at":"t","event_id":"1"}\n'
-    )
+def test_the_last_diagnostic_survives_a_mutation(tmp_path: Path):
+    """Which diagnostic ran last is what makes the cycle alternate."""
+    content(tmp_path)
+    log(tmp_path, "draft", "critique", "revise", "audit", "revise")
     f = facts(tmp_path)
-    assert f["last_round_diagnosed_by_critique"] is True
-    assert f["last_round_diagnosed_by_audit"] is False
+    assert f["awaiting_mutation"] is False
+    assert f["last_diagnostic_is_audit"] is True
+    assert f["last_diagnostic_is_critique"] is False
 
 
-def test_no_editorial_vocabulary_survives():
-    for gone in (
-        "round_unresolved",
-        "round_actionable",
-        "adoption_unresolved",
-        "open_round",
-        "no_open_round",
-    ):
-        assert gone not in PREDICATE_NAMES
-
-
-def test_every_declared_predicate_is_returned(tmp_path: Path):
-    assert set(facts(tmp_path)) == set(PREDICATE_NAMES)
+def test_no_diagnostic_yet(tmp_path: Path):
+    content(tmp_path)
+    log(tmp_path, "brief", "draft")
+    f = facts(tmp_path)
+    assert f["awaiting_mutation"] is False
+    assert f["last_diagnostic_is_critique"] is False
+    assert f["last_diagnostic_is_audit"] is False

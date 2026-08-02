@@ -14,11 +14,7 @@ def _lookup(facts: dict[str, bool], name: str) -> bool:
 
 
 def matches(guard: dict | str, facts: dict[str, bool]) -> bool:
-    """True when every present clause is satisfied.
-
-    `fallback` is positional — precedence in derive.py resolves it — so it
-    never matches through evaluation.
-    """
+    """True when every present clause is satisfied."""
     if not isinstance(guard, dict) or not guard:
         return False
 

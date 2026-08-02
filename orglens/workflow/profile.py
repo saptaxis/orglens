@@ -26,7 +26,7 @@ def load_profile(
     packet: Path, workflow: dict, brief_frontmatter: dict
 ) -> tuple[str, dict]:
     """Resolve the packet's profile. Fails loudly rather than guessing (I7)."""
-    marker_name = workflow.get("marker", "writing.yaml")
+    marker_name = workflow["marker"]
     marker = find_marker(Path(packet), marker_name)
     if marker is None:
         raise FileNotFoundError(

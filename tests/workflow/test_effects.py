@@ -3,7 +3,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from orglens.workflow.effects import check_delta, revert
+import pytest
+
+from orglens.workflow.effects import VerificationUnavailable, check_delta, revert
 
 
 def git_repo(tmp_path: Path) -> Path:
@@ -55,6 +57,17 @@ def test_new_files_are_not_modifications(tmp_path: Path):
     (repo / "decisions-01.md").write_text("## Proposed\n")
     node = {"writes": ["decisions-01.md"], "must_not_modify": ["**"]}
     assert check_delta(repo, node) == []
+
+
+def test_outside_a_repo_verification_is_unavailable_not_clean(tmp_path: Path):
+    """`git diff` fails with no repository to diff against. Returning `[]`
+    there would report every packet outside a repo as clean forever — a
+    pass overwriting a protected file would be recorded as a clean
+    completion. This must be distinguishable from a real "nothing changed"."""
+    (tmp_path / "writing-brief.md").write_text("# Brief\n")
+    (tmp_path / "draft.md").write_text("v2\n")
+    with pytest.raises(VerificationUnavailable):
+        check_delta(tmp_path, NODE)
 
 
 def test_revert_restores_a_protected_file(tmp_path: Path):
