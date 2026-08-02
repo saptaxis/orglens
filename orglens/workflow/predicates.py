@@ -1,71 +1,72 @@
-"""Named predicates over a packet snapshot.
+"""Facts about a packet, answered from a snapshot and the deck alone.
 
-Booleans only, over filenames, frontmatter, and recorded facts. Nothing here
-reads a document body — what a round *says* is data for the next node, and the
-human's decision reaches the engine as "a human acted", never as parsed prose.
-
-Keep the set small: the exclusivity check in validate.py covers fixtures across
-this vocabulary, and every addition widens the space those fixtures cover.
+There is no round vocabulary here. Artifacts are one canonical file with git
+as their history, so the only questions worth asking of the run log are
+sequence questions: has a diagnostic completed since the last mutation
+(``awaiting_mutation``), and which one it was (``last_diagnostic_is_{node}``).
+The deck says which of its nodes mutate the artifact and which diagnose it;
+this module never learns a node's name of its own, and generates the
+sequence predicates fresh from whatever the deck declares.
 """
 
 from __future__ import annotations
 
+from orglens.workflow.runstate import last_completed
 from orglens.workflow.snapshot import PacketSnapshot
 
-PREDICATE_NAMES = frozenset(
+STATIC_PREDICATES: frozenset[str] = frozenset(
     {
         "brief_exists",
         "brief_published",
         "artifact_exists",
         "artifact_noncanonical",
-        "no_rounds",
-        "round_open",
-        "round_closed",
-        "last_round_diagnosed_by_critique",
-        "last_round_diagnosed_by_audit",
     }
 )
 
-#: Nodes whose completion closes a round. Overridable per deck via
-#: `rounds.closed_by`; the default matches the writing deck.
-DEFAULT_CLOSED_BY = ("revise",)
+
+def _nodes_with(workflow: dict, flag: str) -> set[str]:
+    """Names of the nodes the deck declares with ``flag: true``."""
+    nodes = workflow.get("nodes") or {}
+    return {name for name, spec in nodes.items() if (spec or {}).get(flag)}
 
 
-def _completed(snapshot: PacketSnapshot, node: str, round_number: int) -> bool:
-    return any(
-        entry.get("type") == "node_completed"
-        and entry.get("node") == node
-        and entry.get("round") == round_number
-        for entry in snapshot.runs
-    )
+def predicate_names(workflow: dict) -> frozenset[str]:
+    """The complete predicate vocabulary for ``workflow``: the static four
+    plus ``awaiting_mutation`` plus one ``last_diagnostic_is_{node}`` per
+    diagnosing node the deck declares.
+    """
+    diagnosing = _nodes_with(workflow, "diagnoses")
+    generated = {"awaiting_mutation"} | {
+        f"last_diagnostic_is_{node}" for node in diagnosing
+    }
+    return STATIC_PREDICATES | generated
 
 
-def evaluate(snapshot: PacketSnapshot, workflow: dict | None = None) -> dict[str, bool]:
-    workflow = workflow or {}
-    closed_by = tuple(
-        workflow.get("rounds", {}).get("closed_by") or DEFAULT_CLOSED_BY
-    )
+def evaluate(snapshot: PacketSnapshot, workflow: dict) -> dict[str, bool]:
+    """Evaluate every predicate ``predicate_names(workflow)`` names against
+    ``snapshot``. Requires ``workflow`` because the sequence predicates
+    cannot be generated without the node declarations.
+    """
+    mutating = _nodes_with(workflow, "mutates")
+    diagnosing = _nodes_with(workflow, "diagnoses")
 
-    latest = max(snapshot.rounds) if snapshot.rounds else None
+    # The most recently completed node among either role settles which role
+    # is "more recent" without ever comparing timestamps: `last_completed`
+    # scans the log from the end, so whichever role it lands on first is
+    # the one that happened last.
+    last_of_either = last_completed(snapshot.runs, mutating | diagnosing)
+    last_diagnostic = last_completed(snapshot.runs, diagnosing)
+    awaiting_mutation = last_of_either is not None and last_of_either in diagnosing
 
-    if latest is None:
-        closed = False
-        open_round = False
-    else:
-        closed = any(_completed(snapshot, node, latest) for node in closed_by)
-        open_round = not closed
-
-    return {
+    facts: dict[str, bool] = {
         "brief_exists": snapshot.brief is not None,
         "brief_published": bool(snapshot.brief_frontmatter.get("published")),
         "artifact_exists": snapshot.artifact is not None,
         "artifact_noncanonical": snapshot.artifact is not None
         and not snapshot.artifact_canonical,
-        "no_rounds": latest is None,
-        "round_open": open_round,
-        "round_closed": latest is not None and closed,
-        "last_round_diagnosed_by_critique": latest is not None
-        and _completed(snapshot, "critique", latest),
-        "last_round_diagnosed_by_audit": latest is not None
-        and _completed(snapshot, "audit", latest),
+        "awaiting_mutation": awaiting_mutation,
     }
+    for node in diagnosing:
+        facts[f"last_diagnostic_is_{node}"] = last_diagnostic == node
+
+    return facts
