@@ -40,21 +40,39 @@ def test_artifact_family_rule_highest_version_wins(tmp_path: Path):
     assert snap.artifact == "draft-v2.md"
 
 
-def test_parses_round_sections(tmp_path: Path):
-    (tmp_path / "decisions-01.md").write_text(
-        "## Proposed\n- a\n\n## Accept\n- b\n- c\n\n## Reject\n"
-    )
+def test_round_pattern_comes_from_the_workflow_not_the_engine(tmp_path: Path):
+    """No decisions-NN regex in the engine. The deck declares its pattern."""
+    (tmp_path / "decisions-01.md").write_text("anything at all")
+    (tmp_path / "decisions-02.md").write_text("anything at all")
     snap = read_packet(tmp_path, WORKFLOW)
-    assert set(snap.rounds) == {1}
-    assert snap.rounds[1].sections["Proposed"] == ["a"]
-    assert snap.rounds[1].sections["Accept"] == ["b", "c"]
-    assert snap.rounds[1].sections["Reject"] == []
+    assert sorted(snap.rounds) == [1, 2]
 
 
-def test_reads_run_log(tmp_path: Path):
+def test_a_deck_may_use_a_different_round_pattern(tmp_path: Path):
+    (tmp_path / "review-03.md").write_text("x")
+    other = {**WORKFLOW, "rounds": {"record": "review-{NN}.md"}}
+    snap = read_packet(tmp_path, other)
+    assert sorted(snap.rounds) == [3]
+
+
+def test_the_snapshot_does_not_read_document_bodies(tmp_path: Path):
+    """RoundInfo carries a number and nothing else. What a round *says* is
+    data for the next node, never routing input."""
+    (tmp_path / "decisions-01.md").write_text("## Accept\n- something\n")
+    snap = read_packet(tmp_path, WORKFLOW)
+    assert snap.rounds[1].number == 1
+    assert not hasattr(snap.rounds[1], "sections")
+
+
+def test_adoption_is_not_a_snapshot_concept(tmp_path: Path):
+    (tmp_path / "adoption.md").write_text("## Proposed\n- x\n")
+    snap = read_packet(tmp_path, WORKFLOW)
+    assert not hasattr(snap, "adoption")
+
+
+def test_run_state_entries_are_read(tmp_path: Path):
     (tmp_path / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"critique","round":1}\n'
-        '{"type":"node_completed","node":"revise","round":1}\n'
+        '{"type":"node_completed","node":"critique","round":1,"at":"t","event_id":"1"}\n'
     )
     snap = read_packet(tmp_path, WORKFLOW)
-    assert [r["node"] for r in snap.runs] == ["critique", "revise"]
+    assert snap.runs[0]["node"] == "critique"

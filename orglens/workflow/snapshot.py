@@ -1,26 +1,27 @@
-"""Packet snapshot — pure filesystem facts for one unit of work."""
+"""Packet snapshot — filenames, frontmatter, and recorded facts.
+
+The engine does not open a file it did not write. What a document *says* is
+data for the next node; the only things routing may see are which files exist,
+what their frontmatter declares, and what run state records.
+
+That line is why `SECTION_NAMES` and a `decisions-NN` regex used to live here
+and no longer do: both made the deck-agnostic layer know what an essay is.
+"""
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
-SECTION_NAMES = ("Proposed", "Accept", "Modify", "Reject", "Auto-applied")
+from orglens.workflow.runstate import read_entries
 
 
 @dataclass
 class RoundInfo:
     number: int
-    sections: dict[str, list[str]] = field(default_factory=dict)
-
-
-@dataclass
-class AdoptionInfo:
-    sections: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -32,7 +33,6 @@ class PacketSnapshot:
     artifact: str | None = None
     artifact_canonical: bool = True
     rounds: dict[int, RoundInfo] = field(default_factory=dict)
-    adoption: AdoptionInfo | None = None
     runs: list[dict] = field(default_factory=list)
 
 
@@ -45,32 +45,29 @@ def _parse_frontmatter(text: str) -> dict:
     return yaml.safe_load(text[3:end]) or {}
 
 
-def _parse_sections(text: str) -> dict[str, list[str]]:
-    out: dict[str, list[str]] = {}
-    current = None
-    for line in text.split("\n"):
-        heading = re.match(r"^##\s+(.+?)\s*$", line)
-        if heading:
-            name = heading.group(1)
-            current = name if name in SECTION_NAMES else None
-            if current:
-                out[current] = []
-            continue
-        if current and line.startswith("- "):
-            out[current].append(line[2:].strip())
-    return out
-
-
 def _artifact_family_match(name: str, family: str) -> int | None:
-    """Return the version number if `name` is a member of the artifact family.
+    """Version number if `name` belongs to the artifact family.
 
-    Permissive per I1a: draft.md, draft2.md, draft-v2.md, draft-v1.md all parse.
-    A bare name is version 1.
+    Permissive per I1a: draft.md, draft2.md, draft-v2.md all parse, and a bare
+    name is version 1.
     """
-    m = re.fullmatch(rf"{re.escape(family)}[-_]?v?(\d*)\.md", name)
-    if not m:
+    match = re.fullmatch(rf"{re.escape(family)}[-_]?v?(\d*)\.md", name)
+    if not match:
         return None
-    return int(m.group(1)) if m.group(1) else 1
+    return int(match.group(1)) if match.group(1) else 1
+
+
+def _round_pattern(workflow: dict) -> re.Pattern:
+    """Compile the deck's declared round record pattern.
+
+    `decisions-{NN}.md` -> decisions-(\\d+)\\.md. The engine has no default;
+    a deck that records rounds must say how.
+    """
+    record = workflow.get("rounds", {}).get("record")
+    if not record:
+        return re.compile(r"(?!)")  # matches nothing
+    escaped = re.escape(record).replace(re.escape("{NN}"), r"(\d+)")
+    return re.compile(escaped)
 
 
 def read_packet(root: Path, workflow: dict) -> PacketSnapshot:
@@ -82,6 +79,8 @@ def read_packet(root: Path, workflow: dict) -> PacketSnapshot:
     snap.files = sorted(p.name for p in root.iterdir() if p.is_file())
 
     family = workflow.get("artifact", {}).get("family", "draft")
+    canonical = workflow.get("artifact", {}).get("canonical")
+    round_pattern = _round_pattern(workflow)
     best_version = -1
 
     for name in snap.files:
@@ -96,28 +95,13 @@ def read_packet(root: Path, workflow: dict) -> PacketSnapshot:
             snap.artifact = name
             continue
 
-        round_match = re.fullmatch(r"decisions-(\d+)\.md", name)
+        round_match = round_pattern.fullmatch(name)
         if round_match:
-            n = int(round_match.group(1))
-            snap.rounds[n] = RoundInfo(
-                number=n, sections=_parse_sections((root / name).read_text())
-            )
-            continue
+            number = int(round_match.group(1))
+            snap.rounds[number] = RoundInfo(number=number)
 
-        if name == "adoption.md":
-            snap.adoption = AdoptionInfo(
-                sections=_parse_sections((root / name).read_text())
-            )
-
-    canonical = workflow.get("artifact", {}).get("canonical")
     if snap.artifact is not None and canonical:
         snap.artifact_canonical = snap.artifact == canonical
 
-    runs_path = root / "runs.jsonl"
-    if runs_path.exists():
-        for line in runs_path.read_text().splitlines():
-            line = line.strip()
-            if line:
-                snap.runs.append(json.loads(line))
-
+    snap.runs = read_entries(root)
     return snap
