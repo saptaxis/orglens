@@ -2,29 +2,32 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orglens.workflow.job import resolve_job
+from orglens.workflow.job import STRUCTURAL, resolve_job
 
 WORKFLOW = {
     "marker": "writing.yaml",
+    "brief": "*-brief.md",
     "artifact": {"family": "draft", "canonical": "draft.md"},
-    "rounds": {"record": "decisions-{NN}.md", "closed_by": ["revise"]},
     "nodes": {
         "critique": {
             "role": "references/roles/critic.md",
             "reads": ["@brief", "@artifact", "@profile.voice"],
-            "writes": ["decisions-{next}.md"],
+            "writes": ["findings.md"],
             "must_not_modify": ["**"],
             "requires": {"interpreter": "not-the-producer"},
             "human_review": True,
             "expect": "revise",
-        }
+            "diagnoses": True,
+        },
+        "revise": {"role": "references/roles/liner.md", "writes": ["draft.md"]},
     },
 }
 
 
 def build(tmp_path: Path) -> tuple[Path, Path]:
     (tmp_path / "writing.yaml").write_text(
-        "default: portfolio\nprofiles:\n  portfolio: {voice: references/voice/portfolio.md}\n"
+        "default: portfolio\n"
+        "profiles:\n  portfolio: {voice: references/voice/portfolio.md}\n"
     )
     packet = tmp_path / "a-piece"
     packet.mkdir()
@@ -36,6 +39,10 @@ def build(tmp_path: Path) -> tuple[Path, Path]:
     (deck / "references" / "roles" / "critic.md").write_text("# critic")
     (deck / "references" / "voice" / "portfolio.md").write_text("# voice")
     return packet, deck
+
+
+def test_three_structural_references():
+    assert STRUCTURAL == ("@brief", "@artifact", "@runstate")
 
 
 def test_every_path_is_absolute(tmp_path: Path):
@@ -58,26 +65,32 @@ def test_profile_reference_resolves_against_the_deck(tmp_path: Path):
     assert str(deck / "references" / "voice" / "portfolio.md") in job.reads
 
 
-def test_the_next_round_number_is_resolved(tmp_path: Path):
+def test_writes_are_literal(tmp_path: Path):
+    """Nothing is numbered, so nothing is templated."""
     packet, deck = build(tmp_path)
     job = resolve_job(packet, deck, WORKFLOW, "critique")
-    assert job.writes == [str(packet / "decisions-01.md")]
-    assert "{next}" not in job.writes[0]
+    assert job.writes == [str(packet / "findings.md")]
 
 
-def test_the_next_round_number_increments(tmp_path: Path):
+def test_a_file_named_twice_is_read_once(tmp_path: Path):
     packet, deck = build(tmp_path)
-    (packet / "decisions-01.md").write_text("x")
-    job = resolve_job(packet, deck, WORKFLOW, "critique")
-    assert job.writes == [str(packet / "decisions-02.md")]
+    wf = {**WORKFLOW}
+    wf["nodes"] = {**WORKFLOW["nodes"]}
+    wf["nodes"]["critique"] = {
+        **WORKFLOW["nodes"]["critique"],
+        "reads": ["@artifact", "draft.md"],
+    }
+    job = resolve_job(packet, deck, wf, "critique")
+    assert job.reads.count(str(packet / "draft.md")) == 1
 
 
-def test_double_star_expands_to_actual_files_minus_declared_writes(tmp_path: Path):
+def test_double_star_expands_to_present_files_minus_declared_writes(tmp_path: Path):
     packet, deck = build(tmp_path)
+    (packet / "findings.md").write_text("old findings")
     job = resolve_job(packet, deck, WORKFLOW, "critique")
     names = {Path(p).name for p in job.must_not_modify}
     assert names == {"writing-brief.md", "draft.md"}
-    assert "decisions-01.md" not in names
+    assert "runs.jsonl" not in names
 
 
 def test_the_role_path_is_deck_relative(tmp_path: Path):
@@ -95,20 +108,9 @@ def test_declaration_fields_carry_through(tmp_path: Path):
     assert job.profile == "portfolio"
 
 
-def test_rounds_resolves_to_declared_round_records_only(tmp_path: Path):
-    """@rounds meant 'everything that is not the brief or artifact', which
-    swept up adoption.md, stray drafts, and the run log."""
+def test_an_undeclared_node_is_an_error(tmp_path: Path):
     packet, deck = build(tmp_path)
-    (packet / "decisions-01.md").write_text("x")
-    (packet / "adoption.md").write_text("x")
-    (packet / "draft-v1.md").write_text("superseded")
-    wf = {**WORKFLOW, "nodes": {"n": {"reads": ["@rounds"], "writes": []}}}
-    job = resolve_job(packet, deck, wf, "n")
-    assert [Path(p).name for p in job.reads] == ["decisions-01.md"]
+    import pytest
 
-
-def test_a_file_named_twice_is_read_once(tmp_path: Path):
-    packet, deck = build(tmp_path)
-    wf = {**WORKFLOW, "nodes": {"n": {"reads": ["@brief", "@brief"], "writes": []}}}
-    job = resolve_job(packet, deck, wf, "n")
-    assert len(job.reads) == 1
+    with pytest.raises(KeyError, match="nonesuch"):
+        resolve_job(packet, deck, WORKFLOW, "nonesuch")
