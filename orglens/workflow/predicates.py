@@ -25,9 +25,17 @@ STATIC_PREDICATES: frozenset[str] = frozenset(
 
 
 def _nodes_with(workflow: dict, flag: str) -> set[str]:
-    """Names of the nodes the deck declares with ``flag: true``."""
+    """Names of the nodes the deck declares with ``flag: true``. A node
+    whose value is not a dict declares nothing and is skipped rather than
+    raising — reporting that shape as a problem is `validate_definition`'s
+    job, not this one's.
+    """
     nodes = workflow.get("nodes") or {}
-    return {name for name, spec in nodes.items() if (spec or {}).get(flag)}
+    return {
+        name
+        for name, spec in nodes.items()
+        if isinstance(spec, dict) and spec.get(flag)
+    }
 
 
 def predicate_names(workflow: dict) -> frozenset[str]:

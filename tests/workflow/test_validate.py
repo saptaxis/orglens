@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from orglens.workflow.validate import validate_definition
 
 BASE = {
@@ -86,3 +88,70 @@ def test_a_diagnostic_must_protect_the_artifact():
         }
     }
     assert any("must_not_modify" in p for p in validate_definition(broken))
+
+
+# `derive_next_node` does not catch the KeyError guard evaluation raises for
+# an unknown predicate; `validate_definition` is the only gate against a
+# malformed definition, so it must survive every shape below without
+# raising rather than crashing the caller it exists to protect.
+MALFORMED_SHAPES = [
+    pytest.param({}, id="empty workflow"),
+    pytest.param({"nodes": {}}, id="empty nodes"),
+    pytest.param({"nodes": None}, id="nodes is None"),
+    pytest.param({"nodes": {"x": "not-a-dict"}}, id="node value is a string"),
+    pytest.param({"nodes": {"x": None}}, id="node value is None"),
+    pytest.param({"nodes": {"x": {"guard": "not-a-dict"}}}, id="guard is a string"),
+    pytest.param({"nodes": {"x": {"guard": None}}}, id="guard is None"),
+    pytest.param(
+        {"nodes": {"x": {"guard": {"all": "brief_exists"}}}},
+        id="guard clause value is a string",
+    ),
+    pytest.param(
+        {"nodes": {}, "terminal": "not-a-dict"}, id="terminal present but not a dict"
+    ),
+    pytest.param(
+        {
+            "nodes": {
+                "x": "not-a-dict",
+                "y": {"guard": {"all": "brief_exists"}},
+                "z": {"mutates": True, "diagnoses": True, "guard": {"all": []}},
+            },
+            "terminal": "not-a-dict",
+        },
+        id="several distinct problems at once",
+    ),
+]
+
+
+@pytest.mark.parametrize("workflow", MALFORMED_SHAPES)
+def test_malformed_shapes_are_reported_not_raised(workflow):
+    problems = validate_definition(workflow)
+    assert isinstance(problems, list)
+
+
+def test_a_node_that_is_not_a_mapping_is_reported():
+    broken = {"nodes": {"x": "not-a-dict"}}
+    assert any("x" in p for p in validate_definition(broken))
+
+
+def test_a_guard_clause_that_is_not_a_list_is_reported():
+    broken = {"nodes": {"x": {"guard": {"all": "brief_exists"}}}}
+    assert validate_definition(broken) != []
+
+
+def test_a_terminal_that_is_not_a_mapping_is_reported():
+    broken = {"nodes": {}, "terminal": "not-a-dict"}
+    assert any("terminal" in p for p in validate_definition(broken))
+
+
+def test_several_distinct_problems_are_all_returned():
+    broken = {
+        "nodes": {
+            "x": "not-a-dict",
+            "y": {"guard": {"all": "brief_exists"}},
+            "z": {"mutates": True, "diagnoses": True, "guard": {"all": []}},
+        },
+        "terminal": "not-a-dict",
+    }
+    problems = validate_definition(broken)
+    assert len(problems) >= 4

@@ -20,10 +20,22 @@ from orglens.workflow.predicates import predicate_names
 _OUTCOME_NAMES = frozenset({"runnable", "terminal", "ambiguous", "malformed", "unknown"})
 
 
-def _guard_predicates(guard: dict) -> set[str]:
+def _guard_predicates(guard: dict, node: str, problems: list[str]) -> set[str]:
+    """Names of the predicates a guard cites. A clause whose value is not a
+    list (a bare string, for instance) is reported and skipped rather than
+    iterated character by character.
+    """
     names: set[str] = set()
     for clause in ("all", "any", "none"):
-        names.update(guard.get(clause) or [])
+        if clause not in guard:
+            continue
+        value = guard[clause]
+        if not isinstance(value, list):
+            problems.append(
+                f"node {node!r} guard clause {clause!r} is not a list: {value!r}"
+            )
+            continue
+        names.update(value)
     return names
 
 
@@ -39,13 +51,16 @@ def validate_definition(workflow: dict) -> list[str]:
     known_predicates = predicate_names(workflow)
 
     for name, spec in nodes.items():
-        spec = spec or {}
+        if not isinstance(spec, dict):
+            problems.append(f"node {name!r} is not a mapping: {spec!r}")
+            continue
+
         guard = spec.get("guard")
 
         if not isinstance(guard, dict) or not guard:
             problems.append(f"node {name!r} has no usable guard: {guard!r}")
         else:
-            for predicate in sorted(_guard_predicates(guard)):
+            for predicate in sorted(_guard_predicates(guard, name, problems)):
                 if predicate not in known_predicates:
                     problems.append(
                         f"node {name!r} guards on unknown predicate {predicate!r}"
@@ -71,10 +86,14 @@ def validate_definition(workflow: dict) -> list[str]:
                     "node nor an outcome"
                 )
 
-    for label, predicate in (workflow.get("terminal") or {}).items():
-        if predicate not in known_predicates:
-            problems.append(
-                f"terminal {label!r} names unknown predicate {predicate!r}"
-            )
+    terminal = workflow.get("terminal")
+    if terminal is not None and not isinstance(terminal, dict):
+        problems.append(f"terminal is not a mapping: {terminal!r}")
+    else:
+        for label, predicate in (terminal or {}).items():
+            if predicate not in known_predicates:
+                problems.append(
+                    f"terminal {label!r} names unknown predicate {predicate!r}"
+                )
 
     return problems
