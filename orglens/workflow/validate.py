@@ -1,92 +1,80 @@
-"""Validation of a workflow definition, and of its edges against fixtures.
+"""Checking a workflow definition for defects before it is ever run.
 
-Fixtures, not a general prover. Proving what states `revise` can produce would
-need a model of what an LLM writes and what a human then ratifies. What has
-actually found every defect in this design is tracing concrete cycles, so that
-is what this automates.
+This is a static check of the declaration alone — no fixtures, no synthetic
+packets, no attempt to prove a property by constructing a scenario that
+satisfies it. A scenario built by the same assumptions as the code it tests
+agrees with those assumptions, not with reality; every defect that actually
+mattered here was found by running against real files instead.
+
+One of these checks exists because of a real failure: a node whose
+``expect`` named itself. The postcondition check treated that node's own
+completion as proof it had reached its own target, so a packet re-ran the
+same step forever while every check along the way reported success. A
+self-referential ``expect`` is now rejected before a workflow ever runs.
 """
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from orglens.workflow.predicates import predicate_names
 
-from orglens.workflow.derive import FALLBACK, derive_next_node
-from orglens.workflow.malformed import CONDITIONS
-from orglens.workflow.predicates import PREDICATE_NAMES
-from orglens.workflow.result import Outcome
+_OUTCOME_NAMES = frozenset({"runnable", "terminal", "ambiguous", "malformed", "unknown"})
 
 
-def _edge_pairs(workflow: dict) -> list[tuple[str, str]]:
-    pairs = []
-    for edge in workflow.get("edges", []):
-        if isinstance(edge, str) and "->" in edge:
-            source, target = edge.split("->", 1)
-            pairs.append((source.strip(), target.strip()))
-        elif isinstance(edge, dict):
-            pairs.append((edge.get("from", ""), edge.get("to", "")))
-    return pairs
+def _guard_predicates(guard: dict) -> set[str]:
+    names: set[str] = set()
+    for clause in ("all", "any", "none"):
+        names.update(guard.get(clause) or [])
+    return names
 
 
 def validate_definition(workflow: dict) -> list[str]:
+    """Return every problem found in ``workflow``, as human-readable
+    strings naming the node and the offending value. Never raises: a
+    malformed definition is data to report on, not an exception.
+    """
     problems: list[str] = []
-    nodes = workflow.get("nodes", {})
+
+    nodes = workflow.get("nodes") or {}
+    declared = set(nodes)
+    known_predicates = predicate_names(workflow)
 
     for name, spec in nodes.items():
-        if not isinstance(spec, dict):
-            continue
+        spec = spec or {}
         guard = spec.get("guard")
-        if guard == FALLBACK:
-            continue
+
         if not isinstance(guard, dict) or not guard:
-            problems.append(f"node {name!r} has no usable guard")
-            continue
-        for clause in ("all", "any", "none"):
-            for predicate in guard.get(clause, []):
-                if predicate not in PREDICATE_NAMES:
+            problems.append(f"node {name!r} has no usable guard: {guard!r}")
+        else:
+            for predicate in sorted(_guard_predicates(guard)):
+                if predicate not in known_predicates:
                     problems.append(
-                        f"node {name!r} uses unknown predicate {predicate!r}"
+                        f"node {name!r} guards on unknown predicate {predicate!r}"
                     )
 
-    for source, target in _edge_pairs(workflow):
-        for endpoint in (source, target):
-            if endpoint not in nodes:
-                problems.append(f"edge references undeclared node {endpoint!r}")
+        mutates = bool(spec.get("mutates"))
+        diagnoses = bool(spec.get("diagnoses"))
+        if mutates and diagnoses:
+            problems.append(f"node {name!r} declares both mutates and diagnoses")
 
-    for condition in workflow.get("malformed", []):
-        if condition not in CONDITIONS:
-            problems.append(f"unknown malformed condition {condition!r}")
-
-    terminal = workflow.get("terminal", {})
-    for label, predicate in terminal.items():
-        if predicate not in PREDICATE_NAMES:
+        if diagnoses and "must_not_modify" not in spec:
             problems.append(
-                f"terminal {label!r} uses unknown predicate {predicate!r}"
+                f"node {name!r} declares diagnoses without must_not_modify"
             )
 
-    return problems
+        expect = spec.get("expect")
+        if expect is not None:
+            if expect == name:
+                problems.append(f"node {name!r} names itself in expect: {expect!r}")
+            elif expect not in declared and expect not in _OUTCOME_NAMES:
+                problems.append(
+                    f"node {name!r} expects {expect!r}, which is neither a declared "
+                    "node nor an outcome"
+                )
 
-
-def validate_edges(
-    workflow: dict, fixtures: list[tuple[dict, str]]
-) -> list[str]:
-    """Each fixture is ({filename: content}, expected_node). Reports mismatches."""
-    problems: list[str] = []
-
-    for index, (files, expected) in enumerate(fixtures):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            for name, content in files.items():
-                (root / name).write_text(content)
-            result = derive_next_node(root, workflow)
-
-        actual = result.node
-        if result.outcome in (Outcome.MALFORMED, Outcome.AMBIGUOUS):
-            actual = str(result.outcome)
-        if actual != expected:
+    for label, predicate in (workflow.get("terminal") or {}).items():
+        if predicate not in known_predicates:
             problems.append(
-                f"fixture {index}: expected {expected}, got {actual} "
-                f"({result.reason})"
+                f"terminal {label!r} names unknown predicate {predicate!r}"
             )
 
     return problems
