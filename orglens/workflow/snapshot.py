@@ -6,9 +6,9 @@ the artifact is found by the family it declares in ``workflow["artifact"]``.
 The only filename this module names itself is ``runs.jsonl``, and it does
 not even open that file directly — ``read_entries`` does.
 
-Artifacts are one canonical file with git as their history, so there is no
-concept of a numbered round here. A file the deck did not declare is just a
-name in ``files``; the engine never opens it.
+Artifacts are one canonical file with git as their history: each write lands
+on the same name, and the history lives in the commits. A file the deck did
+not declare is just a name in ``files``; the engine never opens it.
 """
 
 from __future__ import annotations

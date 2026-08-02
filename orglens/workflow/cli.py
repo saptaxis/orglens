@@ -7,6 +7,7 @@ exiting, so --json is the primary interface.
 from __future__ import annotations
 
 import json as json_module
+import subprocess
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -17,9 +18,14 @@ from orglens.workflow import blocking
 from orglens.workflow.definition import load_workflow
 from orglens.workflow.derive import derive_next_node
 from orglens.workflow.job import resolve_job
+from orglens.workflow.orchestrator import step
 from orglens.workflow.result import Outcome
-from orglens.workflow.runlog import append_fact, workflow_version
-from orglens.workflow.runstate import read_entries, unresolved_needs_human
+from orglens.workflow.runstate import (
+    append_fact,
+    read_entries,
+    unresolved_needs_human,
+    workflow_version,
+)
 from orglens.workflow.validate import validate_definition
 
 FAILING = {Outcome.MALFORMED, Outcome.AMBIGUOUS, Outcome.UNKNOWN}
@@ -95,13 +101,14 @@ def check(workflow_path: str):
 @click.argument("packet", type=click.Path(exists=True, file_okay=False))
 @click.option("--workflow", "workflow_path", required=True,
               help="Path to WORKFLOW.yaml.")
+@click.option("--deck", required=True, help="Deck root, to resolve the pass's declared writes.")
 @click.option("--node", required=True, help="The node that just ran.")
 @click.option("--agent", default=None, help="Which family performed the pass.")
 @click.option("--session", default=None, help="Session id of the performer.")
-@click.option("--round", "round_number", type=int, default=None,
-              help="Round this pass belongs to. Required for nodes that open or close rounds.")
-def record(packet: str, workflow_path: str, node: str, agent: str | None,
-           session: str | None, round_number: int | None):
+@click.option("--question", default=None,
+              help="Raise a gate after recording — how a stuck pass blocks itself.")
+def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | None,
+           session: str | None, question: str | None):
     """Record a completed pass, then confirm the packet derives to `expect`.
 
     A node that writes files and exits has no idea whether what it wrote is
@@ -119,47 +126,102 @@ def record(packet: str, workflow_path: str, node: str, agent: str | None,
         click.echo(f"no node {node!r} in this workflow")
         raise SystemExit(2)
 
+    version = workflow_version(Path(workflow_path))
+    resolved = resolve_job(Path(packet), Path(deck), definition, node)
+    wrote = [Path(p).name for p in resolved.writes if Path(p).exists()]
+
     fact = {
         "type": "node_completed",
         "node": node,
-        "workflow_version": workflow_version(Path(workflow_path)),
+        "wrote": wrote,
+        "workflow_version": version,
     }
     if agent:
         fact["agent"] = agent
     if session:
         fact["by"] = session
-    if round_number is not None:
-        fact["round"] = round_number
     append_fact(Path(packet), fact)
 
     result = derive_next_node(Path(packet), definition)
     expected = spec.get("expect")
+    actual = result.node if result.outcome == Outcome.RUNNABLE else str(result.outcome)
+
+    if expected is not None and actual != expected:
+        append_fact(
+            Path(packet),
+            {
+                "type": "needs_human",
+                "node": node,
+                "raised_by": "postcondition",
+                "question": (
+                    f"{node} expected the packet to derive to {expected}, "
+                    f"but it derives to {actual}. What it wrote does not leave "
+                    "the packet in the state the workflow expects."
+                ),
+                "workflow_version": version,
+            },
+        )
+        click.echo(f"POSTCONDITION FAILED for {node}")
+        click.echo(f"  expected {expected}, got {actual}")
+        click.echo(f"  derivation: {result.outcome} {result.node or '-'}")
+        click.echo(f"  {result.reason}")
+        raise SystemExit(1)
+
     if expected is None:
         click.echo(f"recorded {node}; no expect declared, nothing to check")
-        raise SystemExit(0)
-
-    actual = result.node if result.outcome == Outcome.RUNNABLE else str(result.outcome)
-    if actual == expected:
+    else:
         click.echo(f"recorded {node}; packet derives to {actual} as expected")
+
+    if question:
+        append_fact(
+            Path(packet),
+            {
+                "type": "needs_human",
+                "node": node,
+                "raised_by": "node",
+                "question": question,
+                "workflow_version": version,
+            },
+        )
+        click.echo(f"raised a gate: {question}")
+
+    raise SystemExit(0)
+
+
+@workflow.command()
+@click.argument("packet", type=click.Path(exists=True, file_okay=False))
+@click.option("--workflow", "workflow_path", required=True)
+@click.option("--deck", required=True, help="Deck root, for role and profile paths.")
+@click.option("--dispatch", "dispatch_cmd", default=None,
+              help="Command receiving the job as JSON on stdin. Omit to print and stop.")
+@click.option("--once", is_flag=True, help="One turn, then exit.")
+def run(packet: str, workflow_path: str, deck: str, dispatch_cmd: str | None, once: bool):
+    """Drive the loop until it stops. The driver holds nothing."""
+    definition = load_workflow(Path(workflow_path))
+
+    if dispatch_cmd is None:
+        result = derive_next_node(Path(packet), definition)
+        if result.outcome != Outcome.RUNNABLE:
+            click.echo(f"{result.outcome}: {result.reason}")
+            raise SystemExit(0)
+        resolved = resolve_job(Path(packet), Path(deck), definition, result.node)
+        click.echo(json_module.dumps(resolved.to_dict(), indent=2))
+        click.echo("no dispatcher configured; pass --dispatch to execute")
         raise SystemExit(0)
 
-    append_fact(
-        Path(packet),
-        {
-            "type": "postcondition_failed",
-            "node": node,
-            "expected": expected,
-            "derived": actual,
-            "workflow_version": workflow_version(Path(workflow_path)),
-        },
-    )
-    click.echo(f"POSTCONDITION FAILED for {node}")
-    click.echo(f"  expected {expected}, got {actual}")
-    click.echo(f"  derivation: {result.outcome} {result.node or '-'}")
-    click.echo(f"  {result.reason}")
-    click.echo("  the output this pass wrote does not leave the packet in the")
-    click.echo("  state the workflow expects. Fix it and re-derive.")
-    raise SystemExit(1)
+    def dispatch(job):
+        subprocess.run(
+            [dispatch_cmd],
+            input=json_module.dumps(job.to_dict()),
+            text=True,
+            check=True,
+        )
+
+    while True:
+        outcome = step(Path(packet), Path(deck), definition, Path(workflow_path), dispatch)
+        click.echo(f"{outcome.status}: {outcome.node or '-'}  {outcome.detail}")
+        if outcome.status != "completed" or once:
+            raise SystemExit(0 if outcome.status in ("completed", "terminal", "blocked") else 1)
 
 
 @workflow.command()
@@ -196,7 +258,7 @@ def job(packet: str, workflow_path: str, deck: str, node: str | None, as_json: b
 @click.argument("packet", type=click.Path(exists=True, file_okay=False))
 @click.option("--note", required=True, help="What you decided. Free text.")
 def resolve(packet: str, note: str):
-    """Clear the outstanding question. No dispositions — just a note."""
+    """Clear the outstanding question with a free-text note."""
     outstanding = unresolved_needs_human(read_entries(Path(packet)))
     if outstanding is None:
         click.echo("nothing outstanding to resolve")

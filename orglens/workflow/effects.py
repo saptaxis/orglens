@@ -46,7 +46,7 @@ def check_delta(packet: Path, node: dict) -> list[str]:
     """Files modified in violation of the node's `must_not_modify`.
 
     `must_not_modify: ["**"]` means *everything except this node's declared
-    writes* — a diagnostic node still creates its decisions file.
+    writes* — a diagnostic node still creates what it declares.
     """
     protected = node.get("must_not_modify") or []
     if not protected:

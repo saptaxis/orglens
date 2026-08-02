@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ORCHESTRATOR_WORKFLOW = {
     "marker": "writing.yaml",
@@ -84,7 +85,7 @@ def repo_packet(tmp_path: Path):
         (deck / card).write_text(f"# {card}")
 
     workflow_path = tmp_path / "WORKFLOW.yaml"
-    workflow_path.write_text("workflow: t\n")  # hashed for version only
+    workflow_path.write_text(yaml.safe_dump(ORCHESTRATOR_WORKFLOW))
 
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "packet")
