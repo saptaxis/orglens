@@ -1,0 +1,49 @@
+# A three-node loop, small enough to read in one sitting.
+#
+# A bug report arrives. Someone reproduces it, someone fixes it, someone checks
+# the fix. If the check fails you go round again. When it passes you close it.
+#
+# Nothing here is about bugs as far as the engine is concerned. `reproduce`,
+# `fix`, `report.md`, `CLOSED` are strings this file invents; the engine matches
+# them and never interprets them. Swap them for `plan`/`apply`/`*.tf` and the
+# same engine runs a deploy.
+
+workflow: triage
+version: 1
+roots: ["."]
+
+# One condition ends the loop: a file exists.
+terminal:
+  closed: "exists:CLOSED"
+
+nodes:
+
+  # Entry AND the loop-back edge, in one guard.
+  #   after:nothing  — the log is empty, this packet is new
+  #   after:verify   — we went round and the check did not pass
+  reproduce:
+    role: roles/reproduce.md
+    reads: [report.md, verdict.md]
+    writes: [repro.md]
+    guard:
+      any: ["after:nothing", "after:verify"]
+
+  # human_review stops the loop after this pass until someone runs `resolve`.
+  fix:
+    role: roles/fix.md
+    reads: [report.md, repro.md]
+    writes: [fix.md]
+    human_review: true
+    guard:
+      all: ["after:reproduce"]
+
+  # requires is carried into the job for whoever dispatches it. The engine does
+  # not enforce it — it is a declaration the driver honours.
+  verify:
+    role: roles/verify.md
+    reads: [repro.md, fix.md]
+    writes: [verdict.md]
+    requires:
+      interpreter: not-the-producer
+    guard:
+      all: ["after:fix"]
