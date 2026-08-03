@@ -31,6 +31,12 @@ BANNED = (
     "fallback",
     "proposed",
     "decisions",
+    "brief",
+    "published",
+    "canonical",
+    "frontmatter",
+    "profile",
+    "ratify",
 )
 
 
@@ -57,31 +63,29 @@ def test_the_outcome_enum_is_exactly_the_model():
         "runnable",
         "terminal",
         "ambiguous",
-        "malformed",
         "unknown",
     }
 
 
-def test_run_state_declares_exactly_three_kinds():
+def test_run_state_declares_exactly_four_kinds():
     from orglens.workflow.runstate import ENTRY_TYPES
 
     assert ENTRY_TYPES == frozenset(
-        {"node_completed", "needs_human", "human_resolved"}
+        {"node_completed", "resumed_at", "needs_human", "human_resolved"}
     )
 
 
-def test_the_static_predicate_set_is_exactly_four():
-    """Two more are generated per deck. These four are all the engine knows."""
-    from orglens.workflow.predicates import STATIC_PREDICATES
+def test_the_engine_declares_exactly_two_predicate_forms():
+    from orglens.workflow.predicates import EXISTS, AFTER, NOTHING
 
-    assert STATIC_PREDICATES == frozenset(
-        {
-            "brief_exists",
-            "brief_published",
-            "artifact_exists",
-            "artifact_noncanonical",
-        }
-    )
+    assert (EXISTS, AFTER, NOTHING) == ("exists:", "after:", "nothing")
+
+
+def test_there_are_no_static_predicate_names():
+    """Every predicate is parameterized by the deck. The engine names none."""
+    import orglens.workflow.predicates as p
+
+    assert not hasattr(p, "STATIC_PREDICATES")
 
 
 def test_run_state_forbids_exactly_the_present_tense_keys():
@@ -91,6 +95,22 @@ def test_run_state_forbids_exactly_the_present_tense_keys():
     assert FORBIDDEN_KEYS == frozenset(
         {"current_state", "status", "pending", "next_node", "state"}
     )
+
+
+def test_the_engine_holds_no_file_extension():
+    """`.md` in the engine means it assumed a document format."""
+    import re
+
+    for path in engine_sources():
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            assert not re.search(r"\.(md|txt|rst|docx)\b", line), (
+                f"{path.name}:{number} names a file format: {line.strip()}"
+            )
+
+
+def test_the_deleted_modules_are_gone():
+    assert not (ENGINE / "effects.py").exists()
+    assert not (ENGINE / "profile.py").exists()
 
 
 def test_the_engine_names_no_file_from_any_deck():

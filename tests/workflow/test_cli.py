@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 import subprocess
 from pathlib import Path
@@ -9,7 +8,6 @@ import yaml
 from click.testing import CliRunner
 
 from orglens.cli import cli
-from tests.workflow.conftest import ORCHESTRATOR_WORKFLOW
 from tests.workflow.test_derive import WORKFLOW
 
 
@@ -18,25 +16,14 @@ def _git(root: Path, *args: str) -> None:
 
 
 def write_workflow(root: Path) -> Path:
-    # `expect` is what `record` checks a pass against. The deriver ignores it,
-    # so declaring one for `critique` here leaves every other test in this
-    # module unchanged. A completed critique leaves the packet awaiting a
-    # mutation, which routes straight to `revise`.
-    definition = copy.deepcopy(WORKFLOW)
-    definition["nodes"]["critique"]["expect"] = "revise"
-    definition["nodes"]["critique"]["must_not_modify"] = ["**"]
-    definition["nodes"]["audit"]["must_not_modify"] = ["**"]
-
     path = root / "WORKFLOW.yaml"
-    path.write_text(yaml.safe_dump(definition))
+    path.write_text(yaml.safe_dump(WORKFLOW))
     return path
 
 
 def test_derive_reports_runnable_as_json(tmp_path: Path):
     packet = tmp_path / "packet"
     packet.mkdir()
-    (packet / "writing-brief.md").write_text("# Brief")
-    (packet / "draft.md").write_text("prose")
     wf = write_workflow(tmp_path)
 
     result = CliRunner().invoke(
@@ -45,18 +32,16 @@ def test_derive_reports_runnable_as_json(tmp_path: Path):
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["outcome"] == "runnable"
-    assert payload["node"] == "critique"
+    assert payload["node"] == "brief"
 
 
-def test_derive_reports_an_open_round_as_runnable(tmp_path: Path):
-    """A diagnostic that already completed routes straight to the mutation
-    that resolves it — nothing else needs to happen first."""
+def test_derive_walks_the_pipeline(tmp_path: Path):
+    """A completed node routes straight to the one that follows it —
+    nothing else needs to happen first."""
     packet = tmp_path / "packet"
     packet.mkdir()
-    (packet / "writing-brief.md").write_text("# Brief")
-    (packet / "draft.md").write_text("prose")
     (packet / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"critique","at":"t","event_id":"e1"}\n'
+        '{"type":"node_completed","node":"brief","at":"t","event_id":"e1"}\n'
     )
     wf = write_workflow(tmp_path)
 
@@ -66,23 +51,7 @@ def test_derive_reports_an_open_round_as_runnable(tmp_path: Path):
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["outcome"] == "runnable"
-    assert payload["node"] == "revise"
-
-
-def test_malformed_exits_nonzero(tmp_path: Path):
-    packet = tmp_path / "packet"
-    packet.mkdir()
-    (packet / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"critique","wrote":["findings.md"],'
-        '"at":"t","event_id":"e1"}\n'
-    )
-    wf = write_workflow(tmp_path)
-
-    result = CliRunner().invoke(
-        cli, ["workflow", "derive", str(packet), "--workflow", str(wf), "--json"]
-    )
-    assert result.exit_code == 1
-    assert json.loads(result.output)["outcome"] == "malformed"
+    assert payload["node"] == "draft"
 
 
 def test_missing_workflow_fails_loudly(tmp_path: Path):
@@ -112,93 +81,11 @@ def test_check_reports_an_unknown_predicate(tmp_path: Path):
     assert "bogus" in result.output
 
 
-def test_record_appends_a_fact_and_confirms_expect(repo_packet):
-    """I2: `record` now runs the same postcondition check `orchestrator.step`
-    does, including `human_review` — critique declares it, so a completed
-    critique also raises the ratification gate, the same as it would under
-    `run --dispatch`. Before I2, `record` ignored `human_review` entirely
-    and this second fact never appeared."""
-    packet, deck, wf = repo_packet
-    (packet / "findings.md").write_text("## Findings\n- something\n")
-
-    result = CliRunner().invoke(
-        cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf),
-         "--node", "critique", "--agent", "codex"],
-    )
-    assert result.exit_code == 0
-
-    lines = (packet / "runs.jsonl").read_text().splitlines()
-    fact = json.loads(lines[0])
-    assert fact["type"] == "node_completed"
-    assert fact["node"] == "critique"
-    assert fact["agent"] == "codex"
-    assert fact["wrote"] == ["findings.md"]
-    assert fact["workflow_version"].startswith("sha256:")
-
-    gate = json.loads(lines[-1])
-    assert gate["type"] == "needs_human"
-    assert gate["raised_by"] == "declaration"
-
-
-def test_record_fails_when_the_packet_does_not_match_expect(repo_packet):
-    """critique declares it expects `audit` next; nothing else about the
-    packet changed, so it actually derives to `revise` — the postcondition
-    disagrees with what the pass claimed."""
-    packet, deck, wf = repo_packet
-    broken = copy.deepcopy(ORCHESTRATOR_WORKFLOW)
-    broken["nodes"]["critique"]["expect"] = "audit"
-    wf.write_text(yaml.safe_dump(broken))
-
-    result = CliRunner().invoke(
-        cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf),
-         "--node", "critique"],
-    )
-    assert result.exit_code == 1
-    assert "expected audit" in result.output
-    assert "revise" in result.output
-
-
-def test_record_rejects_an_unknown_node(repo_packet):
-    packet, deck, wf = repo_packet
-    result = CliRunner().invoke(
-        cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf),
-         "--node", "nonesuch"],
-    )
-    assert result.exit_code == 2
-    assert "nonesuch" in result.output
-
-
-def test_a_failed_postcondition_is_itself_recorded(repo_packet):
-    """Append-only means the log must explain itself. A missed postcondition
-    is not a fourth kind of fact — it is a needs_human, like any other gate."""
-    packet, deck, wf = repo_packet
-    broken = copy.deepcopy(ORCHESTRATOR_WORKFLOW)
-    broken["nodes"]["critique"]["expect"] = "audit"
-    wf.write_text(yaml.safe_dump(broken))
-
-    result = CliRunner().invoke(
-        cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf),
-         "--node", "critique"],
-    )
-    assert result.exit_code == 1
-
-    facts = [json.loads(line) for line in (packet / "runs.jsonl").read_text().splitlines()]
-    assert [f["type"] for f in facts] == ["node_completed", "needs_human"]
-    assert "audit" in facts[-1]["question"]
-    assert "revise" in facts[-1]["question"]
-
-
 def test_derive_reports_a_block_before_a_node(tmp_path: Path):
     packet = tmp_path / "packet"
     packet.mkdir()
-    (packet / "writing-brief.md").write_text("# Brief")
-    (packet / "draft.md").write_text("prose")
     (packet / "runs.jsonl").write_text(
-        '{"type":"needs_human","event_id":"n1","node":"critique",'
+        '{"type":"needs_human","event_id":"n1","node":"brief",'
         '"raised_by":"node","question":"does finding 3 count?","at":"t"}\n'
     )
     wf = write_workflow(tmp_path)
@@ -241,8 +128,8 @@ def test_resolve_with_nothing_outstanding_is_an_error(tmp_path: Path):
 
 
 def test_run_dispatches_through_a_command(tmp_path: Path, repo_packet):
-    """I6: the substrate needs no scheduler, so any driver works. The driver
-    is a command that receives the job on stdin and holds nothing."""
+    """The substrate needs no scheduler, so any driver works. The driver is
+    a command that receives the job on stdin and holds nothing."""
     packet, deck, wf = repo_packet
     script = tmp_path / "driver.sh"
     script.write_text(
@@ -278,7 +165,7 @@ def test_record_raises_a_gate_with_a_question(repo_packet):
     packet, deck, wf = repo_packet
     result = CliRunner().invoke(
         cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf),
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
          "--node", "critique", "--question", "is finding 3 in scope?"],
     )
     assert result.exit_code == 0
@@ -291,16 +178,15 @@ def test_record_raises_a_gate_with_a_question(repo_packet):
 def test_record_raises_exactly_one_gate_even_when_the_node_also_declares_review(
     repo_packet,
 ):
-    """Finding 3: `critique` declares `human_review: true` *and* the card
-    passes `--question` — before the fix, `record` raised both, leaving two
-    near-identical `needs_human` facts for a single pass. Exactly one must
-    be raised (the `--question` one), and a single `orglens workflow
-    resolve` must clear it — nothing left blocking behind it."""
+    """`critique` declares `human_review: true` *and* the card passes
+    `--question` — exactly one gate must be raised (the `--question` one),
+    and a single `orglens workflow resolve` must clear it, nothing left
+    blocking behind it."""
     packet, deck, wf = repo_packet
 
     result = CliRunner().invoke(
         cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf),
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
          "--node", "critique", "--question", "is finding 3 in scope?"],
     )
     assert result.exit_code == 0
@@ -323,10 +209,34 @@ def test_record_raises_exactly_one_gate_even_when_the_node_also_declares_review(
     assert payload["blocked"] is False
 
 
+def test_record_raises_the_declared_gate_when_no_question_is_given(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+         "--node", "critique"],
+    )
+    assert result.exit_code == 0
+    entries = [json.loads(line) for line in (packet / "runs.jsonl").read_text().splitlines()]
+    gate = entries[-1]
+    assert gate["type"] == "needs_human"
+    assert gate["raised_by"] == "declaration"
+
+
+def test_record_rejects_an_unknown_node(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+         "--node", "nonesuch"],
+    )
+    assert result.exit_code == 2
+    assert "nonesuch" in result.output
+
+
 def test_job_reports_an_unknown_node_cleanly(repo_packet):
-    """Finding 5: `--node ghost` used to dump a raw `KeyError` traceback
-    from `resolve_job`. It must be reported the same clean way every other
-    CLI path handles an unknown node."""
+    """`--node ghost` must be reported the same clean way every other CLI
+    path handles an unknown node, not a raw `KeyError` traceback."""
     packet, deck, wf = repo_packet
     result = CliRunner().invoke(
         cli,
@@ -339,16 +249,14 @@ def test_job_reports_an_unknown_node_cleanly(repo_packet):
 
 
 def test_run_stops_after_max_turns_on_a_self_perpetuating_definition(tmp_path: Path):
-    """I4: `cli.run`'s loop had no iteration cap. A node whose guard does
-    not depend on anything its own completion changes — no `mutates`, no
-    `diagnoses`, a guard over a fact that stays true forever — derives to
-    itself indefinitely, and would dispatch forever unattended without a
-    bound."""
+    """A node whose guard does not depend on anything its own completion
+    changes — no read of it ever gets consumed, a guard over a fact that
+    stays true forever — derives to itself indefinitely, and would dispatch
+    forever unattended without a bound."""
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "config", "user.email", "t@example.com")
     _git(tmp_path, "config", "user.name", "t")
 
-    (tmp_path / "writing.yaml").write_text("default: portfolio\nprofiles:\n  portfolio: {}\n")
     packet = tmp_path / "a-piece"
     packet.mkdir()
     (packet / "some-brief.md").write_text("# Brief")
@@ -359,14 +267,12 @@ def test_run_stops_after_max_turns_on_a_self_perpetuating_definition(tmp_path: P
     workflow_path.write_text(
         yaml.safe_dump(
             {
-                "marker": "writing.yaml",
-                "brief": "*-brief.md",
                 "nodes": {
                     "loop": {
                         "role": "self",
                         "reads": [],
                         "writes": [],
-                        "guard": {"all": ["brief_exists"]},
+                        "guard": {"all": ["exists:some-brief.md"]},
                     }
                 },
             }
@@ -396,8 +302,159 @@ def test_record_no_longer_accepts_a_round(repo_packet):
     packet, deck, wf = repo_packet
     result = CliRunner().invoke(
         cli,
-        ["workflow", "record", str(packet), "--workflow", str(wf),
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
          "--node", "critique", "--round", "1"],
     )
     assert result.exit_code != 0
     assert "no such option" in result.output.lower()
+
+
+def test_goto_moves_the_cursor_forward(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "goto", str(packet), "--workflow", str(wf),
+         "--node", "audit", "--note", "revise applied by hand"],
+    )
+    assert result.exit_code == 0
+    entries = [json.loads(l) for l in (packet / "runs.jsonl").read_text().splitlines()]
+    assert entries[-1]["type"] == "resumed_at"
+    assert entries[-1]["node"] == "audit"
+    assert entries[-1]["note"] == "revise applied by hand"
+
+
+def test_goto_moves_the_cursor_backward(repo_packet):
+    """Re-running a stage is a move, not a special mode."""
+    packet, deck, wf = repo_packet
+    CliRunner().invoke(cli, ["workflow", "goto", str(packet), "--workflow", str(wf),
+                             "--node", "audit", "--note", "fwd"])
+    CliRunner().invoke(cli, ["workflow", "goto", str(packet), "--workflow", str(wf),
+                             "--node", "brief", "--note", "start over"])
+    entries = [json.loads(l) for l in (packet / "runs.jsonl").read_text().splitlines()]
+    assert entries[-1]["node"] == "brief"
+
+
+def test_goto_rejects_an_undeclared_node(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli, ["workflow", "goto", str(packet), "--workflow", str(wf),
+              "--node", "ghost", "--note", "x"],
+    )
+    assert result.exit_code != 0
+    assert "ghost" in result.output
+
+
+def test_job_reports_a_glob_that_matched_nothing(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli, ["workflow", "job", str(packet), "--workflow", str(wf),
+              "--deck", str(deck), "--node", "critique"],
+    )
+    assert "(no match)" in result.output
+
+
+def test_record_stores_what_was_read_and_written(repo_packet):
+    packet, deck, wf = repo_packet
+    (packet / "findings.md").write_text("f")
+    CliRunner().invoke(
+        cli, ["workflow", "record", str(packet), "--workflow", str(wf),
+              "--deck", str(deck), "--node", "critique"],
+    )
+    fact = json.loads((packet / "runs.jsonl").read_text().splitlines()[0])
+    assert fact["wrote"] == ["findings.md"]
+    assert "read" in fact
+
+
+# --- fix round 1 ------------------------------------------------------------
+# Finding 1: the glob report matched declared globs against `Job.reads` with
+# `fnmatch` on the basename alone, silently dropping any directory segment —
+# a different, weaker algorithm than the one `resolve_job` actually used
+# (`Path.glob`). A path-bearing glob that genuinely resolved was reported as
+# `(no match)` and its file omitted entirely.
+# Finding 3: `"read" in fact` is satisfied by `read: []`. Pin the content.
+
+
+def test_job_reports_a_path_bearing_glob_that_did_resolve(tmp_path: Path):
+    """Regression for the basename-only match: a glob naming a
+    subdirectory, like a real deck's `references/smell-patterns.md`, must
+    be reported by what `Job.unmatched` says, not recomputed and lost."""
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    (packet / "references").mkdir()
+    (packet / "references" / "smell-patterns.md").write_text("residues")
+
+    deck = tmp_path / "deck"
+    deck.mkdir()
+
+    workflow_path = tmp_path / "WORKFLOW.yaml"
+    workflow_path.write_text(
+        yaml.safe_dump(
+            {
+                "nodes": {
+                    "audit": {
+                        "role": "self",
+                        "reads": ["references/smell-patterns.md"],
+                        "writes": [],
+                        "guard": {"all": ["after:nothing"]},
+                    }
+                },
+            }
+        )
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "job", str(packet), "--workflow", str(workflow_path),
+         "--deck", str(deck), "--node", "audit"],
+    )
+    assert result.exit_code == 0
+    assert "(no match)" not in result.output
+    assert "references/smell-patterns.md" in result.output
+
+
+# --- final review: `cli.record` reports the gate `orchestrator.record`
+# raised rather than recomputing the same branch itself ---------------------
+
+
+def test_record_prints_the_question_gate_it_raised(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+         "--node", "critique", "--question", "is finding 3 in scope?"],
+    )
+    assert result.exit_code == 0
+    assert "raised a gate: is finding 3 in scope?" in result.output
+
+
+def test_record_prints_the_declared_gate_it_raised(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+         "--node", "critique"],
+    )
+    assert result.exit_code == 0
+    assert "raised the declared review gate" in result.output
+
+
+def test_record_prints_no_gate_line_when_none_was_raised(repo_packet):
+    packet, deck, wf = repo_packet
+    result = CliRunner().invoke(
+        cli,
+        ["workflow", "record", str(packet), "--workflow", str(wf), "--deck", str(deck),
+         "--node", "revise"],
+    )
+    assert result.exit_code == 0
+    assert "raised" not in result.output
+
+
+def test_record_names_exactly_what_it_read(repo_packet):
+    packet, deck, wf = repo_packet
+    (packet / "findings.md").write_text("f")
+    CliRunner().invoke(
+        cli, ["workflow", "record", str(packet), "--workflow", str(wf),
+              "--deck", str(deck), "--node", "critique"],
+    )
+    fact = json.loads((packet / "runs.jsonl").read_text().splitlines()[0])
+    assert fact["read"] == ["writing-brief.md"]

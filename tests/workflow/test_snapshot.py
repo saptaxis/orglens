@@ -2,69 +2,59 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orglens.workflow.snapshot import read_packet
-
-WORKFLOW = {
-    "brief": "*-brief.md",
-    "artifact": {"family": "draft", "canonical": "draft.md", "history": "git"},
-}
+from orglens.workflow.snapshot import PacketSnapshot, read_packet
 
 
 def test_an_empty_packet(tmp_path: Path):
-    snap = read_packet(tmp_path, WORKFLOW)
-    assert snap.brief is None and snap.artifact is None and snap.runs == []
+    snap = read_packet(tmp_path)
+    assert snap.files == [] and snap.runs == []
 
 
 def test_a_missing_directory_is_empty_not_an_error(tmp_path: Path):
-    assert read_packet(tmp_path / "nope", WORKFLOW).files == []
+    assert read_packet(tmp_path / "nope").files == []
 
 
-def test_finds_the_brief_and_its_frontmatter(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text("---\nprofile: research\n---\n# Brief")
-    snap = read_packet(tmp_path, WORKFLOW)
-    assert snap.brief == "writing-brief.md"
-    assert snap.brief_frontmatter["profile"] == "research"
+def test_files_are_listed_sorted(tmp_path: Path):
+    for name in ("zeta.txt", "alpha.md", "mid.yaml"):
+        (tmp_path / name).write_text("x")
+    assert read_packet(tmp_path).files == ["alpha.md", "mid.yaml", "zeta.txt"]
 
 
-def test_the_brief_glob_comes_from_the_deck(tmp_path: Path):
-    """No deck filename in the engine. A different deck names its own."""
-    (tmp_path / "spec.md").write_text("# Spec")
-    other = {**WORKFLOW, "brief": "spec.md"}
-    assert read_packet(tmp_path, other).brief == "spec.md"
+def test_directories_are_not_files(tmp_path: Path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "a.md").write_text("x")
+    assert read_packet(tmp_path).files == ["a.md"]
 
 
-def test_a_workflow_declaring_no_brief_finds_none(tmp_path: Path):
-    (tmp_path / "writing-brief.md").write_text("# Brief")
-    assert read_packet(tmp_path, {"artifact": {"family": "draft"}}).brief is None
+def test_the_snapshot_takes_no_workflow(tmp_path: Path):
+    """A packet's shape does not depend on the definition."""
+    import inspect
+
+    params = list(inspect.signature(read_packet).parameters)
+    assert params == ["root"]
 
 
-def test_the_highest_family_member_is_the_artifact(tmp_path: Path):
-    (tmp_path / "draft-v1.md").write_text("old")
-    (tmp_path / "draft-v2.md").write_text("new")
-    assert read_packet(tmp_path, WORKFLOW).artifact == "draft-v2.md"
-
-
-def test_a_bare_family_name_is_version_one(tmp_path: Path):
-    (tmp_path / "draft.md").write_text("x")
-    snap = read_packet(tmp_path, WORKFLOW)
-    assert snap.artifact == "draft.md" and snap.artifact_canonical is True
-
-
-def test_a_versioned_artifact_is_not_canonical(tmp_path: Path):
-    (tmp_path / "draft-v2.md").write_text("x")
-    assert read_packet(tmp_path, WORKFLOW).artifact_canonical is False
-
-
-def test_unrecognised_files_are_listed_and_nothing_more(tmp_path: Path):
-    """A file the deck did not declare is a filename. It is never opened."""
-    (tmp_path / "notes-from-a-call.md").write_text("## Proposed\n- do a thing\n")
-    snap = read_packet(tmp_path, WORKFLOW)
-    assert "notes-from-a-call.md" in snap.files
-    assert snap.artifact is None
+def test_no_file_is_opened_but_run_state(tmp_path: Path):
+    """The body of a deck's file is never read — not even its first line."""
+    (tmp_path / "draft.md").write_text("---\npublished: yes\n---\n# Title\n")
+    snap = read_packet(tmp_path)
+    assert snap.files == ["draft.md"]
+    assert not hasattr(snap, "frontmatter")
+    assert not any("published" in str(v) for v in vars(snap).values())
 
 
 def test_run_state_is_read(tmp_path: Path):
     (tmp_path / "runs.jsonl").write_text(
-        '{"type":"node_completed","node":"critique","at":"t","event_id":"1"}\n'
+        '{"type":"node_completed","node":"draft","at":"t","event_id":"1"}\n'
     )
-    assert read_packet(tmp_path, WORKFLOW).runs[0]["node"] == "critique"
+    assert read_packet(tmp_path).runs[0]["node"] == "draft"
+
+
+def test_the_snapshot_has_exactly_three_fields():
+    import dataclasses
+
+    assert [f.name for f in dataclasses.fields(PacketSnapshot)] == [
+        "root",
+        "files",
+        "runs",
+    ]

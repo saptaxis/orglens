@@ -1,19 +1,8 @@
-"""Resolve a node's declaration into a fully-resolved job.
+"""Files in, files out.
 
-A workflow declares nodes; each node reads references and writes literal
-filenames. This module turns a node name into a ``Job``: every path
-absolute, every read reference expanded and de-duplicated in first-seen
-order, every write a literal filename against the packet — there is
-nothing to number, because an artifact and its companion files are each
-one canonical file with git as their history.
-
-The brief, the artifact, and the run ledger are the three structural
-references (``STRUCTURAL``) the engine resolves by construction. Every
-other read reference is either a profile reference resolved against the
-deck, or a path — bare or a glob — resolved against the packet, checked
-against the deck when the packet does not have it. The engine names no
-deck file itself: a node that wants a particular file lists it in
-``reads``.
+A job turns "node X is next" into a concrete assignment: which role card
+drives the pass, which files it reads, which files it writes. The engine
+does not open any of these paths — it only names them.
 """
 
 from __future__ import annotations
@@ -21,199 +10,90 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from orglens.workflow.profile import load_profile
-from orglens.workflow.snapshot import PacketSnapshot, read_packet
-
-STRUCTURAL = ("@brief", "@artifact", "@runstate")
+_NO_ROLE = {"self", "none"}
 
 
 @dataclass
 class Job:
     node: str
     role: str | None
-    profile: str
     reads: list[str]
     writes: list[str]
-    must_not_modify: list[str]
-    requires: dict = field(default_factory=dict)
-    human_review: bool = False
-    expect: str | list[str] | None = None
+    requires: dict
+    human_review: bool
+    unmatched: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "node": self.node,
             "role": self.role,
-            "profile": self.profile,
-            "reads": self.reads,
-            "writes": self.writes,
-            "must_not_modify": self.must_not_modify,
-            "requires": self.requires,
+            "reads": list(self.reads),
+            "writes": list(self.writes),
+            "requires": dict(self.requires),
             "human_review": self.human_review,
-            "expect": self.expect,
+            "unmatched": list(self.unmatched),
         }
 
 
-def resolve_job(packet: Path, deck: Path, workflow: dict, node: str) -> Job:
-    """Resolve ``node`` in ``workflow`` into a ``Job``.
+def _resolve_reads(packet: Path, globs: list[str]) -> tuple[list[str], list[str]]:
+    reads: list[str] = []
+    unmatched: list[str] = []
+    seen: set[str] = set()
+    for pattern in globs:
+        matches = sorted(str(p.resolve()) for p in packet.glob(pattern))
+        if not matches:
+            unmatched.append(pattern)
+            continue
+        for match in matches:
+            if match not in seen:
+                seen.add(match)
+                reads.append(match)
+    return reads, unmatched
 
-    Both roots are resolved so that every path this emits is absolute.
-    Raises ``KeyError`` if ``node`` is not declared.
-    """
+
+def _resolve_writes(packet: Path, names: list[str]) -> list[str]:
+    return [str((packet / name).resolve()) for name in names]
+
+
+def _resolve_role(role: str | None, deck: Path, roots: list[str]) -> str | None:
+    if role is None or role in _NO_ROLE:
+        return None
+
+    tried: list[str] = []
+    for root in roots:
+        base = (deck / root).resolve()
+        candidate = base / role
+        tried.append(str(candidate))
+        if candidate.is_file():
+            return str(candidate)
+
+    raise FileNotFoundError(
+        f"role {role!r} not found under any root {roots!r} (deck {deck}); tried: "
+        + ", ".join(tried)
+    )
+
+
+def resolve_job(packet: Path, deck: Path, workflow: dict, node: str) -> Job:
     packet = Path(packet).resolve()
     deck = Path(deck).resolve()
 
     nodes = workflow.get("nodes", {})
     if node not in nodes:
-        raise KeyError(f"node {node!r} is not declared; known nodes: {sorted(nodes)}")
+        raise KeyError(node)
     declaration = nodes[node]
 
-    snapshot = read_packet(packet, workflow)
-    profile_name, profile_config = load_profile(
-        packet, workflow, snapshot.brief_frontmatter
-    )
+    roots = workflow.get("roots", ["."])
+    role = _resolve_role(declaration.get("role"), deck, roots)
 
-    reads: list[str] = []
-    for ref in declaration.get("reads", []):
-        for resolved in _expand_read(ref, packet, deck, snapshot, profile_config):
-            if resolved not in reads:
-                reads.append(resolved)
-
-    writes = [str((packet / name).resolve()) for name in declaration.get("writes", [])]
-
-    must_not_modify = _expand_must_not_modify(
-        declaration.get("must_not_modify", []), packet, snapshot, writes
-    )
+    reads, unmatched = _resolve_reads(packet, declaration.get("reads", []))
+    writes = _resolve_writes(packet, declaration.get("writes", []))
 
     return Job(
         node=node,
-        role=_resolve_role(declaration.get("role"), deck),
-        profile=profile_name,
+        role=role,
         reads=reads,
         writes=writes,
-        must_not_modify=must_not_modify,
         requires=declaration.get("requires", {}),
         human_review=declaration.get("human_review", False),
-        expect=declaration.get("expect"),
+        unmatched=unmatched,
     )
-
-
-def _resolve_role(role: str | None, deck: Path) -> str | None:
-    """A pass with no separate role card yields ``None``; anything else
-    names a card relative to the deck.
-    """
-    if role in (None, "self", "none"):
-        return None
-    return str((deck / role).resolve())
-
-
-def _expand_read(
-    ref: str,
-    packet: Path,
-    deck: Path,
-    snapshot: PacketSnapshot,
-    profile_config: dict,
-) -> list[str]:
-    """Expand one ``reads`` entry to zero or more absolute paths."""
-    if ref == "@brief":
-        return [_require(packet, snapshot.brief, "brief")]
-    if ref == "@artifact":
-        return [_require(packet, snapshot.artifact, "artifact")]
-    if ref == "@runstate":
-        return [str((packet / "runs.jsonl").resolve())]
-    if ref.startswith("@profile."):
-        return [_require_profile_path(ref, deck, profile_config)]
-    if ref.startswith("@"):
-        raise KeyError(f"unknown structural reference: {ref!r}; known: {STRUCTURAL}")
-    if _is_glob(ref):
-        return _expand_glob(ref, packet, deck)
-    return [str(_resolve_bare(ref, packet, deck))]
-
-
-def _require(packet: Path, name: str | None, label: str) -> str:
-    if name is None:
-        raise FileNotFoundError(f"packet has no {label}: {packet}")
-    return str((packet / name).resolve())
-
-
-def _require_profile_path(ref: str, deck: Path, profile_config: dict) -> str:
-    """Resolve ``@profile.<key>`` against the deck and fail loudly rather
-    than hand back a path nobody checked. A value the profile does not
-    carry, or a value that does not name a file the deck actually has, is
-    a marker defect, and a silent nonexistent path in ``reads`` is how one
-    reaches a live run undetected.
-    """
-    key = ref.split(".", 1)[1]
-    if key not in profile_config:
-        raise KeyError(
-            f"profile has no {key!r}; known keys: {sorted(profile_config)}"
-        )
-    value = profile_config[key]
-    resolved = (deck / value).resolve()
-    if not resolved.is_file():
-        raise FileNotFoundError(
-            f"@profile.{key} = {value!r} resolves to {resolved}, which does "
-            f"not exist under deck root {deck}"
-        )
-    return str(resolved)
-
-
-def _is_glob(ref: str) -> bool:
-    return any(ch in ref for ch in "*?[")
-
-
-def _resolve_bare(ref: str, packet: Path, deck: Path) -> Path:
-    """A bare path is checked against the packet first; if it is not
-    there, it is checked against the deck.
-    """
-    candidate = packet / ref
-    if candidate.exists():
-        return candidate.resolve()
-    return (deck / ref).resolve()
-
-
-def _expand_glob(pattern: str, packet: Path, deck: Path) -> list[str]:
-    """Globs are only ever allowed in ``reads``, never in ``writes``."""
-    matches = sorted(str(p.resolve()) for p in packet.glob(pattern) if p.is_file())
-    if matches:
-        return matches
-    return sorted(str(p.resolve()) for p in deck.glob(pattern) if p.is_file())
-
-
-def _expand_must_not_modify(
-    entries: list[str],
-    packet: Path,
-    snapshot: PacketSnapshot,
-    writes: list[str],
-) -> list[str]:
-    """``["**"]`` expands to every file present in the packet, minus this
-    node's declared writes and ``runs.jsonl``. Any other explicit list
-    expands to those paths, minus any that are also declared writes.
-    """
-    writes_set = set(writes)
-    runs_path = str((packet / "runs.jsonl").resolve())
-
-    remaining = list(entries)
-    candidates: list[str] = []
-    if "**" in remaining:
-        candidates.extend(
-            str((packet / name).resolve())
-            for name in snapshot.files
-            if str((packet / name).resolve()) != runs_path
-        )
-        remaining = [entry for entry in remaining if entry != "**"]
-
-    for entry in remaining:
-        if _is_glob(entry):
-            candidates.extend(
-                str(p.resolve()) for p in packet.glob(entry) if p.is_file()
-            )
-        else:
-            candidates.append(str((packet / entry).resolve()))
-
-    result: list[str] = []
-    for candidate in candidates:
-        if candidate in writes_set:
-            continue
-        if candidate not in result:
-            result.append(candidate)
-    return result

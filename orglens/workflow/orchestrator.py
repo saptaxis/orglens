@@ -1,10 +1,22 @@
 """One turn of the loop.
 
-The orchestrator holds nothing. Every question it asks is answered by a module
-that already existed — blocking, derive, job, effects, runstate — and its only
-job is to ask them in the order workflow.md fixes, and to write down what
-happened. Rule 6 lives here: a pass that dies validates nothing, so the caller
-verifies rather than the pass.
+The orchestrator holds nothing. Every question it asks is answered by a
+module that already exists — blocking, derive, job, runstate — and its only
+job is to ask them in the order the definition fixes, and to write down what
+happened.
+
+There is no verification step here anymore. Protection is a sentence in a
+role card now, and recovery from a pass that overreaches is git, not this
+module: nothing here takes a snapshot before a dispatch or inspects what
+changed afterward. Nothing checks a pass's output against what it declared,
+either. `record` stamps `wrote` onto the completion fact — the declared
+writes that exist right now — but nothing reads that value back to decide
+anything: the cursor is the node named by the most recent routing fact,
+full stop, and `record` appends that fact unconditionally once a dispatch
+returns. A pass that runs and writes nothing it declared still advances the
+cursor, and the next node still fires if its guard only asks `after:` the
+node that just ran. Git is the recovery, not a guard that silently catches
+this.
 """
 
 from __future__ import annotations
@@ -13,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from orglens.workflow import blocking, effects
+from orglens.workflow import blocking
 from orglens.workflow.derive import derive_next_node
 from orglens.workflow.job import Job, resolve_job
 from orglens.workflow.result import Outcome
@@ -25,115 +37,14 @@ class StepResult:
     status: str
     node: str | None = None
     detail: str = ""
-    # Set only on a "completed" result whose postcondition check failed —
-    # `cli.record`'s own reporting needs to know this without re-deriving.
-    postcondition_failed: bool = False
-    expect: list[str] | None = None
+    gate: str | None = None
 
 
 def _names(paths: list[str]) -> list[str]:
     return [Path(p).name for p in paths]
 
 
-def _expect_options(expect: str | list[str] | None) -> list[str]:
-    """`expect` may name a single successor or a list of acceptable ones —
-    see I1: a node with two legitimate successors (a diagnostic that can be
-    followed by either of two cycles) cannot be pinned to just one."""
-    if expect is None:
-        return []
-    return list(expect) if isinstance(expect, list) else [expect]
-
-
-def _verify_delta(
-    packet: Path,
-    job: Job,
-    workflow_path: Path,
-    baseline: frozenset[str],
-    baseline_hashes: dict[str, str | None],
-) -> StepResult | None:
-    """Check what a dispatch just changed against the node's declaration.
-
-    Only `step` calls this — it is the half of rule 6 that requires a
-    "before" state to judge against, and `step` is the only caller that has
-    one, taken as `baseline` before it dispatched. Returns a `StepResult`
-    if verification stops here (unverifiable, or a violation reverted or
-    flagged), or `None` if the pass's changes were clean and recording may
-    proceed.
-    """
-    version = workflow_version(Path(workflow_path))
-
-    try:
-        violations = effects.check_delta(
-            packet,
-            {"must_not_modify": _names(job.must_not_modify), "writes": _names(job.writes)},
-        )
-    except effects.VerificationUnavailable as exc:
-        append_fact(
-            packet,
-            {
-                "type": "needs_human",
-                "node": job.node,
-                "raised_by": "verification",
-                "question": f"{job.node}'s changes could not be verified: {exc}",
-                "workflow_version": version,
-            },
-        )
-        return StepResult("unverifiable", job.node, str(exc))
-
-    # Partition against the baseline: new violations are this pass's doing
-    # and safe to revert; a file already dirty and further modified is also
-    # this pass's doing, but reverting it would destroy the pre-existing
-    # edit too, so it is flagged instead; a file already dirty and left
-    # alone is not a violation at all.
-    reverted: list[str] = []
-    flagged: list[str] = []
-    for name in violations:
-        if name not in baseline:
-            reverted.append(name)
-        elif effects.file_hash(packet, name) != baseline_hashes.get(name):
-            flagged.append(name)
-
-    if reverted:
-        effects.revert(packet, reverted)
-        append_fact(
-            packet,
-            {
-                "type": "needs_human",
-                "node": job.node,
-                "raised_by": "verification",
-                "question": (
-                    f"{job.node} modified {', '.join(reverted)}, which its "
-                    "declaration protects. The changes were reverted."
-                ),
-                "workflow_version": version,
-            },
-        )
-
-    if flagged:
-        append_fact(
-            packet,
-            {
-                "type": "needs_human",
-                "node": job.node,
-                "raised_by": "verification",
-                "question": (
-                    f"{', '.join(flagged)} was already modified before {job.node} ran, "
-                    f"and {job.node} modified it further. Its declaration protects it, "
-                    "but reverting would destroy the changes that predate the pass, so "
-                    "it was left alone for a human to sort out."
-                ),
-                "workflow_version": version,
-            },
-        )
-
-    if reverted:
-        return StepResult("reverted", job.node, ", ".join(reverted))
-    if flagged:
-        return StepResult("flagged", job.node, ", ".join(flagged))
-    return None
-
-
-def record_and_verify(
+def record(
     packet: Path,
     workflow: dict,
     workflow_path: Path,
@@ -143,23 +54,24 @@ def record_and_verify(
     by: str | None = None,
     question: str | None = None,
 ) -> StepResult:
-    """Record that a pass ran and confirm the packet still derives where the
-    workflow expects — the "record" step of the loop, and the half of rule
-    6 both callers share.
+    """Write down that a pass ran — the one implementation of the
+    completion fact, shared by `step` (which just dispatched the pass
+    itself) and the CLI's own `record` verb (a pass reporting itself after
+    running entirely outside this loop's view).
 
-    This does not check what the pass changed against its declaration —
-    that is `step`'s job alone (see `_verify_delta`), because it needs a
-    "before" state to judge against and this function is invoked only
-    *after* a pass has already written, whether that pass was dispatched
-    under `step`'s control (which has already run `_verify_delta` by the
-    time this runs) or driven by hand through `cli.record` (which has no
-    "before" state to have taken a baseline in, and trusts the pass to have
-    respected its own declaration).
+    The fact carries `wrote` — the node's declared writes that exist right
+    now — and `read` — the files this job actually handed the pass to read.
+    `read` has to be captured here rather than recomputed later: the
+    directory keeps changing underneath a packet, so which files a pass saw
+    is a fact about the past, not something derivable from the packet's
+    current shape.
 
     Raises exactly one gate after recording: `question` if the caller gave
-    one, otherwise the node's declared `human_review` gate. Never both — a
-    single pass raising two near-identical `needs_human` facts would leave
-    the packet blocked after the author's one `resolve`.
+    one, otherwise the node's declared review gate. Never both, and this
+    function never re-derives to check anything — there is no postcondition
+    left to fail. Which gate it raised, if either, comes back on the
+    returned `StepResult.gate` (`"question"`, `"declaration"`, or `None`) so
+    a caller can report it without re-testing the same condition itself.
     """
     packet = Path(packet)
     version = workflow_version(Path(workflow_path))
@@ -168,6 +80,7 @@ def record_and_verify(
         "type": "node_completed",
         "node": job.node,
         "wrote": [n for n in _names(job.writes) if (packet / n).exists()],
+        "read": _names(job.reads),
         "workflow_version": version,
     }
     if agent:
@@ -176,31 +89,9 @@ def record_and_verify(
         fact["by"] = by
     append_fact(packet, fact)
 
-    after = derive_next_node(packet, workflow)
-    derived = after.node if after.outcome == Outcome.RUNNABLE else str(after.outcome)
-    options = _expect_options(job.expect)
+    result = StepResult("completed", job.node)
 
-    step_result = StepResult("completed", job.node, derived, expect=options or None)
-
-    if options and derived not in options:
-        # Not a fourth kind of fact. A cached derivation would drift and would
-        # not stop the loop; a question does both.
-        append_fact(
-            packet,
-            {
-                "type": "needs_human",
-                "node": job.node,
-                "raised_by": "postcondition",
-                "question": (
-                    f"{job.node} expected the packet to derive to "
-                    f"{' or '.join(options)}, but it derives to {derived}. What it "
-                    "wrote does not leave the packet in the state the workflow expects."
-                ),
-                "workflow_version": version,
-            },
-        )
-        step_result.postcondition_failed = True
-    elif question is not None:
+    if question is not None:
         append_fact(
             packet,
             {
@@ -211,6 +102,7 @@ def record_and_verify(
                 "workflow_version": version,
             },
         )
+        result.gate = "question"
     elif job.human_review:
         append_fact(
             packet,
@@ -218,12 +110,13 @@ def record_and_verify(
                 "type": "needs_human",
                 "node": job.node,
                 "raised_by": "declaration",
-                "question": f"ratify {job.node}'s output before {derived} runs",
+                "question": f"{job.node} is declared for human review before the next node runs",
                 "workflow_version": version,
             },
         )
+        result.gate = "declaration"
 
-    return step_result
+    return result
 
 
 def step(
@@ -233,10 +126,11 @@ def step(
     workflow_path: Path,
     dispatch: Callable[[Job], None],
 ) -> StepResult:
+    """One turn: blocked? -> derive -> job -> dispatch -> record."""
     packet = Path(packet)
 
     # 1. blocked? an unresolved question stops everything, and nothing else
-    #    is consulted — not derivation, certainly not the guards.
+    #    is consulted — not derivation, not a guard.
     block = blocking.check(packet)
     if block is not None:
         return StepResult("blocked", block.node, block.question)
@@ -247,59 +141,10 @@ def step(
         return StepResult(str(result.outcome), result.node, result.reason)
 
     # 3. job
-    job = resolve_job(packet, deck, workflow, result.node)
-    version = workflow_version(Path(workflow_path))
-
-    # Baseline taken before dispatch (C1): what is already dirty right now
-    # was not caused by the pass about to run, so a violation found after
-    # dispatch must be judged against this, not against HEAD alone.
-    try:
-        baseline = effects.dirty_files(packet)
-        baseline_hashes = {name: effects.file_hash(packet, name) for name in baseline}
-    except effects.VerificationUnavailable as exc:
-        append_fact(
-            packet,
-            {
-                "type": "needs_human",
-                "node": job.node,
-                "raised_by": "verification",
-                "question": f"{job.node}'s changes could not be verified: {exc}",
-                "workflow_version": version,
-            },
-        )
-        return StepResult("unverifiable", job.node, str(exc))
+    resolved = resolve_job(packet, deck, workflow, result.node)
 
     # 4. dispatch
-    dispatch(job)
+    dispatch(resolved)
 
-    # 5. verify — before recording, because an overreaching pass has not
-    #    completed, it has damaged the packet. Two clauses: the declared
-    #    writes exist, and nothing outside must_not_modify moved.
-
-    missing = [n for n in job.writes if not Path(n).exists()]
-    if missing:
-        append_fact(
-            packet,
-            {
-                "type": "needs_human",
-                "node": job.node,
-                "raised_by": "verification",
-                "question": (
-                    f"{job.node} did not write {', '.join(_names(missing))}, "
-                    "which its declaration promised."
-                ),
-                "workflow_version": version,
-            },
-        )
-        return StepResult("incomplete", job.node, ", ".join(_names(missing)))
-
-    # 6. verify what changed against the declaration — the half of rule 6
-    #    only `step` can do, since only `step` has a baseline to judge
-    #    against (C1).
-    delta_result = _verify_delta(packet, job, workflow_path, baseline, baseline_hashes)
-    if delta_result is not None:
-        return delta_result
-
-    # 7. record — the completion-fact and postcondition-check logic, shared
-    #    with `cli.record` (I2).
-    return record_and_verify(packet, workflow, workflow_path, job)
+    # 5. record — the shared completion-fact path.
+    return record(packet, workflow, workflow_path, resolved)

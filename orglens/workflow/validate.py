@@ -1,118 +1,199 @@
-"""Checking a workflow definition for defects before it is ever run.
+"""Checking a deck's workflow definition before anything runs.
 
-This is a static check of the declaration alone — no fixtures, no synthetic
-packets, no attempt to prove a property by constructing a scenario that
-satisfies it. A scenario built by the same assumptions as the code it tests
-agrees with those assumptions, not with reality; every defect that actually
-mattered here was found by running against real files instead.
+Routing has exactly two predicate forms: `exists:<glob>`, which asks the
+packet's directory, and `after:<node>`, which asks the run log for its
+cursor — the node named by the most recent routing fact. Because the cursor
+is a single position, exactly one `after:` predicate is ever true for a
+given snapshot. That turns one shape of definition bug into something a
+checker can decide on its own, with no packet and no directory listing: if
+two nodes' guards can both be satisfied by the same cursor value, the
+definition is ambiguous no matter what the filesystem later says.
 
-One of these checks exists because of a real failure: a node whose
-``expect`` named itself. The postcondition check treated that node's own
-completion as proof it had reached its own target, so a packet re-ran the
-same step forever while every check along the way reported success. A
-self-referential ``expect`` is now rejected before a workflow ever runs.
+`validate_definition` never raises. It is the one gate standing between an
+arbitrary mapping and the rest of the engine, so it has to survive whatever
+shape it is handed.
 """
 
 from __future__ import annotations
 
-from orglens.workflow.predicates import predicate_names
+from orglens.workflow.predicates import AFTER, EXISTS, NOTHING
 
-_OUTCOME_NAMES = frozenset({"runnable", "terminal", "ambiguous", "malformed", "unknown"})
-_GLOB_CHARS = ("*", "?", "[")
-
-
-def _expect_entries(expect) -> list:
-    """``expect`` names either one acceptable successor or several — a node
-    with two legitimate successors (a diagnostic reachable from either of
-    two cycles) cannot be pinned to just one. Both forms are checked the
-    same way, entry by entry.
-    """
-    return expect if isinstance(expect, list) else [expect]
-
-
-def _guard_predicates(guard: dict, node: str, problems: list[str]) -> set[str]:
-    """Names of the predicates a guard cites. A clause whose value is not a
-    list (a bare string, for instance) is reported and skipped rather than
-    iterated character by character.
-    """
-    names: set[str] = set()
-    for clause in ("all", "any", "none"):
-        if clause not in guard:
-            continue
-        value = guard[clause]
-        if not isinstance(value, list):
-            problems.append(
-                f"node {node!r} guard clause {clause!r} is not a list: {value!r}"
-            )
-            continue
-        names.update(value)
-    return names
+_CLAUSES = ("all", "any", "none")
 
 
 def validate_definition(workflow: dict) -> list[str]:
-    """Return every problem found in ``workflow``, as human-readable
-    strings naming the node and the offending value. Never raises: a
-    malformed definition is data to report on, not an exception.
-    """
+    """Every problem with `workflow`, or an empty list if it is sound."""
+    if not isinstance(workflow, dict):
+        return [f"a workflow definition must be a mapping, got {workflow!r}"]
+
     problems: list[str] = []
 
-    nodes = workflow.get("nodes") or {}
-    declared = set(nodes)
-    known_predicates = predicate_names(workflow)
+    raw_nodes = workflow.get("nodes")
+    if raw_nodes is not None and not isinstance(raw_nodes, dict):
+        problems.append(f"nodes must be a mapping, got {raw_nodes!r}")
+    nodes = raw_nodes if isinstance(raw_nodes, dict) else {}
+    declared = {name for name in nodes if isinstance(name, str)}
 
-    for name, spec in nodes.items():
-        if not isinstance(spec, dict):
-            problems.append(f"node {name!r} is not a mapping: {spec!r}")
+    if NOTHING in nodes:
+        problems.append(
+            f"node {NOTHING!r} is reserved for the empty cursor and cannot "
+            "be declared"
+        )
+
+    usable_guards: dict[str, dict] = {}
+
+    for name, node in nodes.items():
+        label = name if isinstance(name, str) else repr(name)
+
+        if not isinstance(node, dict):
+            problems.append(f"node {label!r} is not a mapping: {node!r}")
             continue
 
-        guard = spec.get("guard")
-
-        if not isinstance(guard, dict) or not guard:
-            problems.append(f"node {name!r} has no usable guard: {guard!r}")
+        guard = node.get("guard")
+        if _is_usable_guard(guard):
+            usable_guards[label] = guard
+            for clause in _CLAUSES:
+                for literal in guard.get(clause, []):
+                    problems.extend(_check_literal(label, literal, declared))
         else:
-            for predicate in sorted(_guard_predicates(guard, name, problems)):
-                if predicate not in known_predicates:
-                    problems.append(
-                        f"node {name!r} guards on unknown predicate {predicate!r}"
-                    )
+            problems.append(f"node {label!r} has no usable guard: {guard!r}")
 
-        mutates = bool(spec.get("mutates"))
-        diagnoses = bool(spec.get("diagnoses"))
-        if mutates and diagnoses:
-            problems.append(f"node {name!r} declares both mutates and diagnoses")
-
-        if diagnoses and "must_not_modify" not in spec:
-            problems.append(
-                f"node {name!r} declares diagnoses without must_not_modify"
-            )
-
-        expect = spec.get("expect")
-        if expect is not None:
-            for entry in _expect_entries(expect):
-                if entry == name:
-                    problems.append(f"node {name!r} names itself in expect: {entry!r}")
-                elif entry not in declared and entry not in _OUTCOME_NAMES:
-                    problems.append(
-                        f"node {name!r} expects {entry!r}, which is neither a declared "
-                        "node nor an outcome"
-                    )
-
-        writes = spec.get("writes")
+        writes = node.get("writes", [])
         if isinstance(writes, list):
             for entry in writes:
-                if isinstance(entry, str) and any(ch in entry for ch in _GLOB_CHARS):
+                if not isinstance(entry, str):
+                    continue
+                if _has_glob_character(entry):
                     problems.append(
-                        f"node {name!r} writes a glob, not a literal path: {entry!r}"
+                        f"node {label!r} writes a glob, not a literal name: "
+                        f"{entry!r}"
                     )
+                if "/" in entry:
+                    problems.append(
+                        f"node {label!r} writes a path, not a flat name: "
+                        f"{entry!r}"
+                    )
+        elif writes is not None:
+            problems.append(
+                f"node {label!r} writes must be a list of names, got {writes!r}"
+            )
 
     terminal = workflow.get("terminal")
-    if terminal is not None and not isinstance(terminal, dict):
-        problems.append(f"terminal is not a mapping: {terminal!r}")
-    else:
-        for label, predicate in (terminal or {}).items():
-            if predicate not in known_predicates:
-                problems.append(
-                    f"terminal {label!r} names unknown predicate {predicate!r}"
-                )
+    if isinstance(terminal, dict):
+        for key, literal in terminal.items():
+            owner = f"terminal[{key!r}]"
+            problems.extend(_check_literal(owner, literal, declared))
+    elif terminal is not None:
+        problems.append(f"terminal must be a mapping, got {terminal!r}")
+
+    roots = workflow.get("roots")
+    if roots is not None and (
+        not isinstance(roots, list) or not all(isinstance(r, str) for r in roots)
+    ):
+        problems.append(f"roots must be a list of strings, got {roots!r}")
+
+    problems.extend(_check_ambiguity(usable_guards, declared))
 
     return problems
+
+
+def _is_usable_guard(guard: object) -> bool:
+    if not isinstance(guard, dict) or not guard:
+        return False
+    present = [clause for clause in _CLAUSES if clause in guard]
+    if not present:
+        return False
+    return all(isinstance(guard[clause], list) for clause in present)
+
+
+def _has_glob_character(entry: str) -> bool:
+    return any(character in entry for character in "*?[")
+
+
+def _check_literal(owner: str, literal: object, declared: set[str]) -> list[str]:
+    if not isinstance(literal, str) or not (
+        literal.startswith(EXISTS) or literal.startswith(AFTER)
+    ):
+        return [f"{owner} names an unrecognized literal: {literal!r}"]
+
+    if literal.startswith(EXISTS):
+        glob = literal[len(EXISTS):]
+        if "/" in glob:
+            return [
+                f"{owner} declares {literal!r} — exists: only matches a "
+                "flat name, never a path"
+            ]
+
+    if literal.startswith(AFTER):
+        target = literal[len(AFTER):]
+        if target != NOTHING and target not in declared:
+            return [f"{owner} names an undeclared node: {literal!r}"]
+
+    return []
+
+
+def _check_ambiguity(usable_guards: dict[str, dict], declared: set[str]) -> list[str]:
+    problems: list[str] = []
+    for cursor in sorted(declared | {NOTHING}):
+        matched = sorted(
+            name
+            for name, guard in usable_guards.items()
+            if _could_match_cursor(guard, cursor)
+        )
+        if len(matched) > 1:
+            cursor_literal = f"{AFTER}{cursor}"
+            problems.append(
+                f"nodes {matched!r} could each be satisfied by cursor "
+                f"{cursor_literal!r} — ambiguous routing"
+            )
+    return problems
+
+
+def _could_match_cursor(guard: dict, cursor: str) -> bool:
+    """Could this guard match with the cursor fixed at `cursor`?
+
+    Only `after:` literals are pinned by the cursor. Anything else (an
+    `exists:` literal, or a literal this guard has no business carrying) is
+    not decided by the cursor at all, so it is treated as free to come out
+    either way — whichever favors a match.
+    """
+    if "all" in guard and not _all_could_match(guard["all"], cursor):
+        return False
+    if "any" in guard and not _any_could_match(guard["any"], cursor):
+        return False
+    if "none" in guard and not _none_could_match(guard["none"], cursor):
+        return False
+    return True
+
+
+def _after_target(literal: object) -> str | None:
+    if isinstance(literal, str) and literal.startswith(AFTER):
+        return literal[len(AFTER):]
+    return None
+
+
+def _all_could_match(literals: list, cursor: str) -> bool:
+    for literal in literals:
+        target = _after_target(literal)
+        if target is not None and target != cursor:
+            return False
+    return True
+
+
+def _any_could_match(literals: list, cursor: str) -> bool:
+    free = False
+    for literal in literals:
+        target = _after_target(literal)
+        if target is None:
+            free = True
+        elif target == cursor:
+            return True
+    return free
+
+
+def _none_could_match(literals: list, cursor: str) -> bool:
+    for literal in literals:
+        target = _after_target(literal)
+        if target is not None and target == cursor:
+            return False
+    return True

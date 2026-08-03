@@ -1,19 +1,17 @@
-"""Deciding what runs next, in three fixed steps.
+"""What runs next, derived fresh from a packet's current shape.
 
-Given a packet directory and the workflow that describes it, this module
-reads the files and the run log, evaluates every fact the workflow's
-predicates define, and returns the first of three checks that has an
-opinion: does the log claim work the files do not back up, has the packet
-already reached an end state, and — only once both of those are settled —
-which single node's guard matches the facts.
+Precedence is exactly two steps. First, every terminal value the deck
+declares is checked against the packet's facts; if any one of them holds,
+the run is over and nothing else is consulted. Otherwise every node's guard
+is checked against the same facts. Exactly one match names the node to run.
+More than one match is a deck authoring error, not a tiebreak to resolve
+quietly. No match at all is not an error either — it is a packet shape the
+deck's guards do not recognise, and the reason explains, node by node, which
+guard entries came back false so the gap is a diagnosis rather than a
+mystery.
 
-A layout that matches no node's guard is not made to fit anything. It
-names no node; whatever decides what happens to an unrecognised directory
-is a separate concern from this one.
-
-This module has no opinion about a human. Whether an open question in the
-log should stop a node from starting is answered elsewhere; here, a fact is
-a fact regardless of whether anyone has been asked about it yet.
+This module only reads a packet and answers a question about it. It never
+writes to the packet and never launches anything on its behalf.
 """
 
 from __future__ import annotations
@@ -23,104 +21,85 @@ from pathlib import Path
 from orglens.workflow.guards import matches
 from orglens.workflow.predicates import evaluate
 from orglens.workflow.result import DerivationResult, Outcome
-from orglens.workflow.snapshot import PacketSnapshot, read_packet
+from orglens.workflow.snapshot import read_packet
 
 
-def _unbacked_write(snapshot: PacketSnapshot) -> str | None:
-    """Name a file the most recent completion claims to have produced that
-    is not present, or ``None`` if that claim is backed up by a file on
-    disk (or the most recent completion named nothing to check).
+def _unknown_reason(nodes: dict, facts: dict[str, bool]) -> str:
+    """One line per declared node, naming the guard entries that blocked it.
 
-    Only the single most recent ``node_completed`` fact overall is
-    examined, not the latest per node. A file one node wrote can be
-    legitimately consumed and removed by a later, different node — critique
-    writes `findings.md`, revise applies it and the packet no longer needs
-    it — and that is not a defect; checking every node's own latest claim
-    would still condemn the packet forever the moment that happened, since
-    the consuming node's completion never re-claims the consumed node's
-    file. Only the most recent claim, of any node, has to still be true.
+    An ``all`` entry blocks its clause when it is false. A ``none`` entry
+    blocks its clause when it is true — the opposite test, because presence
+    is what a ``none`` clause forbids. An ``any`` clause blocks only when
+    every one of its entries is false, in which case every one of them is
+    named. An entry named by more than one clause of the same guard is
+    reported once, not once per clause.
     """
-    latest: dict | None = None
-    for entry in snapshot.runs:
-        if entry.get("type") == "node_completed":
-            latest = entry
+    lines = []
+    for name, spec in nodes.items():
+        guard = spec.get("guard", {})
+        blocking: dict[str, bool] = {}
 
-    if latest is None:
-        return None
+        for entry in guard.get("all", []):
+            if not facts.get(entry):
+                blocking.setdefault(entry, facts.get(entry))
 
-    for name in latest.get("wrote") or []:
-        if name not in snapshot.files:
-            return name
-    return None
+        any_entries = guard.get("any", [])
+        if any_entries and not any(facts.get(entry) for entry in any_entries):
+            for entry in any_entries:
+                blocking.setdefault(entry, facts.get(entry))
+
+        for entry in guard.get("none", []):
+            if facts.get(entry):
+                blocking.setdefault(entry, facts.get(entry))
+
+        parts = [f"{entry}={value}" for entry, value in blocking.items()]
+        lines.append(f"{name}: " + ", ".join(parts))
+    return "\n".join(lines)
 
 
 def derive_next_node(root: Path, workflow: dict) -> DerivationResult:
-    """Read ``root`` under ``workflow`` and decide what happens next.
-
-    Three checks run in a fixed order, and the first that has an opinion
-    settles the outcome: a log entry unbacked by a file on disk, an end
-    state the facts already satisfy, then whichever single node's guard
-    the facts match. Reading and deciding are all this does — it never
-    writes anything back.
-    """
-    snapshot = read_packet(root, workflow)
+    """Read one packet and answer what runs next, or why nothing does."""
+    snapshot = read_packet(Path(root))
     facts = evaluate(snapshot, workflow)
 
-    missing = _unbacked_write(snapshot)
-    if missing is not None:
-        return DerivationResult(
-            outcome=Outcome.MALFORMED,
-            node=None,
-            reason=f"the log credits a file that is not present: {missing!r}",
-            facts=facts,
-        )
-
-    for label, predicate in (workflow.get("terminal") or {}).items():
-        if facts.get(predicate):
+    for label, literal in workflow.get("terminal", {}).items():
+        if facts.get(literal):
             return DerivationResult(
                 outcome=Outcome.TERMINAL,
                 node=None,
-                reason=f"{predicate!r} is true ({label})",
+                reason=f"terminal: {label} ({literal}=True)",
+                matched=[],
                 facts=facts,
             )
 
-    nodes = workflow.get("nodes") or {}
+    nodes = workflow.get("nodes", {})
     matched = [
-        name
-        for name, spec in nodes.items()
-        if matches((spec or {}).get("guard") or {}, facts)
+        name for name, spec in nodes.items() if matches(spec.get("guard", {}), facts)
     ]
+
+    if len(matched) == 1:
+        node = matched[0]
+        return DerivationResult(
+            outcome=Outcome.RUNNABLE,
+            node=node,
+            reason=f"{node}: guard matched",
+            matched=matched,
+            facts=facts,
+        )
 
     if len(matched) > 1:
         return DerivationResult(
             outcome=Outcome.AMBIGUOUS,
             node=None,
-            reason=f"more than one guard matched: {', '.join(sorted(matched))}",
+            reason="more than one guard matched: " + ", ".join(sorted(matched)),
             matched=matched,
             facts=facts,
         )
 
-    if not matched:
-        return DerivationResult(
-            outcome=Outcome.UNKNOWN,
-            node=None,
-            reason="no node's guard matches this layout",
-            facts=facts,
-        )
-
-    node = matched[0]
-    guard = (nodes[node] or {}).get("guard") or {}
-    satisfied = [
-        name
-        for name in list(guard.get("all", [])) + list(guard.get("any", []))
-        if facts.get(name)
-    ]
-    reason = f"{node!r} matched on {', '.join(satisfied)}" if satisfied else f"{node!r} matched"
-
     return DerivationResult(
-        outcome=Outcome.RUNNABLE,
-        node=node,
-        reason=reason,
-        matched=matched,
+        outcome=Outcome.UNKNOWN,
+        node=None,
+        reason=_unknown_reason(nodes, facts),
+        matched=[],
         facts=facts,
     )
