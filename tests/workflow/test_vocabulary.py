@@ -108,6 +108,29 @@ def test_the_engine_holds_no_file_extension():
             )
 
 
+def test_a_job_carries_exactly_what_the_engine_resolves():
+    """Pinned by equality, like the other enumerations.
+
+    `requires` used to sit here: an opaque dict the engine copied from the
+    declaration into the job and never read. It looked identical in kind to
+    `human_review` one line above it in the same YAML, and only one of them did
+    anything. A field the engine cannot act on belongs in a role card, where
+    instructions to the agent already live and are honest about being advice.
+    """
+    import dataclasses
+
+    from orglens.workflow.job import Job
+
+    assert [f.name for f in dataclasses.fields(Job)] == [
+        "node",
+        "role",
+        "reads",
+        "writes",
+        "human_review",
+        "unmatched",
+    ]
+
+
 def test_the_deleted_modules_are_gone():
     assert not (ENGINE / "effects.py").exists()
     assert not (ENGINE / "profile.py").exists()

@@ -19,7 +19,6 @@ class Job:
     role: str | None
     reads: list[str]
     writes: list[str]
-    requires: dict
     human_review: bool
     unmatched: list[str] = field(default_factory=list)
 
@@ -29,7 +28,6 @@ class Job:
             "role": self.role,
             "reads": list(self.reads),
             "writes": list(self.writes),
-            "requires": dict(self.requires),
             "human_review": self.human_review,
             "unmatched": list(self.unmatched),
         }
@@ -93,7 +91,6 @@ def resolve_job(packet: Path, deck: Path, workflow: dict, node: str) -> Job:
         role=role,
         reads=reads,
         writes=writes,
-        requires=declaration.get("requires", {}),
         human_review=declaration.get("human_review", False),
         unmatched=unmatched,
     )

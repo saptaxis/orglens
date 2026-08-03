@@ -37,13 +37,9 @@ nodes:
     guard:
       all: ["after:reproduce"]
 
-  # requires is carried into the job for whoever dispatches it. The engine does
-  # not enforce it — it is a declaration the driver honours.
   verify:
     role: roles/verify.md
     reads: [repro.md, fix.md]
     writes: [verdict.md]
-    requires:
-      interpreter: not-the-producer
     guard:
       all: ["after:fix"]

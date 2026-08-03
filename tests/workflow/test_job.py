@@ -13,7 +13,6 @@ WORKFLOW = {
             "role": "operators/critic.md",
             "reads": ["*-brief*.md", "draft*.md", "runs.jsonl", "findings*.md"],
             "writes": ["findings.md"],
-            "requires": {"interpreter": "not-the-producer"},
             "human_review": True,
         },
         "local": {"role": "own/liner.md", "writes": ["draft.md"]},
@@ -115,7 +114,6 @@ def test_roots_default_to_the_deck(tmp_path: Path):
 def test_declaration_fields_carry_through(tmp_path: Path):
     packet, deck = build(tmp_path)
     job = resolve_job(packet, deck, WORKFLOW, "critique")
-    assert job.requires == {"interpreter": "not-the-producer"}
     assert job.human_review is True
 
 

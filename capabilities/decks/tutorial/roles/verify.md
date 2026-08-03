@@ -19,9 +19,10 @@ what your prose says. Ending the loop is a human act:
 
 `exists:CLOSED` is the workflow's only terminal condition.
 
-You should not be the same session that wrote `fix.md`. The declaration says
-`requires: {interpreter: not-the-producer}`; the engine carries that through to
-the job and the driver honours it.
+**You should not be the same session that wrote `fix.md`.** A session checking
+its own work reads its own reasoning as obvious and misses what it assumed.
+Nothing enforces this — it is on whoever dispatches the pass to hand it to a
+fresh session.
 
 When done:
 
