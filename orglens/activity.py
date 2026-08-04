@@ -45,6 +45,7 @@ class Activity:
     sessions: int = 0
     last_session: int | None = None     # epoch seconds
     turns: int = 0
+    last_turn: dict | None = None       # {at, role, text} — what was last said
     agents: list[str] = field(default_factory=list)
     needs: list[dict] = field(default_factory=list)   # {question, at}
     notes: list[dict] = field(default_factory=list)   # the authored tier
@@ -153,7 +154,7 @@ def _json_list(raw: str | None) -> list[str]:
     return [str(v) for v in value] if isinstance(value, list) else []
 
 
-_EMPTY: tuple = (0, None, 0, [], [], [])
+_EMPTY: tuple = (0, None, 0, None, [], [], [])
 
 
 def _sessions(name: str, index: Path) -> tuple:
@@ -165,10 +166,6 @@ def _sessions(name: str, index: Path) -> tuple:
     except sqlite3.Error:
         return _EMPTY
     try:
-        # `ended` is when the last message landed. The turns table holds the
-        # exact stamp, but joining it costs ~171 ms per project against 0 ms
-        # here, for a worst observed gap of 15.7 minutes — not a trade worth
-        # making to order a list.
         count, last, turns = db.execute(
             "select count(*), max(coalesce(ended, started)), "
             "sum(coalesce(n_turns, 0)) from sessions where project = ?",
@@ -188,6 +185,21 @@ def _sessions(name: str, index: Path) -> tuple:
         # alone found three of the eight notes that actually discuss orglens.
         # The table is small, so match exactly in Python rather than with LIKE
         # over JSON text.
+        # The exact last turn, not just when the session ended. It carries what
+        # was actually said, which answers "what was I doing" in a way no count
+        # does. Costs a few hundred ms across the whole tree — the render
+        # already spends more than that in git.
+        row = db.execute(
+            "select t.ts, t.role, substr(t.text, 1, 240) from turns t "
+            "join sessions s on s.id = t.session_id "
+            "where s.project = ? and t.text is not null and t.text != '' "
+            "order by t.ts desc limit 1",
+            (name,),
+        ).fetchone()
+        last_turn = (
+            {"at": _epoch(row[0]), "role": row[1], "text": row[2]} if row else None
+        )
+
         notes = []
         for topic, title, ts, tags, entities, project in db.execute(
             "select n.topic, n.title, n.ts, n.tags, n.entities, s.project "
@@ -225,6 +237,7 @@ def _sessions(name: str, index: Path) -> tuple:
         count or 0,
         (int(last) // 1000 if last else None),
         turns or 0,
+        last_turn,
         agents,
         needs,
         notes,
@@ -248,6 +261,7 @@ def read(path: Path, name: str, index: Path = SCAD_INDEX) -> Activity:
         activity.sessions,
         activity.last_session,
         activity.turns,
+        activity.last_turn,
         activity.agents,
         activity.needs,
         activity.notes,

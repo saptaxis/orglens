@@ -50,6 +50,8 @@ details.card[open] { background:transparent }
 .detail a:hover { border-bottom-color:var(--fg) }
 .ask { color:var(--warn); margin:.3rem 0 }
 .when { color:var(--dim); font-weight:400; font-size:.92em }
+.said { white-space:pre-wrap; color:var(--dim); border-left:2px solid var(--line);
+  padding-left:.6rem; margin:.2rem 0 }
 .pill { display:inline-block; border:1px solid var(--line); border-radius:4px;
   padding:0 .35rem; margin:0 .25rem .25rem 0; font-size:.76rem }
 .cp { cursor:pointer; color:var(--dim); margin-left:.3rem; font-size:.8em;
@@ -104,8 +106,9 @@ def _facts(a: Activity) -> str:
     bits.append(f"edited {ago(a.modified)}")
     if a.touched and a.modified and abs(a.touched - a.modified) > 3600:
         bits.append(f"committed {ago(a.touched)}")
-    if a.last_session:
-        bits.append(f"session {ago(a.last_session)}")
+    spoke = (a.last_turn or {}).get("at") or a.last_session
+    if spoke:
+        bits.append(f"session {ago(spoke)}")
     return " · ".join(bits)
 
 
@@ -195,6 +198,14 @@ def _detail(row: dict, ctx: dict) -> str:
                 f"<span class='when'>{html.escape(where + when)}</span></div>"
             )
 
+    if a.last_turn and a.last_turn.get("text"):
+        who = a.last_turn.get("role") or "?"
+        out.append(
+            f"<h4>Last said <span class='when'>· {who} · {ago(a.last_turn['at'])}"
+            "</span></h4>"
+            f"<div class='said'>{html.escape(a.last_turn['text'].strip()[:240])}</div>"
+        )
+
     out.append(f"<h4>Root</h4><div>{_link(row['path'], str(row['path']), ctx)}</div>")
     return "<div class='detail'>" + "".join(out) + "</div>"
 
@@ -227,7 +238,8 @@ def _recency(row: dict) -> int:
     for different reasons, and either can be the one you meant.
     """
     a = row["activity"]
-    return max(a.modified or 0, a.last_session or 0)
+    spoke = (a.last_turn or {}).get("at") or a.last_session or 0
+    return max(a.modified or 0, spoke)
 
 
 def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
