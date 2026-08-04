@@ -17,6 +17,7 @@ worst it can be is closed.
 from __future__ import annotations
 
 import html
+import re
 import time
 from pathlib import Path
 
@@ -47,7 +48,8 @@ details.card[open] { background:transparent }
 .detail h4:first-child { margin-top:0 }
 .detail a { color:inherit; text-decoration:none; border-bottom:1px solid var(--line) }
 .detail a:hover { border-bottom-color:var(--fg) }
-.ask { color:var(--warn); margin:.2rem 0 }
+.ask { color:var(--warn); margin:.3rem 0 }
+.when { color:var(--dim); font-weight:400; font-size:.92em }
 .pill { display:inline-block; border:1px solid var(--line); border-radius:4px;
   padding:0 .35rem; margin:0 .25rem .25rem 0; font-size:.76rem }
 .cp { cursor:pointer; color:var(--dim); margin-left:.3rem; font-size:.8em;
@@ -120,6 +122,15 @@ def doc_url(path: Path, docs_root: Path, base: str) -> str:
     return f"{base}/{tail}"
 
 
+_DATE = re.compile(r"([A-Z][a-z]{2})(\d{2})(\d{4})")
+
+
+def _filedate(name: str) -> str:
+    """The grammar puts MonDDYYYY in plan and log filenames. Surface it."""
+    m = _DATE.search(name)
+    return f"{m.group(2)} {m.group(1)} {m.group(3)}" if m else ""
+
+
 def _link(path, label: str, ctx: dict) -> str:
     """Click opens the served doc; the copy affordance yields the real path."""
     url = doc_url(path, ctx["docs_root"], ctx["base_url"])
@@ -138,15 +149,21 @@ def _detail(row: dict, ctx: dict) -> str:
         out.append("<h4>Waiting</h4>")
         if a.blocked:
             out.append(f"<div class='ask'>{a.blocked} workflow packet(s) at a gate</div>")
-        for q in a.needs:
-            out.append(f"<div class='ask'>{html.escape(q.strip()[:400])}</div>")
+        for ask in a.needs:
+            when = f"<span class='when'> · asked {ago(ask['at'])}</span>" if ask["at"] else ""
+            out.append(
+                f"<div class='ask'>{html.escape(ask['question'].strip()[:400])}{when}</div>"
+            )
 
     for label, items in row["artifacts"]:
         if not items:
             continue
         out.append(f"<h4>{html.escape(label)} ({len(items)})</h4><div>")
         for art in items[-8:]:
-            out.append(f"<span class='pill'>{_link(art.path, art.name, ctx)}</span>")
+            out.append(
+                f"<span class='pill'>{_link(art.path, art.name, ctx)}"
+                f"<span class='when'> {_filedate(art.name)}</span></span>"
+            )
         out.append("</div>")
 
     if row.get("docs"):
@@ -165,10 +182,11 @@ def _detail(row: dict, ctx: dict) -> str:
         out.append("<h4>Notes</h4>")
         for n in a.notes[:8]:
             where = "" if n["written_in"] == row["name"] else f" · written in {n['written_in']}"
+            when = f" · {ago(n['at'])}" if n.get("at") else ""
             out.append(
                 f"<div>{html.escape(str(n['topic']))} — "
                 f"{html.escape(str(n['title'] or '')[:96])}"
-                f"<span style='color:var(--dim)'>{html.escape(where)}</span></div>"
+                f"<span class='when'>{html.escape(where + when)}</span></div>"
             )
 
     out.append(f"<h4>Root</h4><div>{_link(row['path'], str(row['path']), ctx)}</div>")
@@ -213,9 +231,15 @@ def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
     body = []
 
     if open_items:
+        oldest = min(
+            (ask["at"] for _, rows in groups for r in rows
+             for ask in r["activity"].needs if ask.get("at")),
+            default=None,
+        )
+        age = f" · oldest {ago(oldest)}" if oldest else ""
         body.append(
             f"<div class='badge'>{open_items} waiting on you"
-            f" · {projects} project{'s' * (projects != 1)}</div>"
+            f" · {projects} project{'s' * (projects != 1)}{age}</div>"
         )
     else:
         body.append("<div class='badge clear'>nothing waiting</div>")

@@ -28,6 +28,7 @@ import json
 import sqlite3
 import subprocess
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 SCAD_INDEX = Path.home() / ".scad" / "index.sqlite"
@@ -44,7 +45,7 @@ class Activity:
     last_session: int | None = None     # epoch seconds
     turns: int = 0
     agents: list[str] = field(default_factory=list)
-    needs: list[str] = field(default_factory=list)
+    needs: list[dict] = field(default_factory=list)   # {question, at}
     notes: list[dict] = field(default_factory=list)   # the authored tier
 
     @property
@@ -97,6 +98,18 @@ def _packets(path: Path) -> tuple[int, int]:
         except (ValueError, OSError):
             pass
     return total, blocked
+
+
+def _epoch(ts) -> int | None:
+    """scad writes note timestamps as ISO strings; the view wants seconds."""
+    if ts is None:
+        return None
+    if isinstance(ts, (int, float)):
+        return int(ts) // (1000 if ts > 1e11 else 1)
+    try:
+        return int(datetime.fromisoformat(str(ts)).timestamp())
+    except ValueError:
+        return None
 
 
 def _json_list(raw: str | None) -> list[str]:
@@ -153,16 +166,19 @@ def _sessions(name: str, index: Path) -> tuple:
                 {
                     "topic": topic,
                     "title": title,
-                    "ts": ts,
+                    "at": _epoch(ts),
                     "written_in": project,
                     "about": named or topic == name,
                 }
             )
+        # `ended` is when the session stopped with the question outstanding,
+        # which is the date a human actually cares about — how long it has sat.
         needs = [
-            row[0]
-            for row in db.execute(
-                "select needs from sessions where project = ? "
-                "and needs is not null and needs != '' order by started desc",
+            {"question": q, "at": (int(at) // 1000 if at else None)}
+            for q, at in db.execute(
+                "select needs, coalesce(ended, started) from sessions "
+                "where project = ? and needs is not null and needs != '' "
+                "order by coalesce(ended, started) desc",
                 (name,),
             )
         ]

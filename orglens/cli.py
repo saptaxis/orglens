@@ -158,8 +158,10 @@ def status():
         for name, act in waiting:
             if act.blocked:
                 click.echo(f"  {name}: {act.blocked} packet(s) at a gate")
-            for question in act.needs:
-                click.echo(f"  {name}: {question.strip().splitlines()[0][:96]}")
+            for ask in act.needs:
+                when = f" ({_ago(ask['at'])} ago)" if ask["at"] else ""
+                first = ask["question"].strip().splitlines()[0]
+                click.echo(f"  {name}: {first[:88]}{when}")
 
 
 @cli.command()
