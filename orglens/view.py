@@ -52,6 +52,11 @@ details.card[open] { background:transparent }
 .when { color:var(--dim); font-weight:400; font-size:.92em }
 .said { white-space:pre-wrap; color:var(--dim); border-left:2px solid var(--line);
   padding-left:.6rem; margin:.2rem 0 }
+ol.list { margin:.2rem 0; padding-left:1.4rem }
+ol.list li { margin:.18rem 0 }
+ol.list li.open { color:var(--warn) }
+.pin { display:inline-block; border:1px solid var(--warn); color:var(--warn);
+  border-radius:3px; padding:0 .3rem; margin-right:.4rem; font-size:.72rem }
 .pill { display:inline-block; border:1px solid var(--line); border-radius:4px;
   padding:0 .35rem; margin:0 .25rem .25rem 0; font-size:.76rem }
 .cp { cursor:pointer; color:var(--dim); margin-left:.3rem; font-size:.8em;
@@ -99,6 +104,8 @@ def _facts(a: Activity) -> str:
     if a.sessions:
         who = "/".join(a.agents) if a.agents else "?"
         bits.append(f"{a.sessions} sessions ({who}) · {a.turns:,} turns")
+    if a.open_sessions:
+        bits.append(f"<span class='gate'>{a.open_sessions} open</span>")
     if a.dirty:
         bits.append(f"{a.dirty} uncommitted")
     # Three clocks, deliberately not merged: what landed, what was touched,
@@ -188,15 +195,33 @@ def _detail(row: dict, ctx: dict) -> str:
         out.append("</div>")
 
     if a.notes:
-        out.append("<h4>Notes</h4>")
+        out.append(f"<h4>Notes ({len(a.notes)})</h4><ol class='list'>")
         for n in a.notes[:8]:
             where = "" if n["written_in"] == row["name"] else f" · written in {n['written_in']}"
             when = f" · {ago(n['at'])}" if n.get("at") else ""
             out.append(
-                f"<div>{html.escape(str(n['topic']))} — "
-                f"{html.escape(str(n['title'] or '')[:96])}"
-                f"<span class='when'>{html.escape(where + when)}</span></div>"
+                f"<li><b>{html.escape(str(n['topic']))}</b> — "
+                f"{html.escape(str(n['title'] or '')[:110])}"
+                f"<span class='when'>{html.escape(where + when)}</span></li>"
             )
+        out.append("</ol>")
+
+    if a.recent:
+        label = f"Sessions ({len(a.recent)}"
+        label += f", {a.open_sessions} open)" if a.open_sessions else ")"
+        out.append(f"<h4>{label}</h4><ol class='list'>")
+        for s in a.recent:
+            mark = " class='open'" if s["open"] else ""
+            flag = (
+                f"<span class='pin'>{html.escape(str(s['outcome']))}</span>"
+                if s["open"] else ""
+            )
+            out.append(
+                f"<li{mark}>{flag}{html.escape(str(s['name'] or 'untitled'))[:70]}"
+                f"<span class='when'> · {s['agent']} · {s['turns']:,} turns · "
+                f"{ago(s['at'])}</span></li>"
+            )
+        out.append("</ol>")
 
     if a.last_turn and a.last_turn.get("text"):
         who = a.last_turn.get("role") or "?"

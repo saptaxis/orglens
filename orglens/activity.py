@@ -46,9 +46,15 @@ class Activity:
     last_session: int | None = None     # epoch seconds
     turns: int = 0
     last_turn: dict | None = None       # {at, role, text} — what was last said
+    recent: list[dict] = field(default_factory=list)  # last few main sessions
     agents: list[str] = field(default_factory=list)
     needs: list[dict] = field(default_factory=list)   # {question, at}
     notes: list[dict] = field(default_factory=list)   # the authored tier
+
+    @property
+    def open_sessions(self) -> int:
+        """Sessions that stopped mid-conversation — the resumable ones."""
+        return sum(1 for s in self.recent if s["open"])
 
     @property
     def waiting(self) -> int:
@@ -154,7 +160,11 @@ def _json_list(raw: str | None) -> list[str]:
     return [str(v) for v in value] if isinstance(value, list) else []
 
 
-_EMPTY: tuple = (0, None, 0, None, [], [], [])
+#: Outcomes that mean the conversation stopped without finishing — the ones
+#: you can pick back up. scad's own viewer treats the first two the same way.
+_OPEN = {"awaiting-user", "awaiting-question", "in-flight"}
+
+_EMPTY: tuple = (0, None, 0, None, [], [], [], [])
 
 
 def _sessions(name: str, index: Path) -> tuple:
@@ -200,6 +210,26 @@ def _sessions(name: str, index: Path) -> tuple:
             {"at": _epoch(row[0]), "role": row[1], "text": row[2]} if row else None
         )
 
+        # Only `main` sessions. The store is 1264 workflow-agents against 232
+        # mains, and a subagent is an implementation detail of a session that
+        # is already listed.
+        recent = [
+            {
+                "at": _epoch(at),
+                "agent": agent,
+                "outcome": outcome,
+                "name": name or title,
+                "turns": n_turns or 0,
+                "open": outcome in _OPEN,
+            }
+            for at, agent, outcome, name, title, n_turns in db.execute(
+                "select coalesce(ended, started), agent, outcome, name, title, "
+                "n_turns from sessions where project = ? and kind = 'main' "
+                "order by coalesce(ended, started) desc limit 8",
+                (name,),
+            )
+        ]
+
         notes = []
         for topic, title, ts, tags, entities, project in db.execute(
             "select n.topic, n.title, n.ts, n.tags, n.entities, s.project "
@@ -238,6 +268,7 @@ def _sessions(name: str, index: Path) -> tuple:
         (int(last) // 1000 if last else None),
         turns or 0,
         last_turn,
+        recent,
         agents,
         needs,
         notes,
@@ -262,6 +293,7 @@ def read(path: Path, name: str, index: Path = SCAD_INDEX) -> Activity:
         activity.last_session,
         activity.turns,
         activity.last_turn,
+        activity.recent,
         activity.agents,
         activity.needs,
         activity.notes,
