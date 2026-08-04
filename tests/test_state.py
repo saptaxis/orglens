@@ -8,23 +8,28 @@ from orglens.state import extract_status, extract_table_statuses
 class TestStatusExtraction:
     def test_extract_status_badge(self):
         content = '# Overview\n\n> **Status:** Active\n'
-        assert extract_status(content) == "active"
+        assert extract_status(content) == "Active"
 
     def test_extract_status_with_parens(self):
         content = '> **Status:** Packaged and shipped (Plan 01 complete)\n'
-        assert extract_status(content) == "packaged and shipped"
+        assert extract_status(content) == "Packaged and shipped"
 
     def test_extract_design_complete(self):
         content = '> **Status:** Design complete, implementation pending\n'
-        assert extract_status(content) == "design complete"
+        assert extract_status(content) == "Design complete"
 
     def test_no_status_returns_none(self):
         content = "# Overview\n\nJust some text.\n"
         assert extract_status(content) is None
 
-    def test_extract_status_case_insensitive(self):
-        content = '> **Status:** ACTIVE\n'
-        assert extract_status(content) == "active"
+    def test_the_author_s_case_is_preserved(self):
+        """Folding here turned POC into Poc and PhysicsX into Physicsx."""
+        assert extract_status('> **Status:** POC working end to end\n') == (
+            "POC working end to end"
+        )
+        assert extract_status('> **Status:** Prep for PhysicsX\n') == (
+            "Prep for PhysicsX"
+        )
 
 
 class TestTableStatusExtraction:

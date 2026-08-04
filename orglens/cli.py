@@ -8,6 +8,10 @@ from pathlib import Path
 
 import click
 
+import time
+
+from orglens import activity
+
 from orglens.config import Config
 from orglens.snapshot import generate_snapshot
 from orglens.state import extract_status
@@ -37,6 +41,16 @@ def cli():
 
 
 cli.add_command(workflow_group, name="workflow")
+
+
+def _ago(ts: int) -> str:
+    """Coarse age. Precision past the hour is noise at this scale."""
+    hours = (time.time() - ts) / 3600
+    if hours < 24:
+        return f"{hours:.0f}h"
+    if hours < 24 * 60:
+        return f"{hours / 24:.0f}d"
+    return f"{hours / 720:.0f}mo"
 
 
 @cli.command()
@@ -97,6 +111,8 @@ def status():
         "client": "Clients",
     }
 
+    waiting: list[tuple[str, activity.Activity]] = []
+
     for etype in ["research-program", "project", "client"]:
         group = by_type.get(etype, [])
         if not group:
@@ -113,23 +129,37 @@ def status():
                 # Truncate after first semicolon
                 truncated = status.split(";")[0].strip()
                 # Capitalize first letter only
-                status_str = truncated[0].upper() + truncated[1:] if truncated else "—"
+                status_str = truncated or "—"
             else:
                 status_str = "—"
 
-            # Count artifacts
-            plan_count = len(topo.find_artifacts("plan", e.name))
-            plan_str = f"  {plan_count} plans" if plan_count else ""
+            # Derived, not declared. The prose says why; these say where.
+            act = activity.read(e.path, e.name)
+            facts = []
+            if act.plan:
+                facts.append(f"plan {act.plan}")
+            if act.touched:
+                facts.append(f"{_ago(act.touched)} ago")
+            if act.sessions:
+                facts.append(f"{act.sessions} sessions")
+            if act.packets:
+                facts.append(f"{act.packets} packets")
+            if act.dirty:
+                facts.append(f"{act.dirty} uncommitted")
 
-            # Count child experiments for research programs
-            expt_str = ""
-            if etype == "research-program":
-                expts = by_type.get("experiment", [])
-                rp_expts = [x for x in expts if x.parent_name == e.name]
-                if rp_expts:
-                    expt_str = f"  {len(rp_expts)} experiments"
+            click.echo(f"  {e.name:<32} {' · '.join(facts) or '—'}")
+            if status_str != "—":
+                click.echo(f"      {status_str}")
+            if act.waiting:
+                waiting.append((e.name, act))
 
-            click.echo(f"  {e.name:<40} {status_str:<20}{expt_str}{plan_str}")
+    if waiting:
+        click.echo("\nWaiting on you:")
+        for name, act in waiting:
+            if act.blocked:
+                click.echo(f"  {name}: {act.blocked} packet(s) at a gate")
+            for question in act.needs:
+                click.echo(f"  {name}: {question.strip().splitlines()[0][:96]}")
 
 
 @cli.command()

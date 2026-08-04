@@ -20,7 +20,9 @@ def extract_status(content: str) -> str | None:
     raw = re.sub(r'\s*\(.*\)\s*$', '', raw)
     # Strip trailing comma and everything after
     raw = re.sub(r',.*$', '', raw)
-    return raw.strip().lower()
+    # Preserve the author's case. Lowercasing here and re-capitalising at the
+    # call site turned "POC" into "Poc" and "PhysicsX" into "Physicsx".
+    return raw.strip()
 
 
 def extract_table_statuses(content: str) -> list[dict]:
