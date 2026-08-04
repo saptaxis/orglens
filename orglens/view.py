@@ -161,6 +161,12 @@ def _link(path, label: str, ctx: dict) -> str:
     )
 
 
+#: Section order inside a card, most actionable first. Artifact headings are
+#: matched case-insensitively against the grammar's own type names, so a
+#: grammar that adds a type still renders — just at the end.
+ARTIFACT_ORDER = ("spec", "plan", "log")
+
+
 def _detail(row: dict, ctx: dict) -> str:
     """What the taxonomy knows, once you ask. Links point into the tree."""
     a, out = row["activity"], []
@@ -174,41 +180,6 @@ def _detail(row: dict, ctx: dict) -> str:
             out.append(
                 f"<div class='ask'>{html.escape(ask['question'].strip()[:400])}{when}</div>"
             )
-
-    for label, items in row["artifacts"]:
-        if not items:
-            continue
-        out.append(f"<h4>{html.escape(label)} ({len(items)})</h4><div>")
-        for art in items[-8:]:
-            out.append(
-                f"<span class='pill'>{_link(art.path, art.name, ctx)}"
-                f"<span class='when'> {_filedate(art.name)}</span></span>"
-            )
-        out.append("</div>")
-
-    if row.get("docs"):
-        out.append(f"<h4>Documents ({len(row['docs'])})</h4><div>")
-        for d in row["docs"]:
-            out.append(f"<span class='pill'>{_link(d, d.name, ctx)}</span>")
-        out.append("</div>")
-
-    if row["dirs"]:
-        out.append("<h4>Directories</h4><div>")
-        for d in row["dirs"]:
-            out.append(f"<span class='pill'>{_link(d, d.name + '/', ctx)}</span>")
-        out.append("</div>")
-
-    if a.notes:
-        out.append(f"<h4>Notes ({len(a.notes)})</h4><ol class='list'>")
-        for n in a.notes[:8]:
-            where = "" if n["written_in"] == row["name"] else f" · written in {n['written_in']}"
-            when = f" · {ago(n['at'])}" if n.get("at") else ""
-            out.append(
-                f"<li><b>{html.escape(str(n['topic']))}</b> — "
-                f"{html.escape(str(n['title'] or '')[:110])}"
-                f"<span class='when'>{html.escape(where + when)}</span></li>"
-            )
-        out.append("</ol>")
 
     if a.live:
         out.append(f"<h4>Running now ({len(a.live)})</h4><ol class='list'>")
@@ -244,6 +215,48 @@ def _detail(row: dict, ctx: dict) -> str:
             "</span></h4>"
             f"<div class='said'>{html.escape(a.last_turn['text'].strip()[:240])}</div>"
         )
+
+    if a.notes:
+        out.append(f"<h4>Notes ({len(a.notes)})</h4><ol class='list'>")
+        for n in a.notes[:8]:
+            where = "" if n["written_in"] == row["name"] else f" · written in {n['written_in']}"
+            when = f" · {ago(n['at'])}" if n.get("at") else ""
+            out.append(
+                f"<li><b>{html.escape(str(n['topic']))}</b> — "
+                f"{html.escape(str(n['title'] or '')[:110])}"
+                f"<span class='when'>{html.escape(where + when)}</span></li>"
+            )
+        out.append("</ol>")
+
+    if row["dirs"]:
+        out.append("<h4>Directories</h4><div>")
+        for d in row["dirs"]:
+            out.append(f"<span class='pill'>{_link(d, d.name + '/', ctx)}</span>")
+        out.append("</div>")
+
+    if row.get("docs"):
+        out.append(f"<h4>Documents ({len(row['docs'])})</h4><div>")
+        for d in row["docs"]:
+            out.append(f"<span class='pill'>{_link(d, d.name, ctx)}</span>")
+        out.append("</div>")
+
+    def rank(pair):
+        heading = pair[0].lower()
+        for i, kind in enumerate(ARTIFACT_ORDER):
+            if heading.startswith(kind):
+                return i
+        return len(ARTIFACT_ORDER)
+
+    for label, items in sorted(row["artifacts"], key=rank):
+        if not items:
+            continue
+        out.append(f"<h4>{html.escape(label)} ({len(items)})</h4><div>")
+        for art in items[-8:]:
+            out.append(
+                f"<span class='pill'>{_link(art.path, art.name, ctx)}"
+                f"<span class='when'> {_filedate(art.name)}</span></span>"
+            )
+        out.append("</div>")
 
     out.append(f"<h4>Root</h4><div>{_link(row['path'], str(row['path']), ctx)}</div>")
     return "<div class='detail'>" + "".join(out) + "</div>"
