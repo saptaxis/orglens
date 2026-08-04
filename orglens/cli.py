@@ -10,7 +10,7 @@ import click
 
 import time
 
-from orglens import activity
+from orglens import activity, view
 
 from orglens.config import Config
 from orglens.snapshot import generate_snapshot
@@ -249,3 +249,41 @@ def _refresh_snapshot(topo: Topology, config: Config):
         generate_snapshot(topo, config, output_path=config.snapshot_path)
     except Exception:
         pass  # Non-critical — don't fail the main operation
+
+
+@cli.command(name="view")
+@click.option("--out", default="~/.orglens/view.html", help="Where to write the page.")
+@click.option("--open/--no-open", "do_open", default=True, help="Open it after writing.")
+def view_cmd(out: str, do_open: bool):
+    """Render where every project stands, and open it.
+
+    Joins what the tree knows (plans, packets, uncommitted work) with what scad
+    knows (sessions, notes, open questions). Everything is recomputed here, so
+    the page cannot drift the way a written status line does.
+    """
+    topo, _ = _load_topo()
+
+    by_type: dict[str, list] = {}
+    for entity in topo.list_entities():
+        by_type.setdefault(entity.entity_type, []).append(entity)
+
+    labels = {
+        "research-program": "Research programs",
+        "project": "Projects",
+        "client": "Clients",
+    }
+    groups = []
+    for etype, label in labels.items():
+        rows = []
+        for entity in by_type.get(etype, []):
+            et = topo.grammar.entity_types[etype]
+            why = None
+            if et.state_file and (entity.path / et.state_file).exists():
+                why = extract_status((entity.path / et.state_file).read_text())
+            rows.append((entity.name, why, activity.read(entity.path, entity.name)))
+        groups.append((label, rows))
+
+    path = view.write(view.render(groups), Path(out))
+    click.echo(f"wrote {path}")
+    if do_open:
+        os.system(f"open '{path}'")

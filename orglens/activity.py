@@ -24,6 +24,7 @@ without scad, an entity with no plans are all ordinary.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import subprocess
 from dataclasses import dataclass, field
@@ -41,7 +42,10 @@ class Activity:
     blocked: int = 0                    # packets holding an unanswered question
     sessions: int = 0
     last_session: int | None = None     # epoch seconds
+    turns: int = 0
+    agents: list[str] = field(default_factory=list)
     needs: list[str] = field(default_factory=list)
+    notes: list[dict] = field(default_factory=list)   # the authored tier
 
     @property
     def waiting(self) -> int:
@@ -95,18 +99,65 @@ def _packets(path: Path) -> tuple[int, int]:
     return total, blocked
 
 
-def _sessions(name: str, index: Path) -> tuple[int, int | None, list[str]]:
+def _json_list(raw: str | None) -> list[str]:
+    """scad stores tags and entities as JSON arrays of strings."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return [str(v) for v in value] if isinstance(value, list) else []
+
+
+_EMPTY: tuple = (0, None, 0, [], [], [])
+
+
+def _sessions(name: str, index: Path) -> tuple:
     """Sessions scad attributed to this entity, and their open questions."""
     if not index.exists():
-        return 0, None, []
+        return _EMPTY
     try:
         db = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
     except sqlite3.Error:
-        return 0, None, []
+        return _EMPTY
     try:
-        count, last = db.execute(
-            "select count(*), max(started) from sessions where project = ?", (name,)
+        count, last, turns = db.execute(
+            "select count(*), max(started), sum(coalesce(n_turns, 0)) "
+            "from sessions where project = ?",
+            (name,),
         ).fetchone()
+        agents = [
+            row[0]
+            for row in db.execute(
+                "select distinct agent from sessions where project = ? "
+                "and agent is not null order by agent",
+                (name,),
+            )
+        ]
+        # A note is *about* an entity, which is not the same as being *written
+        # in* one. The field report on orglens was authored from a session in
+        # another project and cross-tagged; joining on the session's project
+        # alone found three of the eight notes that actually discuss orglens.
+        # The table is small, so match exactly in Python rather than with LIKE
+        # over JSON text.
+        notes = []
+        for topic, title, ts, tags, entities, project in db.execute(
+            "select n.topic, n.title, n.ts, n.tags, n.entities, s.project "
+            "from notes n join sessions s on s.id = n.session_id order by n.ts desc"
+        ):
+            named = name in _json_list(tags) or name in _json_list(entities)
+            if not (named or topic == name or project == name):
+                continue
+            notes.append(
+                {
+                    "topic": topic,
+                    "title": title,
+                    "ts": ts,
+                    "written_in": project,
+                    "about": named or topic == name,
+                }
+            )
         needs = [
             row[0]
             for row in db.execute(
@@ -116,11 +167,18 @@ def _sessions(name: str, index: Path) -> tuple[int, int | None, list[str]]:
             )
         ]
     except sqlite3.Error:
-        return 0, None, []
+        return _EMPTY
     finally:
         db.close()
     # scad stores epoch milliseconds.
-    return count or 0, (int(last) // 1000 if last else None), needs
+    return (
+        count or 0,
+        (int(last) // 1000 if last else None),
+        turns or 0,
+        agents,
+        needs,
+        notes,
+    )
 
 
 def read(path: Path, name: str, index: Path = SCAD_INDEX) -> Activity:
@@ -135,5 +193,12 @@ def read(path: Path, name: str, index: Path = SCAD_INDEX) -> Activity:
 
     activity.plan = _latest_plan(path)
     activity.packets, activity.blocked = _packets(path)
-    activity.sessions, activity.last_session, activity.needs = _sessions(name, index)
+    (
+        activity.sessions,
+        activity.last_session,
+        activity.turns,
+        activity.agents,
+        activity.needs,
+        activity.notes,
+    ) = _sessions(name, index)
     return activity
