@@ -25,13 +25,20 @@ without scad, an entity with no plans are all ordinary.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 SCAD_INDEX = Path.home() / ".scad" / "index.sqlite"
+
+#: Claude writes one file per running process here. It is the only source that
+#: knows a session is *live* rather than merely unfinished — the index records
+#: what a trace said when it was archived, which is a different question.
+LIVE_REGISTRY = Path.home() / ".claude" / "sessions"
 
 
 @dataclass
@@ -47,9 +54,15 @@ class Activity:
     turns: int = 0
     last_turn: dict | None = None       # {at, role, text} — what was last said
     recent: list[dict] = field(default_factory=list)  # last few main sessions
+    live: list[dict] = field(default_factory=list)     # processes running now
     agents: list[str] = field(default_factory=list)
     needs: list[dict] = field(default_factory=list)   # {question, at}
     notes: list[dict] = field(default_factory=list)   # the authored tier
+
+    @property
+    def live_sessions(self) -> int:
+        """Panes you could switch to right now."""
+        return len(self.live)
 
     @property
     def open_sessions(self) -> int:
@@ -135,6 +148,55 @@ def _packets(path: Path) -> tuple[int, int]:
         except (ValueError, OSError):
             pass
     return total, blocked
+
+
+@lru_cache(maxsize=1)
+def _live_by_project(index: Path) -> dict[str, list[dict]]:
+    """Sessions whose process is still running, grouped by project.
+
+    Liveness is a `kill(pid, 0)` against the registry Claude maintains; the
+    project comes from the index. Claude-only — codex and kimi keep no
+    equivalent registry, so their live work is invisible here.
+    """
+    out: dict[str, list[dict]] = {}
+    if not LIVE_REGISTRY.is_dir():
+        return out
+    db = None
+    if index.exists():
+        try:
+            db = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
+        except sqlite3.Error:
+            db = None
+    for entry in sorted(LIVE_REGISTRY.glob("*.json")):
+        try:
+            data = json.loads(entry.read_text())
+            pid = int(data["pid"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            continue
+        project = None
+        if db is not None:
+            row = db.execute(
+                "select project, coalesce(nullif(name,''), nullif(title,'')) "
+                "from sessions where id = ?",
+                (data.get("sessionId"),),
+            ).fetchone()
+            project, label = (row or (None, None))
+        out.setdefault(project or "unfiled", []).append(
+            {
+                "pid": pid,
+                "session": data.get("sessionId"),
+                "cwd": data.get("cwd"),
+                "kind": data.get("kind"),
+                "name": (label if db is not None else None),
+            }
+        )
+    if db is not None:
+        db.close()
+    return out
 
 
 def _epoch(ts) -> int | None:
@@ -286,6 +348,7 @@ def read(path: Path, name: str, index: Path = SCAD_INDEX) -> Activity:
         activity.dirty = _dirty(root, path)
     activity.modified = _newest_mtime(path)
 
+    activity.live = _live_by_project(index).get(name, [])
     activity.plan = _latest_plan(path)
     activity.packets, activity.blocked = _packets(path)
     (

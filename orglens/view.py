@@ -25,9 +25,9 @@ from orglens.activity import Activity
 
 CSS = """
 :root { color-scheme: light dark;
-  --bg:#fff; --fg:#111; --dim:#666; --line:#e3e3e3; --card:#fafafa; --warn:#b45309; }
+  --bg:#fff; --fg:#111; --dim:#666; --line:#e3e3e3; --card:#fafafa; --warn:#b45309; --ok:#15803d; }
 @media (prefers-color-scheme: dark) { :root {
-  --bg:#111; --fg:#eee; --dim:#999; --line:#2a2a2a; --card:#191919; --warn:#fbbf24; } }
+  --bg:#111; --fg:#eee; --dim:#999; --line:#2a2a2a; --card:#191919; --warn:#fbbf24; --ok:#4ade80; } }
 * { box-sizing:border-box }
 body { margin:0; padding:2rem 1.5rem; background:var(--bg); color:var(--fg);
   font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",sans-serif; }
@@ -38,6 +38,7 @@ h1 { font-size:1.1rem; font-weight:600; margin:0 0 .25rem }
   border-radius:999px; padding:.15rem .6rem; font-size:.75rem; font-weight:600;
   margin-bottom:1.5rem }
 .badge.clear { border-color:var(--line); color:var(--dim); font-weight:400 }
+.badge.live-badge { border-color:var(--ok); color:var(--ok); margin-right:.4rem }
 details.card > summary { cursor:pointer; list-style:none; outline:none }
 details.card > summary::-webkit-details-marker { display:none }
 details.card[open] { background:transparent }
@@ -55,6 +56,7 @@ details.card[open] { background:transparent }
 ol.list { margin:.2rem 0; padding-left:1.4rem }
 ol.list li { margin:.18rem 0 }
 ol.list li.open { color:var(--warn) }
+ol.list li.live, .live { color:var(--ok); font-weight:600 }
 .pin { display:inline-block; border:1px solid var(--warn); color:var(--warn);
   border-radius:3px; padding:0 .3rem; margin-right:.4rem; font-size:.72rem }
 .pill { display:inline-block; border:1px solid var(--line); border-radius:4px;
@@ -104,8 +106,10 @@ def _facts(a: Activity) -> str:
     if a.sessions:
         who = "/".join(a.agents) if a.agents else "?"
         bits.append(f"{a.sessions} sessions ({who}) · {a.turns:,} turns")
+    if a.live_sessions:
+        bits.append(f"<span class='live'>&#x25CF; {a.live_sessions} live</span>")
     if a.open_sessions:
-        bits.append(f"<span class='gate'>{a.open_sessions} open</span>")
+        bits.append(f"{a.open_sessions} resumable")
     if a.dirty:
         bits.append(f"{a.dirty} uncommitted")
     # Three clocks, deliberately not merged: what landed, what was touched,
@@ -206,9 +210,19 @@ def _detail(row: dict, ctx: dict) -> str:
             )
         out.append("</ol>")
 
+    if a.live:
+        out.append(f"<h4>Running now ({len(a.live)})</h4><ol class='list'>")
+        for s in a.live:
+            out.append(
+                f"<li class='live'>&#x25CF; {html.escape(str(s['name'] or s['session'] or '')[:60])}"
+                f"<span class='when'> · pid {s['pid']} · {html.escape(str(s['kind'] or ''))}"
+                f" · {html.escape(str(s['cwd'] or '')[-46:])}</span></li>"
+            )
+        out.append("</ol>")
+
     if a.recent:
         label = f"Sessions ({len(a.recent)}"
-        label += f", {a.open_sessions} open)" if a.open_sessions else ")"
+        label += f", {a.open_sessions} resumable)" if a.open_sessions else ")"
         out.append(f"<h4>{label}</h4><ol class='list'>")
         for s in a.recent:
             mark = " class='open'" if s["open"] else ""
@@ -263,6 +277,8 @@ def _recency(row: dict) -> int:
     for different reasons, and either can be the one you meant.
     """
     a = row["activity"]
+    if a.live:
+        return 1 << 62          # running now — nothing outranks it
     spoke = (a.last_turn or {}).get("at") or a.last_session or 0
     return max(a.modified or 0, spoke)
 
@@ -277,6 +293,10 @@ def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
     open_items = sum(r["activity"].waiting for _, rows in groups for r in rows)
     projects = len([r for _, rows in groups for r in rows if r["activity"].waiting])
     body = []
+
+    running = sum(r["activity"].live_sessions for _, rows in groups for r in rows)
+    if running:
+        body.append(f"<div class='badge live-badge'>&#x25CF; {running} running now</div> ")
 
     if open_items:
         oldest = min(
