@@ -99,7 +99,13 @@ def _facts(a: Activity) -> str:
         bits.append(f"{a.sessions} sessions ({who}) · {a.turns:,} turns")
     if a.dirty:
         bits.append(f"{a.dirty} uncommitted")
-    bits.append(ago(a.touched))
+    # Three clocks, deliberately not merged: what landed, what was touched,
+    # and when an agent last spoke. They diverge when work is in flight.
+    bits.append(f"edited {ago(a.modified)}")
+    if a.touched and a.modified and abs(a.touched - a.modified) > 3600:
+        bits.append(f"committed {ago(a.touched)}")
+    if a.last_session:
+        bits.append(f"session {ago(a.last_session)}")
     return " · ".join(bits)
 
 
@@ -215,8 +221,13 @@ def _card(name: str, why: str | None, a: Activity) -> str:
 
 
 def _recency(row: dict) -> int:
+    """Latest wins, across two independent clocks.
+
+    A tree edited an hour ago and a session that ran last week are both "recent"
+    for different reasons, and either can be the one you meant.
+    """
     a = row["activity"]
-    return max(a.touched or 0, a.last_session or 0)
+    return max(a.modified or 0, a.last_session or 0)
 
 
 def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
