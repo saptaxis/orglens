@@ -272,6 +272,10 @@ def view_cmd(out: str, do_open: bool):
         "project": "Projects",
         "client": "Clients",
     }
+    artifact_types = [
+        (name, name.title() + "s") for name in topo.grammar.artifact_types
+    ]
+
     groups = []
     for etype, label in labels.items():
         rows = []
@@ -280,7 +284,29 @@ def view_cmd(out: str, do_open: bool):
             why = None
             if et.state_file and (entity.path / et.state_file).exists():
                 why = extract_status((entity.path / et.state_file).read_text())
-            rows.append((entity.name, why, activity.read(entity.path, entity.name)))
+            rows.append(
+                {
+                    "name": entity.name,
+                    "path": entity.path,
+                    "why": why,
+                    "activity": activity.read(entity.path, entity.name),
+                    "artifacts": [
+                        (heading, topo.find_artifacts(kind, entity.name))
+                        for kind, heading in artifact_types
+                    ],
+                    # Root-level documents — backlog.md, handoffs, dated notes.
+                    # The grammar has no artifact type for these, so they are
+                    # invisible to `find`; they are often the entry point.
+                    "docs": sorted(
+                        f for f in entity.path.glob("*.md")
+                        if not f.name.startswith(".")
+                    ),
+                    "dirs": sorted(
+                        d for d in entity.path.iterdir()
+                        if d.is_dir() and not d.name.startswith(".")
+                    ),
+                }
+            )
         groups.append((label, rows))
 
     path = view.write(view.render(groups), Path(out))

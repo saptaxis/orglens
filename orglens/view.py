@@ -33,12 +33,23 @@ body { margin:0; padding:2rem 1.5rem; background:var(--bg); color:var(--fg);
 main { max-width:1000px; margin:0 auto }
 h1 { font-size:1.1rem; font-weight:600; margin:0 0 .25rem }
 .sub { color:var(--dim); font-size:.82rem; margin-bottom:1.75rem }
-.waiting { border:1px solid var(--warn); border-radius:8px; padding:.9rem 1.1rem;
-  margin-bottom:1.75rem }
-.waiting h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em;
-  color:var(--warn); margin:0 0 .5rem }
-.waiting li { margin:.3rem 0 }
-.waiting .who { font-weight:600 }
+.badge { display:inline-block; border:1px solid var(--warn); color:var(--warn);
+  border-radius:999px; padding:.15rem .6rem; font-size:.75rem; font-weight:600;
+  margin-bottom:1.5rem }
+.badge.clear { border-color:var(--line); color:var(--dim); font-weight:400 }
+details.card > summary { cursor:pointer; list-style:none; outline:none }
+details.card > summary::-webkit-details-marker { display:none }
+details.card[open] { background:transparent }
+.detail { margin-top:.75rem; padding-top:.7rem; border-top:1px solid var(--line);
+  font-size:.83rem }
+.detail h4 { font-size:.7rem; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--dim); margin:.7rem 0 .25rem; font-weight:600 }
+.detail h4:first-child { margin-top:0 }
+.detail a { color:inherit; text-decoration:none; border-bottom:1px solid var(--line) }
+.detail a:hover { border-bottom-color:var(--fg) }
+.ask { color:var(--warn); margin:.2rem 0 }
+.pill { display:inline-block; border:1px solid var(--line); border-radius:4px;
+  padding:0 .35rem; margin:0 .25rem .25rem 0; font-size:.76rem }
 h2.grp { font-size:.78rem; text-transform:uppercase; letter-spacing:.07em;
   color:var(--dim); margin:1.75rem 0 .6rem; border-bottom:1px solid var(--line);
   padding-bottom:.3rem }
@@ -86,6 +97,55 @@ def _facts(a: Activity) -> str:
     return " · ".join(bits)
 
 
+def _link(path, label: str) -> str:
+    return f"<a href='file://{html.escape(str(path))}'>{html.escape(label)}</a>"
+
+
+def _detail(row: dict) -> str:
+    """What the taxonomy knows, once you ask. Links point into the tree."""
+    a, out = row["activity"], []
+
+    if a.needs or a.blocked:
+        out.append("<h4>Waiting</h4>")
+        if a.blocked:
+            out.append(f"<div class='ask'>{a.blocked} workflow packet(s) at a gate</div>")
+        for q in a.needs:
+            out.append(f"<div class='ask'>{html.escape(q.strip()[:400])}</div>")
+
+    for label, items in row["artifacts"]:
+        if not items:
+            continue
+        out.append(f"<h4>{html.escape(label)} ({len(items)})</h4><div>")
+        for art in items[-8:]:
+            out.append(f"<span class='pill'>{_link(art.path, art.name)}</span>")
+        out.append("</div>")
+
+    if row.get("docs"):
+        out.append(f"<h4>Documents ({len(row['docs'])})</h4><div>")
+        for d in row["docs"]:
+            out.append(f"<span class='pill'>{_link(d, d.name)}</span>")
+        out.append("</div>")
+
+    if row["dirs"]:
+        out.append("<h4>Directories</h4><div>")
+        for d in row["dirs"]:
+            out.append(f"<span class='pill'>{_link(d, d.name + '/')}</span>")
+        out.append("</div>")
+
+    if a.notes:
+        out.append("<h4>Notes</h4>")
+        for n in a.notes[:8]:
+            where = "" if n["written_in"] == row["name"] else f" · written in {n['written_in']}"
+            out.append(
+                f"<div>{html.escape(str(n['topic']))} — "
+                f"{html.escape(str(n['title'] or '')[:96])}"
+                f"<span style='color:var(--dim)'>{html.escape(where)}</span></div>"
+            )
+
+    out.append(f"<h4>Root</h4><div>{_link(row['path'], str(row['path']))}</div>")
+    return "<div class='detail'>" + "".join(out) + "</div>"
+
+
 def _card(name: str, why: str | None, a: Activity) -> str:
     idle = "" if (a.dirty or a.waiting or (a.touched and time.time() - a.touched < 86400 * 14)) else " idle"
     out = [f"<div class='card{idle}'><div class='top'><span class='name'>{html.escape(name)}</span>"
@@ -107,41 +167,43 @@ def _card(name: str, why: str | None, a: Activity) -> str:
     return "".join(out)
 
 
-def render(groups: list[tuple[str, list[tuple[str, str | None, Activity]]]]) -> str:
-    """`groups` is [(group label, [(name, prose status, activity), ...]), ...]."""
-    waiting = [
-        (name, a)
-        for _, rows in groups
-        for name, _, a in rows
-        if a.waiting
-    ]
+def _recency(row: dict) -> int:
+    a = row["activity"]
+    return max(a.touched or 0, a.last_session or 0)
+
+
+def render(groups: list[tuple[str, list[dict]]]) -> str:
+    """`groups` is [(label, [row, ...]), ...]; a row is what `cli.view` builds.
+
+    Ordered by use — most recently touched first — because the question is
+    almost always about what you were last doing, not what is alphabetically
+    first. The badge counts; the detail lives in the card it belongs to.
+    """
+    open_items = sum(r["activity"].waiting for _, rows in groups for r in rows)
+    projects = len([r for _, rows in groups for r in rows if r["activity"].waiting])
     body = []
 
-    if waiting:
-        items = []
-        for name, a in waiting:
-            if a.blocked:
-                items.append(
-                    f"<li><span class='who'>{html.escape(name)}</span> — "
-                    f"{a.blocked} packet(s) at a gate</li>"
-                )
-            for q in a.needs:
-                first = q.strip().splitlines()[0]
-                items.append(
-                    f"<li><span class='who'>{html.escape(name)}</span> — "
-                    f"{html.escape(first[:160])}</li>"
-                )
+    if open_items:
         body.append(
-            "<section class='waiting'><h2>Waiting on you</h2><ul>"
-            + "".join(items)
-            + "</ul></section>"
+            f"<div class='badge'>{open_items} waiting on you"
+            f" · {projects} project{'s' * (projects != 1)}</div>"
         )
+    else:
+        body.append("<div class='badge clear'>nothing waiting</div>")
 
     for label, rows in groups:
         if not rows:
             continue
         body.append(f"<h2 class='grp'>{html.escape(label)}</h2>")
-        body.extend(_card(n, why, a) for n, why, a in rows)
+        for row in sorted(rows, key=_recency, reverse=True):
+            card = _card(row["name"], row["why"], row["activity"])
+            body.append(
+                card.replace("<div class='card", "<details class='card", 1)
+                .replace("<div class='top'>", "<summary><div class='top'>", 1)
+                .replace("</div></div>", "</div></summary>", 1)
+                + _detail(row)
+                + "</details>"
+            )
 
     stamp = time.strftime("%Y-%m-%d %H:%M")
     return (
