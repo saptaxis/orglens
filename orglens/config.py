@@ -14,6 +14,7 @@ from orglens.grammar import Grammar
 class Config:
     docs_root: Path
     grammar_name: str
+    docs_base_url: str = "http://localhost:8000"
     _config_dir: Path | None = None
 
     @classmethod
@@ -31,6 +32,9 @@ class Config:
         return cls(
             docs_root=docs_root,
             grammar_name=grammar_name,
+            # Where the tree is served. `mkdocs serve` by default; set it to a
+            # published site and the same links work from anywhere.
+            docs_base_url=(data.get("docs_base_url") or "http://localhost:8000").rstrip("/"),
             _config_dir=path.parent,
         )
 

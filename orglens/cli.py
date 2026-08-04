@@ -254,14 +254,16 @@ def _refresh_snapshot(topo: Topology, config: Config):
 @cli.command(name="view")
 @click.option("--out", default="~/.orglens/view.html", help="Where to write the page.")
 @click.option("--open/--no-open", "do_open", default=True, help="Open it after writing.")
-def view_cmd(out: str, do_open: bool):
+@click.option("--base-url", default=None,
+              help="Where the docs are served. Defaults to config docs_base_url.")
+def view_cmd(out: str, do_open: bool, base_url: str | None):
     """Render where every project stands, and open it.
 
     Joins what the tree knows (plans, packets, uncommitted work) with what scad
     knows (sessions, notes, open questions). Everything is recomputed here, so
     the page cannot drift the way a written status line does.
     """
-    topo, _ = _load_topo()
+    topo, config = _load_topo()
 
     by_type: dict[str, list] = {}
     for entity in topo.list_entities():
@@ -309,7 +311,8 @@ def view_cmd(out: str, do_open: bool):
             )
         groups.append((label, rows))
 
-    path = view.write(view.render(groups), Path(out))
+    ctx = {"docs_root": config.docs_root, "base_url": base_url or config.docs_base_url}
+    path = view.write(view.render(groups, ctx), Path(out))
     click.echo(f"wrote {path}")
     if do_open:
         os.system(f"open '{path}'")

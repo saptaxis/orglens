@@ -50,6 +50,10 @@ details.card[open] { background:transparent }
 .ask { color:var(--warn); margin:.2rem 0 }
 .pill { display:inline-block; border:1px solid var(--line); border-radius:4px;
   padding:0 .35rem; margin:0 .25rem .25rem 0; font-size:.76rem }
+.cp { cursor:pointer; color:var(--dim); margin-left:.3rem; font-size:.8em;
+  user-select:none }
+.cp:hover { color:var(--fg) }
+.cp.done { color:var(--warn) }
 h2.grp { font-size:.78rem; text-transform:uppercase; letter-spacing:.07em;
   color:var(--dim); margin:1.75rem 0 .6rem; border-bottom:1px solid var(--line);
   padding-bottom:.3rem }
@@ -97,11 +101,36 @@ def _facts(a: Activity) -> str:
     return " · ".join(bits)
 
 
-def _link(path, label: str) -> str:
-    return f"<a href='file://{html.escape(str(path))}'>{html.escape(label)}</a>"
+def doc_url(path: Path, docs_root: Path, base: str) -> str:
+    """The served URL for a path in the tree.
+
+    mkdocs with `directory_urls` — the default — publishes `a/b.md` at `/a/b/`
+    and `a/index.md` at `/a/`. The `docs/` prefix is the serving root and does
+    not appear in the URL.
+    """
+    try:
+        rel = Path(path).resolve().relative_to(Path(docs_root).resolve())
+    except ValueError:
+        return "file://" + str(path)
+    if rel.suffix == ".md":
+        rel = rel.with_suffix("")
+        if rel.name == "index":
+            rel = rel.parent
+    tail = "" if str(rel) == "." else f"{rel}/"
+    return f"{base}/{tail}"
 
 
-def _detail(row: dict) -> str:
+def _link(path, label: str, ctx: dict) -> str:
+    """Click opens the served doc; the copy affordance yields the real path."""
+    url = doc_url(path, ctx["docs_root"], ctx["base_url"])
+    fs = html.escape(str(path))
+    return (
+        f"<a href='{html.escape(url)}' title='{fs}'>{html.escape(label)}</a>"
+        f"<span class='cp' data-path='{fs}' title='copy path'>&#x2398;</span>"
+    )
+
+
+def _detail(row: dict, ctx: dict) -> str:
     """What the taxonomy knows, once you ask. Links point into the tree."""
     a, out = row["activity"], []
 
@@ -117,19 +146,19 @@ def _detail(row: dict) -> str:
             continue
         out.append(f"<h4>{html.escape(label)} ({len(items)})</h4><div>")
         for art in items[-8:]:
-            out.append(f"<span class='pill'>{_link(art.path, art.name)}</span>")
+            out.append(f"<span class='pill'>{_link(art.path, art.name, ctx)}</span>")
         out.append("</div>")
 
     if row.get("docs"):
         out.append(f"<h4>Documents ({len(row['docs'])})</h4><div>")
         for d in row["docs"]:
-            out.append(f"<span class='pill'>{_link(d, d.name)}</span>")
+            out.append(f"<span class='pill'>{_link(d, d.name, ctx)}</span>")
         out.append("</div>")
 
     if row["dirs"]:
         out.append("<h4>Directories</h4><div>")
         for d in row["dirs"]:
-            out.append(f"<span class='pill'>{_link(d, d.name + '/')}</span>")
+            out.append(f"<span class='pill'>{_link(d, d.name + '/', ctx)}</span>")
         out.append("</div>")
 
     if a.notes:
@@ -142,7 +171,7 @@ def _detail(row: dict) -> str:
                 f"<span style='color:var(--dim)'>{html.escape(where)}</span></div>"
             )
 
-    out.append(f"<h4>Root</h4><div>{_link(row['path'], str(row['path']))}</div>")
+    out.append(f"<h4>Root</h4><div>{_link(row['path'], str(row['path']), ctx)}</div>")
     return "<div class='detail'>" + "".join(out) + "</div>"
 
 
@@ -172,7 +201,7 @@ def _recency(row: dict) -> int:
     return max(a.touched or 0, a.last_session or 0)
 
 
-def render(groups: list[tuple[str, list[dict]]]) -> str:
+def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
     """`groups` is [(label, [row, ...]), ...]; a row is what `cli.view` builds.
 
     Ordered by use — most recently touched first — because the question is
@@ -201,7 +230,7 @@ def render(groups: list[tuple[str, list[dict]]]) -> str:
                 card.replace("<div class='card", "<details class='card", 1)
                 .replace("<div class='top'>", "<summary><div class='top'>", 1)
                 .replace("</div></div>", "</div></summary>", 1)
-                + _detail(row)
+                + _detail(row, ctx)
                 + "</details>"
             )
 
@@ -216,7 +245,13 @@ def render(groups: list[tuple[str, list[dict]]]) -> str:
         "sessions and notes from scad. Nothing here is stored, so nothing here "
         "can be stale.</div>"
         + "".join(body)
-        + f"<footer>rendered {stamp}</footer></main>"
+        + f"<footer>rendered {stamp} · links open {html.escape(ctx['base_url'])}"
+        " · &#x2398; copies the path</footer></main>"
+        "<script>document.addEventListener('click',e=>{"
+        "const c=e.target.closest('.cp'); if(!c) return; e.preventDefault();"
+        "navigator.clipboard.writeText(c.dataset.path).then(()=>{"
+        "c.classList.add('done'); setTimeout(()=>c.classList.remove('done'),900);});"
+        "});</script>"
     )
 
 
