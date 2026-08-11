@@ -1,20 +1,23 @@
-"""CLI — click commands for orglens."""
+"""CLI — click commands for orglens.
+
+Every command asks the grammar what kinds exist. None of them knows a noun:
+that is what `orglens list --type deck` used to fail on, raising `KeyError`
+because four modules carried their own copy of the type list.
+"""
 
 from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import click
 
-import time
-
-from orglens import activity, view
-
+from orglens import activity, check as check_module, reference, view
 from orglens.config import Config
 from orglens.snapshot import generate_snapshot
-from orglens.state import extract_status
+from orglens.state import read_status
 from orglens.topology import Topology
 from orglens.workflow.cli import workflow as workflow_group
 
@@ -30,8 +33,7 @@ def _load_config() -> Config:
 def _load_topo() -> tuple[Topology, Config]:
     """Load config + grammar + topology."""
     config = _load_config()
-    grammar = config.load_grammar()
-    return Topology(config.docs_root, grammar), config
+    return Topology(config.docs_root, config.load_grammar()), config
 
 
 @click.group()
@@ -43,7 +45,7 @@ def cli():
 cli.add_command(workflow_group, name="workflow")
 
 
-def _ago(ts: int) -> str:
+def _ago(ts: float) -> str:
     """Coarse age. Precision past the hour is noise at this scale."""
     hours = (time.time() - ts) / 3600
     if hours < 24:
@@ -53,91 +55,80 @@ def _ago(ts: int) -> str:
     return f"{hours / 720:.0f}mo"
 
 
-@cli.command()
-@click.option("--type", "entity_type", default=None, help="Filter by entity type")
-def list(entity_type: str | None):
-    """List all entities in the topology."""
-    topo, config = _load_topo()
-    entities = topo.list_entities(entity_type)
+def _heading(type_name: str) -> str:
+    return type_name.replace("-", " ").capitalize() + "s"
 
+
+def _status_of(topo: Topology, entity):
+    # `[*declared]`, not `list(...)` — the `list` command shadows the builtin.
+    declared = topo.grammar.entity_types[entity.entity_type].structure
+    return read_status(entity.path, [*declared])
+
+
+def _unknown(kind: str, value: str, available) -> None:
+    click.echo(
+        f"Unknown {kind}: {value}. Available: {', '.join(available)}", err=True
+    )
+    sys.exit(1)
+
+
+@cli.command()
+@click.option("--type", "entity_type", default=None, help="Filter by kind")
+def list(entity_type: str | None):
+    """List everything in the tree."""
+    topo, _ = _load_topo()
+
+    if entity_type is not None and entity_type not in topo.grammar.entity_types:
+        _unknown("kind", entity_type, topo.grammar.entity_types)
+
+    entities = topo.list_entities(entity_type)
     if not entities:
-        click.echo("No entities found.")
+        click.echo("Nothing found.")
         return
 
-    # Group by type
     by_type: dict[str, list] = {}
-    for e in entities:
-        by_type.setdefault(e.entity_type, []).append(e)
+    for entity in entities:
+        by_type.setdefault(entity.entity_type, []).append(entity)
 
-    type_order = ["research-program", "experiment", "project", "client"]
-    type_display = {
-        "research-program": "Research Programs",
-        "experiment": "  Experiments",
-        "project": "Projects",
-        "client": "Clients",
-    }
-
-    for etype in type_order:
-        group = by_type.get(etype, [])
+    for type_name in topo.grammar.entity_types:
+        group = by_type.get(type_name, [])
         if not group:
             continue
-        click.echo(f"\n{type_display.get(etype, etype)}:")
-        for e in group:
-            # Read status if available
-            et = topo.grammar.entity_types[etype]
-            status = None
-            if et.state_file:
-                state_file = e.path / et.state_file
-                if state_file.exists():
-                    status = extract_status(state_file.read_text())
-            status_str = f"  ({status})" if status else ""
-            parent_str = f"  [{e.parent_name}]" if e.parent_name else ""
-            click.echo(f"  {e.name}{status_str}{parent_str}")
+        click.echo(f"\n{_heading(type_name)}:")
+        for entity in group:
+            status = _status_of(topo, entity)
+            shown = f"  ({status.text})" if status else ""
+            within = f"  [{entity.parent_name}]" if entity.parent_name else ""
+            click.echo(f"  {entity.name}{shown}{within}")
+
 
 
 @cli.command()
 def status():
-    """Show aggregated status across all entities."""
-    topo, config = _load_topo()
+    """Where everything stands — the authored line, dated, beside derived facts."""
+    topo, _ = _load_topo()
     entities = topo.list_entities()
 
     by_type: dict[str, list] = {}
-    for e in entities:
-        by_type.setdefault(e.entity_type, []).append(e)
+    for entity in entities:
+        by_type.setdefault(entity.entity_type, []).append(entity)
 
-    type_display = {
-        "research-program": "Research Programs",
-        "project": "Projects",
-        "client": "Clients",
-    }
+    waiting = []
 
-    waiting: list[tuple[str, activity.Activity]] = []
-
-    for etype in ["research-program", "project", "client"]:
-        group = by_type.get(etype, [])
+    for type_name in topo.grammar.entity_types:
+        group = by_type.get(type_name, [])
         if not group:
             continue
-        click.echo(f"\n{type_display.get(etype, etype)}:")
-        for e in group:
-            et = topo.grammar.entity_types[etype]
-            status = None
-            if et.state_file:
-                state_file = e.path / et.state_file
-                if state_file.exists():
-                    status = extract_status(state_file.read_text())
-            if status:
-                # Truncate after first semicolon
-                truncated = status.split(";")[0].strip()
-                # Capitalize first letter only
-                status_str = truncated or "—"
-            else:
-                status_str = "—"
-
-            # Derived, not declared. The prose says why; these say where.
-            act = activity.read(e.path, e.name)
+        click.echo(f"\n{_heading(type_name)}:")
+        for entity in group:
+            act = activity.read(entity.path, entity.name)
             facts = []
-            if act.plan:
-                facts.append(f"plan {act.plan}")
+            # Counted from the grammar's own kinds, so a tree with different
+            # documents reports on those instead of on nothing.
+            for kind in topo.grammar.artifact_types:
+                held = topo.find_artifacts(kind, entity.name)
+                if held:
+                    facts.append(f"{len(held)} {kind}" + ("s" if len(held) > 1 else ""))
             if act.touched:
                 facts.append(f"{_ago(act.touched)} ago")
             if act.sessions:
@@ -147,11 +138,21 @@ def status():
             if act.dirty:
                 facts.append(f"{act.dirty} uncommitted")
 
-            click.echo(f"  {e.name:<32} {' · '.join(facts) or '—'}")
-            if status_str != "—":
-                click.echo(f"      {status_str}")
+            click.echo(f"  {entity.name:<32} {' · '.join(facts) or '—'}")
+
+            status_line = _status_of(topo, entity)
+            if status_line:
+                # Dated, because three of these are five months behind the tree.
+                # A stale line is then a quote, not a claim about today.
+                age = (
+                    f"  [{_ago(status_line.edited)} old]"
+                    if status_line.edited
+                    else ""
+                )
+                click.echo(f'      "{status_line.text}"{age}')
+
             if act.waiting:
-                waiting.append((e.name, act))
+                waiting.append((entity.name, act))
 
     if waiting:
         click.echo("\nWaiting on you:")
@@ -168,81 +169,107 @@ def status():
 @click.argument("artifact_type")
 @click.argument("entity", required=False)
 def find(artifact_type: str, entity: str | None):
-    """Find artifacts by type, optionally scoped to an entity."""
+    """Find documents by kind, optionally scoped to one entity."""
     topo, config = _load_topo()
 
     if artifact_type not in topo.grammar.artifact_types:
-        click.echo(
-            f"Unknown artifact type: {artifact_type}. "
-            f"Available: {', '.join(topo.grammar.artifact_types.keys())}",
-            err=True,
-        )
-        sys.exit(1)
+        _unknown("document kind", artifact_type, topo.grammar.artifact_types)
 
     artifacts = topo.find_artifacts(artifact_type, entity)
     if not artifacts:
         click.echo(f"No {artifact_type}s found.")
         return
 
-    for a in artifacts:
-        rel_path = a.path.relative_to(config.docs_root)
-        click.echo(f"  {a.name:<45} [{a.entity_name}]  {rel_path}")
+    for artifact in artifacts:
+        try:
+            shown = artifact.path.relative_to(config.docs_root)
+        except ValueError:
+            shown = artifact.path
+        click.echo(f"  {artifact.name:<45} [{artifact.entity_name}]  {shown}")
 
 
 @cli.command()
-@click.argument("type_or_artifact")
+@click.argument("entity_type")
 @click.argument("name")
-@click.argument("topic", required=False)
-@click.option("--parent", default=None, help="Parent entity (for experiments)")
-def new(type_or_artifact: str, name: str, topic: str | None, parent: str | None):
-    """Create a new entity or artifact.
+@click.option("--parent", default=None, help="Create it inside this entity")
+def new(entity_type: str, name: str, parent: str | None):
+    """Create an entity: a directory, plus whatever the grammar says it holds.
 
-    Entity:   orglens new project my-tool
-    Artifact: orglens new plan my-tool "feature design"
+    Documents are written directly — the grammar describes how to name them and
+    nothing parses a filename, so there is nothing for a command to compute.
     """
     topo, config = _load_topo()
 
-    # Is it an entity type?
-    if type_or_artifact in topo.grammar.entity_types:
-        path = topo.scaffold_entity(type_or_artifact, name, parent=parent)
-        click.echo(f"Created {type_or_artifact}: {path.relative_to(config.docs_root)}")
-        # Refresh snapshot
-        _refresh_snapshot(topo, config)
-        return
+    if entity_type not in topo.grammar.entity_types:
+        _unknown("kind", entity_type, topo.grammar.entity_types)
 
-    # Is it an artifact type?
-    if type_or_artifact in topo.grammar.artifact_types:
-        if not topic:
-            click.echo(f"Usage: orglens new {type_or_artifact} <entity> <topic>", err=True)
-            sys.exit(1)
-        path = topo.scaffold_artifact(type_or_artifact, name, topic)
-        click.echo(f"Created {type_or_artifact}: {path.relative_to(config.docs_root)}")
-        # Refresh snapshot
-        _refresh_snapshot(topo, config)
-        return
+    try:
+        path = topo.scaffold_entity(entity_type, name, parent=parent)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
 
-    click.echo(
-        f"Unknown type: {type_or_artifact}. "
-        f"Entity types: {', '.join(topo.grammar.entity_types.keys())}. "
-        f"Artifact types: {', '.join(topo.grammar.artifact_types.keys())}.",
-        err=True,
-    )
-    sys.exit(1)
+    try:
+        shown = path.relative_to(config.docs_root)
+    except ValueError:
+        shown = path
+    click.echo(f"Created {entity_type}: {shown}")
+    _refresh_snapshot(topo, config)
+
+
+@cli.command(name="check")
+def check_cmd():
+    """Report where the tree has drifted from the grammar. Changes nothing."""
+    topo, config = _load_topo()
+    report = check_module.run(topo)
+
+    for drift in report.drifted:
+        try:
+            shown = drift.path.relative_to(config.docs_root)
+        except ValueError:
+            shown = drift.path
+        names = ", ".join(m.name for m in drift.missing)
+        click.echo(f"{str(shown):<42} missing {names}")
+        for missing in drift.missing:
+            if missing.resembles:
+                click.echo(
+                    f"{'':<42} (has {missing.resembles} — likely the same thing)"
+                )
+
+    for barren in report.barren:
+        click.echo(f"pattern matches nothing: {barren}")
+
+    if not report:
+        click.echo("No drift.")
 
 
 @cli.command()
-@click.option("--stdout", is_flag=True, help="Print snapshot to stdout instead of writing to file")
+@click.option("--stdout", is_flag=True, help="Print instead of writing")
 def snapshot(stdout: bool):
-    """Generate a topology snapshot."""
+    """Generate a snapshot of what is in the tree."""
     topo, config = _load_topo()
 
     if stdout:
-        snap = generate_snapshot(topo, config)
-        click.echo(snap)
-    else:
-        output = config.snapshot_path
-        generate_snapshot(topo, config, output_path=output)
-        click.echo(f"Snapshot written to {output}")
+        click.echo(generate_snapshot(topo, config))
+        return
+    output = config.snapshot_path
+    generate_snapshot(topo, config, output_path=output)
+    click.echo(f"Snapshot written to {output}")
+
+
+@cli.command(name="reference")
+@click.option("--out", default=None, help="Write here instead of printing")
+def reference_cmd(out: str | None):
+    """Render the grammar as the skill's vocabulary reference."""
+    topo, _ = _load_topo()
+    text = reference.render(topo.grammar)
+    if out:
+        path = Path(out).expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        click.echo(f"Wrote {path}")
+        return
+    click.echo(text)
 
 
 def _refresh_snapshot(topo: Topology, config: Config):
@@ -259,7 +286,7 @@ def _refresh_snapshot(topo: Topology, config: Config):
 @click.option("--base-url", default=None,
               help="Where the docs are served. Defaults to config docs_base_url.")
 def view_cmd(out: str, do_open: bool, base_url: str | None):
-    """Render where every project stands, and open it.
+    """Render where every entity stands, and open it.
 
     Joins what the tree knows (plans, packets, uncommitted work) with what scad
     knows (sessions, notes, open questions). Everything is recomputed here, so
@@ -271,47 +298,33 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
     for entity in topo.list_entities():
         by_type.setdefault(entity.entity_type, []).append(entity)
 
-    labels = {
-        "research-program": "Research programs",
-        "project": "Projects",
-        "client": "Clients",
-    }
-    artifact_types = [
+    headings = [
         (name, name.title() + "s") for name in topo.grammar.artifact_types
     ]
 
     groups = []
-    for etype, label in labels.items():
+    for type_name in topo.grammar.entity_types:
         rows = []
-        for entity in by_type.get(etype, []):
-            et = topo.grammar.entity_types[etype]
-            why = None
-            if et.state_file and (entity.path / et.state_file).exists():
-                why = extract_status((entity.path / et.state_file).read_text())
+        for entity in by_type.get(type_name, []):
+            status = _status_of(topo, entity)
             rows.append(
                 {
                     "name": entity.name,
                     "path": entity.path,
-                    "why": why,
+                    "why": status.text if status else None,
                     "activity": activity.read(entity.path, entity.name),
                     "artifacts": [
                         (heading, topo.find_artifacts(kind, entity.name))
-                        for kind, heading in artifact_types
+                        for kind, heading in headings
                     ],
-                    # Root-level documents — backlog.md, handoffs, dated notes.
-                    # The grammar has no artifact type for these, so they are
-                    # invisible to `find`; they are often the entry point.
-                    "docs": sorted(
-                        f for f in entity.path.glob("*.md")
-                        if not f.name.startswith(".")
-                    ),
-                    "dirs": sorted(
-                        d for d in entity.path.iterdir()
-                        if d.is_dir() and not d.name.startswith(".")
-                    ),
+                    # Top-level documents — backlogs, handoffs, dated notes. No
+                    # document kind claims them, and they are often the way in.
+                    "docs": topo.documents(entity),
+                    "dirs": topo.subdirectories(entity),
                 }
             )
-        groups.append((label, rows))
+        if rows:
+            groups.append((_heading(type_name), rows))
 
     ctx = {"docs_root": config.docs_root, "base_url": base_url or config.docs_base_url}
     path = view.write(view.render(groups, ctx), Path(out))

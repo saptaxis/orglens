@@ -10,8 +10,10 @@ description: >
 
 # Organizational Context
 
-Load organizational topology awareness at session start. The docs tree follows
-a strict grammar managed by `orglens`.
+Load organizational topology awareness at session start. What the tree may
+contain is declared in one place — the grammar — and rendered into
+`references/grammar-reference.md`. Nothing is restated here, because a second
+copy is a copy that drifts.
 
 ## Load Topology
 
@@ -23,63 +25,66 @@ orglens snapshot --stdout
 
 If `orglens` is not installed or the command fails, skip gracefully.
 
-## Entity Types
+## What may exist, and what each part is for
 
-The docs tree organizes work into four entity types:
+Read `references/grammar-reference.md`. It is generated from the grammar by
+`orglens reference`, so it cannot disagree with the engine.
 
-| Type | Location | Key file | Subdirectories |
-|------|----------|----------|----------------|
-| research-program | `research/` | `research-question.md` | `specs/`, `literature/`, `directions/`, `brainstorms/` |
-| experiment | `research/<program>/expt-{n}-{name}/` | `design.md` | `plans/`, `logs/`, `findings/` |
-| project | `projects/` | `overview.md` | `specs/`, `plans/`, `logs/` |
-| client | `clients/` | `overview.md` | — |
+Two things it will not tell you, by design:
 
-## Artifact Naming
-
-| Type | Directory | Pattern | Example |
-|------|-----------|---------|---------|
-| plan | `plans/` | `{NN}-{topic}-{MonDDYYYY}.md` | `05-data-collection-Feb062026.md` |
-| log | `logs/` | `{NN}-{topic}-{MonDDYYYY}-log.md` | `05-data-collection-Feb062026-log.md` |
-| spec | `specs/` | `{topic}.md` | `system-design-v2.md` |
-
-Conventions: kebab-case directories, `{NN}` sequential per-entity (01, 02...), plans and logs form pairs (same number + topic), `{MonDDYYYY}` = three-letter month + day + four-digit year.
+- **What is actually there.** The grammar describes purpose; only the tree
+  knows contents. Entities routinely hold directories nobody declared. The
+  snapshot lists them — read it rather than assuming.
+- **That anything is required.** A directory that matches a pattern is an
+  entity whether or not it holds what the grammar describes. Nothing is hidden
+  for being incomplete.
 
 ## CLI Reference
 
-Always use the CLI for mechanical operations — never construct filenames or scan directories manually.
+Use the CLI to discover. Never scan directories to find out what exists.
 
 **Discovery:**
 
 ```bash
-orglens list                          # all entities
-orglens list --type project           # filtered
-orglens status                        # status across all entities
-orglens find plan                     # all plans
-orglens find plan <entity>            # plans scoped to entity
-orglens find spec <entity>            # specs scoped to entity
+orglens list                          # everything in the tree
+orglens list --type project           # filtered by kind
+orglens status                        # where everything stands
+orglens find plan                     # documents of a kind
+orglens find plan <entity>            # scoped to an entity and its children
 ```
 
-**Creation (auto-numbers, auto-dates):**
+**Creation:**
 
 ```bash
 orglens new project <name>
-orglens new experiment <name> --parent <research-program>
-orglens new plan <entity> "<topic>"
-orglens new log <entity> "<topic>"
-orglens new spec <entity> "<topic>"
+orglens new experiment <full-name> --parent <entity>
 ```
+
+`new` creates entities only, and the name is given in full — nothing is
+numbered for you. **Write documents yourself**, following the naming
+description in the reference. Nothing parses a filename, so a name that
+departs from the convention is still found; the convention is for humans
+reading a directory listing.
+
+**Audit:**
+
+```bash
+orglens check                         # where the tree has drifted
+```
+
+Reports only. Nothing is blocked or hidden by what it finds, and it always
+exits 0. Run it when tidying, not before working.
 
 **Snapshot:**
 
 ```bash
 orglens snapshot                      # write to cache file
 orglens snapshot --stdout             # print to stdout
+orglens reference --out <path>        # regenerate the vocabulary reference
 ```
 
 ## Design Principle
 
-**Never re-derive what you can read.** Read the snapshot for organizational context. Do not scan directories manually. If the snapshot is stale, run `orglens snapshot` to refresh it.
-
-## Additional Resources
-
-For full grammar specifications, entity type details, status badge conventions, and naming edge cases, consult `references/grammar-reference.md`.
+**Never re-derive what you can read.** Read the snapshot for organizational
+context. Do not scan directories manually. If the snapshot is stale, run
+`orglens snapshot` to refresh it.

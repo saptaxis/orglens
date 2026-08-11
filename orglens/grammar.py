@@ -1,61 +1,66 @@
-"""Grammar loading and resolution."""
+"""The one declaration of a tree's vocabulary.
+
+Three blocks and nothing else: what exists, where documents live, what each
+part is for. Every other module asks this one — none of them may know a noun
+of their own, which `tests/test_vocabulary_face.py` enforces.
+
+Nothing here filters. A directory matching an entity pattern is an entity; a
+file matching an artifact glob is an artifact of that type. Completeness is
+never a precondition for visibility: the previous grammar made it one, and it
+cost four real entities and 88 documents.
+"""
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
 
-@dataclass
+@dataclass(frozen=True)
 class EntityType:
-    name: str
-    parent_dir: str | None = None
-    parent_of: str | None = None
-    dir_pattern: str | None = None
-    required_files: list[str] = field(default_factory=list)
-    directories: list[str] = field(default_factory=list)
-    children: list[str] = field(default_factory=list)
-    state_file: str | None = None
+    """A kind of thing, and the relative glob that finds one."""
 
-
-@dataclass
-class ArtifactType:
     name: str
-    directory: str
     pattern: str
+    #: path within the entity -> what it is for. Authoring, never discovery.
+    structure: dict[str, str] = field(default_factory=dict)
 
-    def generate_name(self, nn: int | None, topic: str, date_str: str | None) -> str:
-        """Generate a filename from the pattern."""
-        result = self.pattern
-        if nn is not None:
-            result = result.replace("{NN}", f"{nn:02d}")
-        if topic:
-            result = result.replace("{topic}", topic)
-        if date_str:
-            result = result.replace("{MonDDYYYY}", date_str)
-        return result
+    @property
+    def container(self) -> str:
+        """The directory part of the pattern — where a new one is placed.
 
-    def parse_name(self, filename: str) -> dict | None:
-        """Parse a filename back into components. Returns None if no match."""
-        # Build regex from pattern
-        regex = self.pattern
-        regex = regex.replace("{NN}", r"(?P<nn>\d+)")
-        regex = regex.replace("{topic}", r"(?P<topic>[a-z0-9-]+)")
-        regex = regex.replace("{MonDDYYYY}", r"(?P<date>[A-Z][a-z]{2}\d{6,8})")
-        regex = "^" + regex + "$"
-        match = re.match(regex, filename)
-        if not match:
-            return None
-        result = match.groupdict()
-        if "nn" in result:
-            result["nn"] = int(result["nn"])
-        return result
+        Empty when the pattern names the directory itself, which is how a type
+        comes to live directly inside its parent rather than under a bucket.
+        """
+        head, _, _ = self.pattern.rpartition("/")
+        return head
+
+    @property
+    def files(self) -> dict[str, str]:
+        return {k: v for k, v in self.structure.items() if not k.endswith("/")}
+
+    @property
+    def directories(self) -> dict[str, str]:
+        return {k: v for k, v in self.structure.items() if k.endswith("/")}
 
 
-@dataclass
+@dataclass(frozen=True)
+class ArtifactType:
+    """A kind of document: where to look, and prose about what to call one."""
+
+    name: str
+    find: str
+    means: str = ""
+
+    @property
+    def directory(self) -> str:
+        head, _, _ = self.find.rpartition("/")
+        return head
+
+
+@dataclass(frozen=True)
 class Grammar:
     version: int
     entity_types: dict[str, EntityType]
@@ -63,33 +68,29 @@ class Grammar:
 
     @classmethod
     def from_yaml(cls, path: Path) -> Grammar:
-        """Load grammar from a YAML file."""
-        with open(path) as f:
-            data = yaml.safe_load(f)
+        data = yaml.safe_load(Path(path).read_text()) or {}
+        declared = data.get("structure") or {}
 
-        entity_types = {}
-        for name, spec in data.get("entity_types", {}).items():
-            entity_types[name] = EntityType(
+        entity_types = {
+            name: EntityType(
                 name=name,
-                parent_dir=spec.get("parent_dir"),
-                parent_of=spec.get("parent_of"),
-                dir_pattern=spec.get("dir_pattern"),
-                required_files=spec.get("required_files", []),
-                directories=spec.get("directories", []),
-                children=spec.get("children", []),
-                state_file=spec.get("state_file"),
+                pattern=pattern,
+                structure=dict(declared.get(name) or {}),
             )
+            for name, pattern in (data.get("entities") or {}).items()
+        }
 
-        artifact_types = {}
-        for name, spec in data.get("artifacts", {}).items():
-            artifact_types[name] = ArtifactType(
+        artifact_types = {
+            name: ArtifactType(
                 name=name,
-                directory=spec["directory"],
-                pattern=spec["pattern"],
+                find=body["find"],
+                means=" ".join((body.get("means") or "").split()),
             )
+            for name, body in (data.get("artifacts") or {}).items()
+        }
 
         return cls(
-            version=data.get("version", 1),
+            version=data.get("version", 2),
             entity_types=entity_types,
             artifact_types=artifact_types,
         )

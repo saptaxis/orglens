@@ -1,54 +1,58 @@
-version: 1
+version: 2
 
-entity_types:
-  research-program:
-    parent_dir: research
-    required_files:
-      - research-question.md
-      - research-program-state.md
-    directories:
-      - specs
-      - literature
-      - directions
-      - brainstorms
-    children:
-      - experiment
-    state_file: research-program-state.md
+# What exists. Every pattern is relative: matched at the docs root, then inside
+# every entity found, until nothing new turns up. Depth is never declared — an
+# experiment is `expt-*` wherever it sits, so a client can grow projects and a
+# project can grow experiments without editing this file.
+entities:
+  client: clients/*
+  project: projects/*
+  research-program: research/*
+  experiment: expt-*
 
-  experiment:
-    parent_of: research-program
-    dir_pattern: "expt-{n}-{name}"
-    required_files:
-      - design.md
-    directories:
-      - plans
-      - logs
-      - findings
-
-  project:
-    parent_dir: projects
-    required_files:
-      - overview.md
-    directories:
-      - specs
-      - plans
-      - logs
-    state_file: overview.md
-
-  client:
-    parent_dir: clients
-    required_files:
-      - overview.md
-    directories: []
-    state_file: overview.md
-
+# Where documents live, and what to call a new one. `find` is the truth; `means`
+# is prose for whoever writes the next file. Nothing parses a filename, so no
+# filename can be wrong.
 artifacts:
   plan:
-    directory: plans
-    pattern: "{NN}-{topic}-{MonDDYYYY}.md"
+    find: plans/*.md
+    means: >
+      A numbered unit of work, written before doing it. Name them
+      NN-topic-MonDDYYYY.md — e.g. 05-data-collection-Feb062026.md. The log
+      with the same number and topic is its record.
   log:
-    directory: logs
-    pattern: "{NN}-{topic}-{MonDDYYYY}-log.md"
+    find: logs/*.md
+    means: >
+      What actually happened executing the plan of the same number, written
+      during or after. NN-topic-MonDDYYYY-log.md.
   spec:
-    directory: specs
-    pattern: "{topic}.md"
+    find: specs/*.md
+    means: >
+      A durable design document — what a thing is and why, not when. Named for
+      its topic. Outlives the plans that implement it.
+
+# What each part of an entity is for. Read when authoring and when creating;
+# never when discovering. Describing purpose is safe — asserting existence is
+# what drifts, so a missing entry here hides nothing.
+structure:
+  client:
+    overview.md: Who they are and the state of the engagement.
+  project:
+    overview.md: What it is, its stack, and where its state lives.
+    specs/: Durable design documents for this project.
+    plans/: Numbered units of work.
+    logs/: What happened executing each plan.
+  research-program:
+    # Order is precedence: `status` takes the first line it finds, and where a
+    # program stands answers "how is it going" better than what it is asking.
+    research-program-state.md: Where the program stands and what is in flight.
+    research-question.md: The question the program exists to answer.
+    specs/: Design documents for the program's shared machinery.
+    literature/: Papers and notes on prior work.
+    directions/: Candidate directions not yet promoted to experiments.
+    brainstorms/: Exploratory thinking, dated, not durable.
+  experiment:
+    design.md: What this experiment tests and how.
+    plans/: Numbered units of work, scoped to this experiment.
+    logs/: What happened executing each plan.
+    findings/: What the experiment actually showed.

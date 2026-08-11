@@ -1,79 +1,77 @@
-"""Tests for snapshot generation."""
+"""The snapshot: what is in the tree, so agents read instead of scan."""
 
 import pytest
-from pathlib import Path
+
 from orglens.snapshot import generate_snapshot
 from orglens.topology import Topology
 
 
 @pytest.fixture
-def topo(config, grammar):
-    return Topology(config.docs_root, grammar)
+def snapshot(docs_tree, grammar, config):
+    return generate_snapshot(Topology(docs_tree, grammar), config)
 
 
-class TestSnapshotGeneration:
-    def test_generates_markdown(self, topo, config):
-        snapshot = generate_snapshot(topo, config)
-        assert isinstance(snapshot, str)
-        assert len(snapshot) > 0
+class TestWhatItContains:
+    def test_it_names_the_kinds_the_grammar_declares(self, snapshot):
+        assert "research-program (`research/*`)" in snapshot
+        assert "plan (`plans/*.md`)" in snapshot
 
-    def test_contains_header(self, topo, config):
-        snapshot = generate_snapshot(topo, config)
-        assert "# Topology Snapshot" in snapshot
+    def test_every_entity_appears_under_its_kind(self, snapshot):
+        assert "## Projects" in snapshot
+        assert "## Research programs" in snapshot
+        assert "### clipcompose" in snapshot
+        assert "### freightify" in snapshot
 
-    def test_contains_projects(self, topo, config):
-        snapshot = generate_snapshot(topo, config)
-        assert "clipcompose" in snapshot
-        assert "orglens" in snapshot
+    def test_the_authored_line_is_carried(self, snapshot):
+        assert "### clipcompose — Active" in snapshot
 
-    def test_contains_research_programs(self, topo, config):
-        snapshot = generate_snapshot(topo, config)
-        assert "physics-priors" in snapshot
+    def test_a_nested_entity_is_listed_under_what_holds_it(self, snapshot):
+        assert "**Contains:**" in snapshot
+        assert "- expt-1-agent-behavior (experiment)" in snapshot
 
-    def test_contains_experiments(self, topo, config):
-        snapshot = generate_snapshot(topo, config)
-        assert "expt-1-agent-behavior" in snapshot
+    def test_a_nested_entity_gets_its_own_section(self, snapshot):
+        """Experiments are entities, not a footnote on a research program."""
+        assert "### expt-1-agent-behavior" in snapshot
+        assert "In: physics-priors" in snapshot
 
-    def test_contains_status(self, topo, config):
-        snapshot = generate_snapshot(topo, config)
-        assert "active" in snapshot.lower() or "Active" in snapshot
+    def test_documents_are_counted_against_the_entity_holding_them(self, snapshot):
+        expt = snapshot.split("### expt-1-agent-behavior")[1]
+        assert "**Plans:** 2" in expt
+        assert "01-testbed-Feb032026.md" in expt
 
-    def test_contains_recent_artifacts(self, topo, config):
-        snapshot = generate_snapshot(topo, config)
-        # Should mention plans that exist
-        assert "plan" in snapshot.lower()
 
-    def test_contains_grammar_summary(self, topo, config):
-        snapshot = generate_snapshot(topo, config)
-        assert "Entity Types" in snapshot or "Grammar" in snapshot
+class TestWhatOnlyTheTreeKnows:
+    def test_undeclared_directories_are_listed(self, docs_tree, grammar, config):
+        """`archive/` and `presentation/` are real and in no grammar.
 
-    def test_snapshot_attributes_artifacts_to_experiments(self, topo, config):
-        """Artifacts under a research program should show which experiment they're from."""
-        snapshot = generate_snapshot(topo, config)
-        # After fix, experiment artifacts should be labeled with experiment name
-        # e.g. "**Plans** (expt-1-agent-behavior): 2"
-        # rather than just "**Plans:** 2" with no attribution
-        lines = snapshot.split("\n")
-        for line in lines:
-            if "01-testbed-Feb032026.md" in line:
-                # Find the artifact header above this line
-                idx = lines.index(line)
-                header_found = False
-                for j in range(idx, max(0, idx-4), -1):
-                    if lines[j].startswith("**") and "expt-1-agent-behavior" in lines[j]:
-                        header_found = True
-                        break
-                assert header_found, (
-                    f"Plan artifact not attributed to experiment in header. "
-                    f"Context: {lines[max(0,idx-3):idx+1]}"
-                )
-                break
-        else:
-            pytest.fail("Plan artifact not found in snapshot at all")
+        An agent navigating by the declared structure alone would miss them,
+        which is the whole reason the snapshot lists what is there.
+        """
+        (docs_tree / "research" / "physics-priors" / "archive").mkdir()
 
-    def test_writes_to_file(self, topo, config, tmp_path):
-        snapshot_path = tmp_path / "snapshot.md"
-        generate_snapshot(topo, config, output_path=snapshot_path)
-        assert snapshot_path.exists()
-        content = snapshot_path.read_text()
-        assert "# Topology Snapshot" in content
+        snapshot = generate_snapshot(Topology(docs_tree, grammar), config)
+
+        assert "`archive/`" in snapshot
+
+    def test_top_level_documents_are_listed(self, docs_tree, grammar, config):
+        (docs_tree / "projects" / "clipcompose" / "backlog.md").write_text("# Backlog\n")
+
+        snapshot = generate_snapshot(Topology(docs_tree, grammar), config)
+
+        assert "`backlog.md`" in snapshot
+
+    def test_an_incomplete_entity_still_appears(self, docs_tree, grammar, config):
+        (docs_tree / "clients" / "itus-capital").mkdir()
+
+        snapshot = generate_snapshot(Topology(docs_tree, grammar), config)
+
+        assert "### itus-capital" in snapshot
+
+
+class TestWriting:
+    def test_it_writes_where_told(self, docs_tree, grammar, config, tmp_path):
+        out = tmp_path / "cache" / "snapshot.md"
+
+        generate_snapshot(Topology(docs_tree, grammar), config, output_path=out)
+
+        assert out.read_text().startswith("# Topology Snapshot")
