@@ -89,12 +89,12 @@ That routes to `~/.agents/skills` (the shared convention) and `~/.claude/skills`
 table is deliberate — a wrong skills path fails **silently**, with files present
 that never load.
 
-Four skills install: `org-context`, plus `interior-viz`, `interior-design-book`
+Four skills install: `orglens`, plus `interior-viz`, `interior-design-book`
 and `article` from the decks under `capabilities/`.
 
 The CLI installs a skill *copy*, not a symlink, so **re-run the command after
 editing a `SKILL.md`**. `references/grammar-reference.md` is generated — run
-`orglens reference --out skills/org-context/references/grammar-reference.md`
+`orglens reference --out skills/orglens/references/grammar-reference.md`
 before reinstalling, or the test suite will tell you it is stale.
 
 orglens was previously a Claude Code plugin. It is not any more: a plugin
@@ -128,7 +128,7 @@ structure:                    # what each part is for. Authoring, never discover
 The tables that used to be here are gone on purpose: they were a fourth copy of
 the same vocabulary, and the copies drifted. **The grammar is the declaration**
 — read `orglens/grammars/default.yaml`, or the rendering of it at
-`skills/org-context/references/grammar-reference.md`.
+`skills/orglens/references/grammar-reference.md`.
 
 The grammar is data, not code. Adding a kind is one line and needs no Python
 change: `deck: capabilities/*` is a working example, exercised by

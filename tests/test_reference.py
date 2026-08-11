@@ -12,7 +12,7 @@ from orglens.grammar import Grammar
 from orglens.reference import render
 
 ROOT = Path(__file__).resolve().parents[1]
-COMMITTED = ROOT / "skills" / "org-context" / "references" / "grammar-reference.md"
+COMMITTED = ROOT / "skills" / "orglens" / "references" / "grammar-reference.md"
 
 
 def test_the_committed_reference_matches_the_grammar():
@@ -51,7 +51,7 @@ def test_the_skill_no_longer_restates_the_vocabulary(grammar):
     fire, not a claim about what a directory contains. What must not come back
     is the table of key files, which is the copy that drifted.
     """
-    text = (ROOT / "skills" / "org-context" / "SKILL.md").read_text()
+    text = (ROOT / "skills" / "orglens" / "SKILL.md").read_text()
     body = text.split("---", 2)[-1]
 
     for entity_type in grammar.entity_types.values():

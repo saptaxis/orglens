@@ -106,14 +106,14 @@ if [ "$STEP" = "all" ] || [ "$STEP" = "5" ]; then
     echo ""
 
     echo "Skill file:"
-    head -10 skills/org-context/SKILL.md
+    head -10 skills/orglens/SKILL.md
     echo "..."
     echo ""
 
     echo "Skill frontmatter validates:"
     python3 -c "
 import yaml
-fm = open('skills/org-context/SKILL.md').read().split('---')
+fm = open('skills/orglens/SKILL.md').read().split('---')
 data = yaml.safe_load(fm[1])
 print(f'  name: {data[\"name\"]}')
 print(f'  description: {data[\"description\"][:80]}...')
@@ -121,7 +121,7 @@ print(f'  description: {data[\"description\"][:80]}...')
     echo ""
 
     echo "References:"
-    ls -la skills/org-context/references/
+    ls -la skills/orglens/references/
     echo ""
 
     echo "To install into every detected agent:"
@@ -143,6 +143,6 @@ echo "=== Demo complete ==="
 echo ""
 echo "Next steps:"
 echo "  1. Install skills: npx skills add $(pwd) -g -a '*' -y --full-depth"
-echo "  2. Ask: 'what projects exist?' — org-context skill should fire"
+echo "  2. Ask: 'what projects exist?' — orglens skill should fire"
 echo "  3. Ask: 'where does a design doc go?' — should read the generated reference"
 echo ""

@@ -1,5 +1,5 @@
 ---
-name: org-context
+name: orglens
 description: >
   This skill should be used when the user starts a session that involves
   organizational docs, asks "what projects exist", "where do plans go",
