@@ -25,6 +25,13 @@ artifacts:
     means: >
       What actually happened executing the plan of the same number, written
       during or after. NN-topic-MonDDYYYY-log.md.
+  doc:
+    find: "*.md"
+    means: >
+      A document belonging to the entity as a whole rather than to a phase of
+      work — a backlog, a handoff, a dated note, a requirements sheet. The
+      catch-all: kinds are independent globs, so naming a narrower kind later
+      costs nothing and moves nothing.
   spec:
     find: specs/*.md
     means: >

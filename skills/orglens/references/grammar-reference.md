@@ -28,6 +28,7 @@ reports the gap and changes nothing.
 |------|----------|------------|
 | `plan` | `plans/*.md` | A numbered unit of work, written before doing it. Name them NN-topic-MonDDYYYY.md — e.g. 05-data-collection-Feb062026.md. The log with the same number and topic is its record. |
 | `log` | `logs/*.md` | What actually happened executing the plan of the same number, written during or after. NN-topic-MonDDYYYY-log.md. |
+| `doc` | `*.md` | A document belonging to the entity as a whole rather than to a phase of work — a backlog, a handoff, a dated note, a requirements sheet. The catch-all: kinds are independent globs, so naming a narrower kind later costs nothing and moves nothing. |
 | `spec` | `specs/*.md` | A durable design document — what a thing is and why, not when. Named for its topic. Outlives the plans that implement it. |
 
 Names are a convention, not a rule the engine enforces — nothing parses a
