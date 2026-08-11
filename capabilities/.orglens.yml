@@ -1,32 +1,32 @@
-# orgdeck grammar — how orglens sees this bank.
-# v1 sketch; evolves as decks reveal their shape (harvest, don't over-specify).
-version: 1
+# How orglens sees this bank — a second tree, and a second grammar file.
+# Nothing in the engine assumes there is only one; which grammar governs which
+# root is a config question, not an engine one.
+version: 2
 
-entity_types:
-  deck:
-    parent_dir: decks
-    required_files:
-      - DECK.md
-    directories:
-      - operators     # method-deck cards (may be absent on a domain deck)
-      - skills        # domain-deck cards (may be absent on a method deck)
-      - packs
-      - agents
-    state_file: DECK.md
+entities:
+  deck: decks/*
 
 artifacts:
   operator:
-    directory: operators
-    pattern: "{name}.md"
+    find: operators/*/*.md
+    means: >
+      A method-deck card — one pass, one instruction, one model. Grouped by
+      the phase it belongs to: inception, verification, communication.
   skill:
-    directory: skills
-    pattern: "{name}/SKILL.md"
+    find: skills/*/SKILL.md
+    means: >
+      A domain-deck card. Directory-shaped: the card is a folder holding
+      SKILL.md plus whatever it needs beside it.
   agent:
-    directory: agents
-    pattern: "{name}.md"
+    find: agents/*.md
+    means: An agent definition the deck can dispatch.
   bias-pack:
-    directory: packs/bias
-    pattern: "{name}.md"
+    find: packs/bias/*.md
+    means: A named bias to apply to a pass.
   voice-pack:
-    directory: packs/voice
-    pattern: "{name}.md"
+    find: packs/voice/*.md
+    means: A named voice to write in.
+
+structure:
+  deck:
+    DECK.md: What the deck is for, and how its cards fit together.

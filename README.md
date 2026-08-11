@@ -46,19 +46,21 @@ orglens find plan
 orglens find plan physics-priors
 orglens find spec orglens
 
-# Create a new entity
+# Create a new entity — the name is given in full; nothing is numbered for you
 orglens new project my-tool
-orglens new experiment world-model --parent physics-priors
+orglens new experiment expt-2-world-model --parent physics-priors
 
-# Create a new artifact (auto-numbers, auto-dates)
-orglens new plan my-tool "feature-design"
-orglens new log my-tool "feature-design"
-orglens new spec my-tool "api-reference"
+# Report where the tree has drifted from the grammar. Reports only.
+orglens check
 
 # Generate a topology snapshot
 orglens snapshot              # writes to ~/.config/orglens/cache/snapshot.md
 orglens snapshot --stdout     # prints to stdout
 ```
+
+Documents are written directly, not through the CLI. Nothing parses a filename,
+so nothing can compute one — the grammar describes how to name a plan and you
+write it.
 
 ## CLI Reference
 
@@ -66,60 +68,89 @@ orglens snapshot --stdout     # prints to stdout
 |---------|-------------|
 | `orglens list [--type TYPE]` | List all entities, optionally filtered by type |
 | `orglens status` | Show aggregated status across all entities |
-| `orglens find ARTIFACT_TYPE [ENTITY]` | Find artifacts (plan, log, spec), optionally scoped |
-| `orglens new TYPE NAME [TOPIC]` | Create a new entity or artifact with correct naming |
+| `orglens find KIND [ENTITY]` | Find documents of a kind, optionally scoped to an entity and its children |
+| `orglens new TYPE NAME [--parent ENTITY]` | Create an entity and whatever the grammar says it holds |
+| `orglens check` | Report where the tree has drifted. Reports only — never gates |
 | `orglens snapshot [--stdout]` | Generate a topology snapshot (markdown) |
+| `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
+| `orglens view` | Render where everything stands as a page, and open it |
 
-## Claude Code Plugin
+## Skills
 
-orglens ships as a Claude Code plugin. The plugin provides an `org-context` skill that loads topology awareness at session start.
+orglens ships its skills through the shared agent-skills convention, so Claude,
+Codex, Kimi and anything else following it get the same files:
 
 ```bash
-# Load as a Claude Code plugin
-claude --plugin-dir /path/to/orglens
+npx skills add . -g -a '*' -y --full-depth
 ```
 
-When loaded, the skill triggers on questions like "what projects exist?", "create a new plan for X", or "what's the status of Y" — and uses the CLI to answer from the topology rather than scanning directories.
+That routes to `~/.agents/skills` (the shared convention) and `~/.claude/skills`
+(Claude, which does not read the shared one). Letting the tool own the path
+table is deliberate — a wrong skills path fails **silently**, with files present
+that never load.
 
-**Plugin structure:**
+Four skills install: `orglens`, plus `interior-viz`, `interior-design-book`
+and `article` from the decks under `capabilities/`.
 
-```
-.claude-plugin/plugin.json          # plugin manifest
-skills/org-context/SKILL.md         # session-start skill (lean, ~80 lines)
-skills/org-context/references/      # detailed grammar reference (progressive disclosure)
-```
+The CLI installs a skill *copy*, not a symlink, so **re-run the command after
+editing a `SKILL.md`**. `references/grammar-reference.md` is generated — run
+`orglens reference --out skills/orglens/references/grammar-reference.md`
+before reinstalling, or the test suite will tell you it is stale.
+
+orglens was previously a Claude Code plugin. It is not any more: a plugin
+reaches exactly one agent, and these decks are built on the premise of dealing
+different passes to different model families. If a machine still carries the old
+registration, remove it before installing — plugin skills and directory skills
+**stack rather than override**, so the same skill arrives twice, namespaced and
+bare, with identical descriptions competing for one trigger.
 
 ## Grammar
 
 orglens discovers entities by scanning the filesystem against a YAML grammar (`orglens/grammars/default.yaml`). No registry or database — the directory tree is the data.
 
-**Entity types** define what lives where:
+The grammar has three blocks and nothing else:
 
-| Type | Location | Required files | Subdirectories |
-|------|----------|----------------|----------------|
-| research-program | `research/` | `research-question.md`, `research-program-state.md` | `specs/`, `literature/`, `directions/`, `brainstorms/` |
-| experiment | `research/<program>/expt-{n}-{name}/` | `design.md` | `plans/`, `logs/`, `findings/` |
-| project | `projects/` | `overview.md` | `specs/`, `plans/`, `logs/` |
-| client | `clients/` | `overview.md` | — |
+```yaml
+entities:                     # what exists, as a relative glob
+  project: projects/*
+  experiment: expt-*
 
-**Artifact types** define naming patterns:
+artifacts:                    # where documents live, and what to call new ones
+  plan:
+    find: plans/*.md
+    means: A numbered unit of work, written before doing it. NN-topic-MonDDYYYY.md.
 
-| Type | Directory | Pattern | Example |
-|------|-----------|---------|---------|
-| plan | `plans/` | `{NN}-{topic}-{MonDDYYYY}.md` | `05-data-collection-Feb062026.md` |
-| log | `logs/` | `{NN}-{topic}-{MonDDYYYY}-log.md` | `05-data-collection-Feb062026-log.md` |
-| spec | `specs/` | `{topic}.md` | `system-design-v2.md` |
+structure:                    # what each part is for. Authoring, never discovery.
+  project:
+    overview.md: What it is, its stack, and where its state lives.
+```
 
-The grammar is data, not code — entity and artifact types can be added or changed without modifying Python.
+The tables that used to be here are gone on purpose: they were a fourth copy of
+the same vocabulary, and the copies drifted. **The grammar is the declaration**
+— read `orglens/grammars/default.yaml`, or the rendering of it at
+`skills/orglens/references/grammar-reference.md`.
+
+The grammar is data, not code. Adding a kind is one line and needs no Python
+change: `deck: capabilities/*` is a working example, exercised by
+`capabilities/.orglens.yml`.
 
 ## How Discovery Works
 
-1. For each entity type, orglens looks in `docs_root/<parent_dir>/` (e.g. `docs_root/projects/`)
-2. Each subdirectory that contains the required files is recognized as an entity
-3. For experiments, it looks inside research programs for dirs matching `expt-*`
-4. Artifacts are found by matching filenames in the artifact's target directory against its naming pattern
+1. Every entity pattern is **relative**: matched at the docs root, then inside
+   every entity found, until nothing new turns up
+2. An entity's parent is whichever entity contains it, so nesting is never
+   declared — a client can grow projects and a project can grow experiments
+   with no grammar edit
+3. A directory that matches **is** an entity, whether or not it holds what
+   `structure` describes. Completeness is never a precondition for visibility
+4. A `.md` file matching an artifact's `find` glob **is** a document of that
+   kind, whatever it is called. Nothing parses a filename
 
-Status is extracted from `> **Status:** ...` badges in entity state files (e.g. `overview.md`).
+Status is the first `> **Status:** ...` line found in an entity's documents,
+looking at the ones `structure` names first. Nothing declares a state file, so
+moving the line into whichever document you actually maintain works. It is
+always reported with its age — an authored sentence can go stale, and a dated
+quote is honest where a bare claim is not.
 
 ## Demo
 
@@ -130,7 +161,7 @@ Run the included demo to validate the full flow:
 ./demo.sh 3        # run a single step
 ```
 
-Steps: install, configure, CLI commands, snapshot, plugin validation, test suite.
+Steps: install, configure, CLI commands, snapshot, skills, test suite.
 
 ## Ecosystem
 
@@ -146,12 +177,12 @@ orglens is part of a two-tool ecosystem:
 pip install pytest
 python -m pytest tests/ -v
 
-# Current: 87 tests
+# Current: 386 tests
 ```
 
 ## Status
 
-- **v1.1** (current): Grammar, topology, state aggregation, snapshot, CLI, Claude Code plugin with org-context skill, demo script
+- **v1.1** (current): Grammar, topology, state aggregation, snapshot, CLI, skills shipped through the shared agent-skills convention, demo script
 - **v2** (planned): Org-mode backend for structured state tracking
 
 ## License

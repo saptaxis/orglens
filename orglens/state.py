@@ -1,101 +1,94 @@
-"""State aggregation from markdown files."""
+"""The one authored line the tree carries, and how old it is.
+
+Everything else about an entity is derived (`activity.py`). This is not: a
+status line is a human's summary of intent — *"vocabulary face is next and
+should shrink before it is patched"* — and no amount of git archaeology
+produces that sentence. Storing it does not create two truths, because there
+is no other copy to disagree with.
+
+What it can do is go stale, so it is always reported with its age. A five-month
+-old line is then a dated quote rather than a claim about today.
+"""
 
 from __future__ import annotations
 
 import re
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+STATUS = re.compile(r"\*\*Status:\*\*\s*(.+)")
+
+
+@dataclass(frozen=True)
+class Status:
+    text: str
+    source: Path
+    #: Unix seconds of the last edit, or None where that cannot be determined.
+    edited: int | None = None
+
+    @property
+    def age_days(self) -> float | None:
+        if self.edited is None:
+            return None
+        return (time.time() - self.edited) / 86400
 
 
 def extract_status(content: str) -> str | None:
-    """Extract the status badge from a markdown file.
+    """Pull the status line out of a document.
 
-    Looks for patterns like:
-      > **Status:** Active
-      > **Status:** Packaged and shipped (Plan 01 complete)
+    Looks for `> **Status:** Active` and similar.
     """
-    match = re.search(r'\*\*Status:\*\*\s*(.+)', content)
+    match = STATUS.search(content)
     if not match:
         return None
     raw = match.group(1).strip()
-    # Strip parenthetical suffixes
-    raw = re.sub(r'\s*\(.*\)\s*$', '', raw)
-    # Strip trailing comma and everything after
-    raw = re.sub(r',.*$', '', raw)
+    raw = re.sub(r"\s*\(.*\)\s*$", "", raw)
+    raw = re.sub(r",.*$", "", raw)
     # Preserve the author's case. Lowercasing here and re-capitalising at the
     # call site turned "POC" into "Poc" and "PhysicsX" into "Physicsx".
     return raw.strip()
 
 
-def extract_table_statuses(content: str) -> list[dict]:
-    """Extract status entries from markdown tables.
+def read_status(path: Path, declared: list[str] | None = None) -> Status | None:
+    """The status line for an entity, and where it came from.
 
-    Looks for tables with a Status column and a Name/Plan/Item column.
-    Returns list of {"name": ..., "status": ...} dicts.
+    Documents the grammar names are consulted first, then everything else
+    alphabetically. Order matters more than it looks: scanning plainly by name
+    picks `backlog.md` over `overview.md`, and `geocoding-results-Jun092026.md`
+    over both. A document the grammar can describe outranks an ad-hoc one.
+
+    Nothing names a *state file*. Move the line into whichever document you
+    actually maintain and it is found there.
     """
-    results = []
-    lines = content.split("\n")
+    preferred = [path / name for name in (declared or []) if not name.endswith("/")]
+    rest = sorted(p for p in path.glob("*.md") if p not in preferred)
 
-    # Find table header rows
-    for i, line in enumerate(lines):
-        if "|" not in line:
+    for candidate in preferred + rest:
+        if not candidate.is_file():
             continue
-        cells = [c.strip() for c in line.split("|")]
-        cells = [c for c in cells if c]  # Remove empty from leading/trailing |
+        text = extract_status(candidate.read_text(errors="ignore"))
+        if text:
+            return Status(text=text, source=candidate, edited=_last_edit(candidate))
+    return None
 
-        # Find status column and name column
-        status_col = None
-        name_col = None
-        for j, cell in enumerate(cells):
-            if cell.lower() == "status":
-                status_col = j
-            if cell.lower() in ("name", "plan", "item", "task"):
-                name_col = j
 
-        if status_col is None:
-            continue
+def _last_edit(path: Path) -> int | None:
+    """When the document last changed, by git where possible.
 
-        # If no explicit name column, use the column after # or the first non-trivial one
-        if name_col is None:
-            for j, cell in enumerate(cells):
-                if cell == "#":
-                    name_col = j + 1 if j + 1 < len(cells) else None
-                    break
-            if name_col is None:
-                name_col = 0
+    Reuses `activity`'s git plumbing rather than shelling out again: it is the
+    module that already knows how to ask a repository when something moved, and
+    a second copy here would be one more thing to keep in step. Falls back to
+    mtime, which a fresh clone rewrites — hence the preference.
+    """
+    from orglens import activity
 
-        # Skip separator row
-        if i + 1 < len(lines) and re.match(r'^\s*\|[\s\-:|]+\|\s*$', lines[i + 1]):
-            data_start = i + 2
-        else:
-            continue
-
-        # Read data rows
-        for row_line in lines[data_start:]:
-            if "|" not in row_line or row_line.strip() == "":
-                break
-            row_cells = [c.strip() for c in row_line.split("|")]
-            row_cells = [c for c in row_cells if c]
-
-            if len(row_cells) <= max(status_col, name_col):
-                continue
-
-            name_raw = row_cells[name_col]
-            status_raw = row_cells[status_col]
-
-            # Strip bold markers
-            name_raw = re.sub(r'\*\*(.+?)\*\*', r'\1', name_raw)
-            status_raw = re.sub(r'\*\*(.+?)\*\*', r'\1', status_raw)
-
-            # Strip markdown links
-            name_raw = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', name_raw)
-
-            # Strip leading numbering like "01 —"
-            name_raw = re.sub(r'^\d+\s*[—–-]\s*', '', name_raw)
-
-            results.append({
-                "name": name_raw.strip(),
-                "status": status_raw.strip().lower(),
-            })
-
-        break  # Only process the first table with a Status column
-
-    return results
+    root = activity._repo_root(path.parent)
+    if root is not None:
+        landed = activity._last_commit(root, path)
+        if landed is not None:
+            return landed
+    try:
+        return int(path.stat().st_mtime)
+    except OSError:
+        return None

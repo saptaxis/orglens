@@ -1,179 +1,228 @@
-"""Tests for topology operations."""
+"""Discovery: patterns find things, nothing filters, nesting is never declared."""
 
 import pytest
-from pathlib import Path
+
 from orglens.topology import Topology
 
 
 @pytest.fixture
-def topo(config, grammar):
-    return Topology(config.docs_root, grammar)
+def topo(docs_tree, grammar):
+    return Topology(docs_tree, grammar)
 
 
-class TestEntityDiscovery:
-    def test_discovers_projects(self, topo):
-        projects = topo.list_entities("project")
-        names = [e.name for e in projects]
-        assert "clipcompose" in names
-        assert "orglens" in names
+class TestDiscovery:
+    def test_every_matching_directory_is_found(self, topo):
+        names = {e.name for e in topo.list_entities()}
+        assert names == {
+            "clipcompose", "orglens", "physics-priors",
+            "expt-1-agent-behavior", "freightify",
+        }
 
-    def test_discovers_research_programs(self, topo):
-        programs = topo.list_entities("research-program")
-        names = [e.name for e in programs]
-        assert "physics-priors" in names
+    def test_each_entity_carries_its_kind(self, topo):
+        kinds = {e.name: e.entity_type for e in topo.list_entities()}
+        assert kinds["clipcompose"] == "project"
+        assert kinds["physics-priors"] == "research-program"
+        assert kinds["expt-1-agent-behavior"] == "experiment"
+        assert kinds["freightify"] == "client"
 
-    def test_discovers_experiments(self, topo):
-        expts = topo.list_entities("experiment")
-        names = [e.name for e in expts]
-        assert "expt-1-agent-behavior" in names
+    def test_filtering_by_kind(self, topo):
+        assert {e.name for e in topo.list_entities("project")} == {
+            "clipcompose", "orglens",
+        }
 
-    def test_discovers_clients(self, topo):
-        clients = topo.list_entities("client")
-        names = [e.name for e in clients]
-        assert "freightify" in names
-
-    def test_list_all_entities(self, topo):
-        all_entities = topo.list_entities()
-        assert len(all_entities) >= 5  # 2 projects + 1 rp + 1 expt + 1 client
-
-    def test_entity_has_path(self, topo):
-        projects = topo.list_entities("project")
-        clipcompose = [e for e in projects if e.name == "clipcompose"][0]
-        assert clipcompose.path.name == "clipcompose"
-        assert clipcompose.path.exists()
-
-    def test_entity_has_type(self, topo):
-        projects = topo.list_entities("project")
-        assert all(e.entity_type == "project" for e in projects)
-
-    def test_experiment_knows_parent(self, topo):
-        expts = topo.list_entities("experiment")
-        expt = expts[0]
+    def test_the_parent_is_whichever_entity_contains_it(self, topo):
+        expt = next(e for e in topo.list_entities() if e.name.startswith("expt-"))
         assert expt.parent_name == "physics-priors"
 
+    def test_a_top_level_entity_has_no_parent(self, topo):
+        project = next(e for e in topo.list_entities() if e.name == "clipcompose")
+        assert project.parent_name is None
 
-class TestEntityResolution:
-    def test_resolve_by_exact_name(self, topo):
-        entity = topo.resolve("clipcompose")
-        assert entity.name == "clipcompose"
-        assert entity.entity_type == "project"
+    def test_ordering_is_stable(self, topo):
+        assert [e.name for e in topo.list_entities()] == [
+            e.name for e in topo.list_entities()
+        ]
 
-    def test_resolve_by_partial_name(self, topo):
-        entity = topo.resolve("physics")
-        assert entity.name == "physics-priors"
 
-    def test_resolve_ambiguous_raises(self, topo, docs_tree):
-        # Add another entity starting with "c"
-        client2 = docs_tree / "clients" / "cloudcorp"
-        client2.mkdir(parents=True)
-        (client2 / "overview.md").write_text("# Overview\n")
-        # "c" matches clipcompose, cloudcorp, clients...
-        # But "clip" should still resolve
-        entity = topo.resolve("clip")
-        assert entity.name == "clipcompose"
+class TestNothingIsFiltered:
+    def test_an_entity_missing_every_declared_file_is_still_found(self, docs_tree, grammar):
+        """The old gate hid four real entities, two on a naming near-miss."""
+        bare = docs_tree / "projects" / "resume"
+        bare.mkdir()
+        (bare / "resume-May222026.md").write_text("# Resume\n")
 
-    def test_resolve_not_found_raises(self, topo):
-        with pytest.raises(ValueError, match="No entity"):
+        assert "resume" in {e.name for e in Topology(docs_tree, grammar).list_entities()}
+
+    def test_a_completely_empty_directory_is_an_entity(self, docs_tree, grammar):
+        (docs_tree / "clients" / "itus-capital").mkdir()
+
+        found = Topology(docs_tree, grammar).list_entities("client")
+
+        assert {e.name for e in found} == {"freightify", "itus-capital"}
+
+    def test_a_document_that_matches_no_naming_template_is_found(self, topo, docs_tree):
+        """`01-stg-simulator-setup.md` has no date. 49 real plans look like this."""
+        (docs_tree / "projects" / "clipcompose" / "plans" / "02-no-date.md").write_text("x")
+        (docs_tree / "projects" / "clipcompose" / "plans" / "e5-03-prefixed-Apr142026.md").write_text("y")
+
+        found = {a.name for a in topo.find_artifacts("plan", "clipcompose")}
+
+        assert found == {
+            "01-packaging-Feb252026.md", "02-no-date.md", "e5-03-prefixed-Apr142026.md",
+        }
+
+
+class TestNestingIsNeverDeclared:
+    def test_a_client_can_grow_projects_with_no_grammar_edit(self, docs_tree, grammar):
+        nested = docs_tree / "clients" / "freightify" / "projects" / "rfp-tooling"
+        nested.mkdir(parents=True)
+
+        found = {e.name: e for e in Topology(docs_tree, grammar).list_entities()}
+
+        assert found["rfp-tooling"].entity_type == "project"
+        assert found["rfp-tooling"].parent_name == "freightify"
+
+    def test_a_project_can_grow_experiments(self, docs_tree, grammar):
+        nested = docs_tree / "projects" / "clipcompose" / "expt-1-encoding"
+        nested.mkdir(parents=True)
+
+        found = {e.name: e for e in Topology(docs_tree, grammar).list_entities()}
+
+        assert found["expt-1-encoding"].entity_type == "experiment"
+        assert found["expt-1-encoding"].parent_name == "clipcompose"
+
+    def test_nesting_three_deep_terminates(self, docs_tree, grammar):
+        deep = docs_tree / "clients" / "freightify" / "projects" / "a" / "expt-1-b"
+        deep.mkdir(parents=True)
+
+        found = {e.name for e in Topology(docs_tree, grammar).list_entities()}
+
+        assert {"freightify", "a", "expt-1-b"} <= found
+
+    def test_children_of_reaches_any_depth(self, docs_tree, grammar):
+        deep = docs_tree / "clients" / "freightify" / "projects" / "a" / "expt-1-b"
+        deep.mkdir(parents=True)
+        topo = Topology(docs_tree, grammar)
+
+        client = topo.resolve("freightify")
+
+        assert {c.name for c in topo.children_of(client)} == {"a", "expt-1-b"}
+
+
+class TestResolve:
+    def test_exact_match(self, topo):
+        assert topo.resolve("clipcompose").name == "clipcompose"
+
+    def test_prefix_match(self, topo):
+        assert topo.resolve("clip").name == "clipcompose"
+
+    def test_substring_match(self, topo):
+        assert topo.resolve("agent-behavior").name == "expt-1-agent-behavior"
+
+    def test_no_match_lists_what_there_is(self, topo):
+        with pytest.raises(ValueError, match="Available"):
             topo.resolve("nonexistent")
 
+    def test_an_ambiguous_prefix_refuses_to_guess(self, docs_tree, grammar):
+        (docs_tree / "projects" / "clipboard").mkdir()
 
-class TestEntityScaffolding:
-    def test_scaffold_project(self, topo, docs_tree):
+        with pytest.raises(ValueError, match="multiple"):
+            Topology(docs_tree, grammar).resolve("clip")
+
+
+class TestFindingDocuments:
+    def test_across_the_whole_tree(self, topo):
+        assert len(topo.find_artifacts("plan")) == 3
+
+    def test_scoped_to_an_entity(self, topo):
+        found = topo.find_artifacts("plan", "clipcompose")
+        assert [a.name for a in found] == ["01-packaging-Feb252026.md"]
+
+    def test_scoping_to_a_parent_includes_its_children(self, topo):
+        """An experiment's plans belong to the program you asked about."""
+        found = topo.find_artifacts("plan", "physics-priors")
+
+        assert len(found) == 2
+        assert {a.entity_name for a in found} == {"expt-1-agent-behavior"}
+
+    def test_documents_are_attributed_to_the_entity_that_holds_them(self, topo):
+        found = topo.find_artifacts("log", "physics-priors")
+        assert [a.entity_name for a in found] == ["expt-1-agent-behavior"]
+
+    def test_an_absent_directory_is_not_an_error(self, topo):
+        assert topo.find_artifacts("spec", "freightify") == []
+
+
+class TestWhatAnEntityActuallyHolds:
+    def test_subdirectories_include_undeclared_ones(self, topo, docs_tree):
+        """`archive/` and `presentation/` are real and in no grammar."""
+        (docs_tree / "research" / "physics-priors" / "archive").mkdir()
+        program = topo.resolve("physics-priors")
+
+        assert "archive" in {d.name for d in topo.subdirectories(program)}
+
+    def test_hidden_directories_are_left_out(self, topo, docs_tree):
+        (docs_tree / "projects" / "clipcompose" / ".cache").mkdir()
+        project = topo.resolve("clipcompose")
+
+        assert ".cache" not in {d.name for d in topo.subdirectories(project)}
+
+    def test_top_level_documents_are_listed(self, topo, docs_tree):
+        (docs_tree / "projects" / "clipcompose" / "backlog.md").write_text("# Backlog\n")
+        project = topo.resolve("clipcompose")
+
+        assert {d.name for d in topo.documents(project)} == {
+            "overview.md", "backlog.md",
+        }
+
+
+class TestCreation:
+    def test_creating_an_entity_makes_what_the_grammar_describes(self, topo, docs_tree):
+        path = topo.scaffold_entity("project", "new-tool")
+
+        assert path == docs_tree / "projects" / "new-tool"
+        assert (path / "overview.md").exists()
+        assert (path / "specs").is_dir()
+        assert (path / "plans").is_dir()
+        assert (path / "logs").is_dir()
+
+    def test_a_new_file_says_what_it_is_for(self, topo):
+        path = topo.scaffold_entity("project", "new-tool")
+
+        text = (path / "overview.md").read_text()
+        assert "**Status:** Pending" in text
+        assert "What it is, its stack, and where its state lives." in text
+
+    def test_what_was_created_is_then_discovered(self, topo):
         topo.scaffold_entity("project", "new-tool")
-        proj_dir = docs_tree / "projects" / "new-tool"
-        assert proj_dir.exists()
-        assert (proj_dir / "overview.md").exists()
-        assert (proj_dir / "specs").is_dir()
-        assert (proj_dir / "plans").is_dir()
-        assert (proj_dir / "logs").is_dir()
+        assert "new-tool" in {e.name for e in topo.list_entities()}
 
-    def test_scaffold_project_overview_content(self, topo, docs_tree):
-        topo.scaffold_entity("project", "new-tool")
-        content = (docs_tree / "projects" / "new-tool" / "overview.md").read_text()
-        assert "# Overview" in content
-        assert "Pending" in content
-
-    def test_scaffold_research_program(self, topo, docs_tree):
-        topo.scaffold_entity("research-program", "new-research")
-        rp_dir = docs_tree / "research" / "new-research"
-        assert rp_dir.exists()
-        assert (rp_dir / "research-question.md").exists()
-        assert (rp_dir / "research-program-state.md").exists()
-        assert (rp_dir / "specs").is_dir()
-        assert (rp_dir / "literature").is_dir()
-        assert (rp_dir / "directions").is_dir()
-        assert (rp_dir / "brainstorms").is_dir()
-
-    def test_scaffold_experiment(self, topo, docs_tree):
-        topo.scaffold_entity("experiment", "world-model", parent="physics-priors")
-        # Should auto-number: expt-2-world-model (expt-1 exists)
-        expt_dir = docs_tree / "research" / "physics-priors" / "expt-2-world-model"
-        assert expt_dir.exists()
-        assert (expt_dir / "design.md").exists()
-        assert (expt_dir / "plans").is_dir()
-        assert (expt_dir / "logs").is_dir()
-        assert (expt_dir / "findings").is_dir()
-
-    def test_scaffold_duplicate_raises(self, topo):
-        with pytest.raises(FileExistsError):
-            topo.scaffold_entity("project", "clipcompose")
-
-
-class TestArtifactOperations:
-    def test_find_plans_in_entity(self, topo):
-        plans = topo.find_artifacts("plan", "physics-priors")
-        # Should find plans in expt-1 (recursive within research program)
-        assert len(plans) >= 2
-        names = [p.name for p in plans]
-        assert "01-testbed-Feb032026.md" in names
-
-    def test_find_specs_in_entity(self, topo):
-        specs = topo.find_artifacts("spec", "clipcompose")
-        names = [s.name for s in specs]
-        assert "agent-integration.md" in names
-
-    def test_find_all_plans(self, topo):
-        plans = topo.find_artifacts("plan")
-        assert len(plans) >= 3  # 1 in clipcompose + 2 in expt-1
-
-    def test_next_artifact_number(self, topo):
-        nn = topo.next_artifact_number("plan", "expt-1-agent-behavior")
-        assert nn == 3  # 01 and 02 exist
-
-    def test_next_artifact_number_empty(self, topo):
-        nn = topo.next_artifact_number("plan", "orglens")
-        assert nn == 1
-
-    def test_scaffold_artifact(self, topo, docs_tree):
-        from datetime import date
-        path = topo.scaffold_artifact("plan", "clipcompose", "agent-integration")
-        assert path.exists()
-        today = date.today().strftime("%b%d%Y")
-        assert path.name == f"02-agent-integration-{today}.md"
-        content = path.read_text()
-        assert "# 02" in content
-
-    def test_scaffold_log(self, topo, docs_tree):
-        from datetime import date
-        path = topo.scaffold_artifact("log", "expt-1-agent-behavior", "testbed")
-        today = date.today().strftime("%b%d%Y")
-        assert path.name == f"02-testbed-{today}-log.md"
-
-    def test_scaffold_spec(self, topo, docs_tree):
-        path = topo.scaffold_artifact("spec", "orglens", "system-design-v2")
-        assert path.name == "system-design-v2.md"
-        assert path.parent.name == "specs"
-
-    def test_find_all_plans_no_duplicates(self, topo):
-        """Global find must not return experiment artifacts twice."""
-        plans = topo.find_artifacts("plan")
-        paths = [str(p.path) for p in plans]
-        assert len(paths) == len(set(paths)), (
-            f"Duplicate artifacts found: {[p for p in paths if paths.count(p) > 1]}"
+    def test_creating_inside_a_parent(self, topo):
+        path = topo.scaffold_entity(
+            "experiment", "expt-2-world-model", parent="physics-priors"
         )
 
-    def test_find_all_logs_no_duplicates(self, topo):
-        """Global find must not return experiment logs twice."""
-        logs = topo.find_artifacts("log")
-        paths = [str(p.path) for p in logs]
-        assert len(paths) == len(set(paths))
+        assert path.parent.name == "physics-priors"
+        assert (path / "design.md").exists()
+        assert (path / "findings").is_dir()
+
+    def test_a_name_the_pattern_would_not_find_is_refused(self, topo):
+        """Creating something invisible is the one thing `new` must not do."""
+        with pytest.raises(ValueError, match="would not be found"):
+            topo.scaffold_entity("experiment", "world-model", parent="physics-priors")
+
+    def test_creating_over_an_existing_directory_is_refused(self, topo):
+        with pytest.raises(ValueError, match="already exists"):
+            topo.scaffold_entity("project", "clipcompose")
+
+    def test_an_entity_with_no_declared_structure_is_just_a_directory(self, docs_tree, tmp_path):
+        from orglens.grammar import Grammar
+
+        path = tmp_path / "g.yaml"
+        path.write_text("version: 2\nentities:\n  deck: capabilities/*\n")
+        topo = Topology(docs_tree, Grammar.from_yaml(path))
+
+        created = topo.scaffold_entity("deck", "writing")
+
+        assert created.is_dir()
+        assert [*created.iterdir()] == []

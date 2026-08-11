@@ -1,4 +1,14 @@
-"""Snapshot generation — materialize topology + state as a markdown document."""
+"""What is in the tree right now, materialized so agents read instead of scan.
+
+Everything here comes from the filesystem and the grammar's patterns. Nothing
+is filtered: an entity appears whether or not it is complete, and a document
+appears whatever it is called.
+
+The subdirectory listing matters more than it looks. The grammar can only say
+what a part is *for*; entities grow directories nobody declared — `archive/`,
+`infrastructure/`, `presentation/` — and an agent navigating by the grammar
+alone would confidently miss all of them.
+"""
 
 from __future__ import annotations
 
@@ -6,139 +16,102 @@ from datetime import datetime
 from pathlib import Path
 
 from orglens.config import Config
-from orglens.state import extract_status
+from orglens.state import read_status
 from orglens.topology import Topology
 
 
-def generate_snapshot(topo: Topology, config: Config, output_path: Path | None = None) -> str:
-    """Generate a markdown snapshot of the full topology and state.
-
-    If output_path is provided, also writes the snapshot to that file.
-    """
-    lines = []
+def generate_snapshot(
+    topo: Topology, config: Config, output_path: Path | None = None
+) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = [
+        "# Topology Snapshot",
+        "",
+        f"> Generated: {now}",
+        f"> Docs root: `{config.docs_root}`",
+        "",
+        "---",
+        "",
+        "## Grammar",
+        "",
+        "**Kinds:** "
+        + ", ".join(
+            f"{name} (`{et.pattern}`)"
+            for name, et in topo.grammar.entity_types.items()
+        ),
+        "",
+        "**Documents:** "
+        + ", ".join(
+            f"{name} (`{at.find}`)"
+            for name, at in topo.grammar.artifact_types.items()
+        ),
+        "",
+        "---",
+        "",
+    ]
 
-    lines.append("# Topology Snapshot")
-    lines.append("")
-    lines.append(f"> Generated: {now}")
-    lines.append(f"> Docs root: `{config.docs_root}`")
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-
-    # Grammar summary
-    lines.append("## Grammar")
-    lines.append("")
-    lines.append("**Entity Types:** " + ", ".join(topo.grammar.entity_types.keys()))
-    lines.append("")
-    lines.append("**Artifact Types:** " + ", ".join(
-        f"{k} (`{v.directory}/`, `{v.pattern}`)"
-        for k, v in topo.grammar.artifact_types.items()
-    ))
-    lines.append("")
-    lines.append("---")
-    lines.append("")
-
-    # Group entities by type
-    all_entities = topo.list_entities()
+    entities = topo.list_entities()
     by_type: dict[str, list] = {}
-    for entity in all_entities:
+    for entity in entities:
         by_type.setdefault(entity.entity_type, []).append(entity)
 
-    # Render each entity type section
-    type_display = {
-        "research-program": "Research Programs",
-        "experiment": "Experiments",
-        "project": "Projects",
-        "client": "Clients",
-    }
-
-    for etype in ["research-program", "project", "client"]:
-        entities = by_type.get(etype, [])
-        if not entities:
+    for type_name in topo.grammar.entity_types:
+        group = by_type.get(type_name, [])
+        if not group:
             continue
 
-        lines.append(f"## {type_display.get(etype, etype)}")
-        lines.append("")
+        lines += [f"## {_heading(type_name)}", ""]
+        for entity in group:
+            declared = topo.grammar.entity_types[type_name]
+            status = read_status(entity.path, list(declared.structure))
+            suffix = f" — {status.text}" if status else ""
+            lines += [f"### {entity.name}{suffix}", ""]
+            if entity.parent_name:
+                lines += [f"In: {entity.parent_name}", ""]
+            lines += [f"Path: `{_relative(entity.path, config.docs_root)}`", ""]
 
-        for entity in entities:
-            status = _read_entity_status(entity.path, topo.grammar.entity_types[etype])
-            status_str = f" — {status}" if status else ""
-            lines.append(f"### {entity.name}{status_str}")
-            lines.append("")
-            lines.append(f"Path: `{entity.path.relative_to(config.docs_root)}`")
-            lines.append("")
+            children = [
+                e for e in entities
+                if e.parent_name == entity.name and e.path.parent == entity.path
+            ]
+            if children:
+                lines += ["**Contains:**", ""]
+                lines += [f"- {c.name} ({c.entity_type})" for c in children]
+                lines.append("")
 
-            # List child experiments inline for research programs
-            if etype == "research-program":
-                children = by_type.get("experiment", [])
-                rp_children = [c for c in children if c.parent_name == entity.name]
-                if rp_children:
-                    lines.append("**Experiments:**")
-                    lines.append("")
-                    for child in rp_children:
-                        child_status = _read_entity_status(
-                            child.path, topo.grammar.entity_types["experiment"]
-                        )
-                        child_status_str = f" — {child_status}" if child_status else ""
-                        lines.append(f"- {child.name}{child_status_str}")
-                    lines.append("")
+            directories = [d.name for d in topo.subdirectories(entity)]
+            if directories:
+                lines += ["**Directories:** " + ", ".join(f"`{d}/`" for d in directories), ""]
 
-            # List recent artifacts, grouped by source entity
-            for at_name, at in topo.grammar.artifact_types.items():
-                # Direct artifacts on this entity
-                direct_artifacts = []
-                target_dir = entity.path / at.directory
-                if target_dir.exists():
-                    for f in sorted(target_dir.iterdir()):
-                        if f.is_file() and f.suffix == ".md":
-                            parsed = at.parse_name(f.name)
-                            if parsed is not None:
-                                direct_artifacts.append(f.name)
+            documents = [d.name for d in topo.documents(entity)]
+            if documents:
+                lines += ["**Documents:** " + ", ".join(f"`{d}`" for d in documents), ""]
 
-                if direct_artifacts:
-                    lines.append(f"**{at_name.title()}s:** {len(direct_artifacts)}")
-                    for name in direct_artifacts[-3:]:
-                        lines.append(f"- `{name}`")
+            for name in topo.grammar.artifact_types:
+                held = [
+                    a for a in topo.find_artifacts(name, entity.name)
+                    if a.entity_name == entity.name
+                ]
+                if held:
+                    lines.append(f"**{name.title()}s:** {len(held)}")
+                    lines += [f"- `{a.name}`" for a in held[-3:]]
                     lines.append("")
 
-                # Child entity artifacts (experiments within research programs)
-                if etype == "research-program":
-                    children = by_type.get("experiment", [])
-                    rp_children = [c for c in children if c.parent_name == entity.name]
-                    for child in rp_children:
-                        child_dir = child.path / at.directory
-                        if child_dir.exists():
-                            child_artifacts = []
-                            for f in sorted(child_dir.iterdir()):
-                                if f.is_file() and f.suffix == ".md":
-                                    parsed = at.parse_name(f.name)
-                                    if parsed is not None:
-                                        child_artifacts.append(f.name)
-                            if child_artifacts:
-                                lines.append(f"**{at_name.title()}s** ({child.name}): {len(child_artifacts)}")
-                                for name in child_artifacts[-3:]:
-                                    lines.append(f"- `{name}`")
-                                lines.append("")
-
-        lines.append("---")
-        lines.append("")
+        lines += ["---", ""]
 
     snapshot = "\n".join(lines)
-
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(snapshot)
-
     return snapshot
 
 
-def _read_entity_status(entity_path: Path, entity_type) -> str | None:
-    """Read status from an entity's state file."""
-    if not entity_type.state_file:
-        return None
-    state_file = entity_path / entity_type.state_file
-    if not state_file.exists():
-        return None
-    content = state_file.read_text()
-    return extract_status(content)
+def _heading(type_name: str) -> str:
+    return type_name.replace("-", " ").capitalize() + "s"
+
+
+def _relative(path: Path, root: Path) -> Path:
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        return path

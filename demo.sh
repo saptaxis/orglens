@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# orglens demo — walks through the full flow: install, config, CLI, plugin, skill
+# orglens demo — walks through the full flow: install, config, CLI, snapshot, skills
 # Usage: ./demo.sh [--step N] [--docs-root PATH]
 
 DOCS_ROOT="${DOCS_ROOT:-/workspace/traitful-docs/docs}"
@@ -96,23 +96,24 @@ if [ "$STEP" = "all" ] || [ "$STEP" = "4" ]; then
     wait_for_user
 fi
 
-# --- Step 5: Plugin validation ---
+# --- Step 5: Skills ---
 if [ "$STEP" = "all" ] || [ "$STEP" = "5" ]; then
-    print_header 5 "Plugin structure"
+    print_header 5 "Skills"
 
-    echo "Plugin manifest:"
-    cat .claude-plugin/plugin.json
+    echo "Skills this repo ships (not installed by this step):"
+    npx --yes skills@latest add . -l --full-depth 2>/dev/null | grep -E "^│    [a-z]" || \
+        echo "  (needs node; skills live in skills/ and capabilities/decks/*/skills/)"
     echo ""
 
     echo "Skill file:"
-    head -10 skills/org-context/SKILL.md
+    head -10 skills/orglens/SKILL.md
     echo "..."
     echo ""
 
     echo "Skill frontmatter validates:"
     python3 -c "
 import yaml
-fm = open('skills/org-context/SKILL.md').read().split('---')
+fm = open('skills/orglens/SKILL.md').read().split('---')
 data = yaml.safe_load(fm[1])
 print(f'  name: {data[\"name\"]}')
 print(f'  description: {data[\"description\"][:80]}...')
@@ -120,11 +121,11 @@ print(f'  description: {data[\"description\"][:80]}...')
     echo ""
 
     echo "References:"
-    ls -la skills/org-context/references/
+    ls -la skills/orglens/references/
     echo ""
 
-    echo "To load as plugin in Claude Code:"
-    echo "  claude --plugin-dir $(pwd)"
+    echo "To install into every detected agent:"
+    echo "  npx skills add $(pwd) -g -a '*' -y --full-depth"
     echo ""
 fi
 
@@ -141,7 +142,7 @@ echo ""
 echo "=== Demo complete ==="
 echo ""
 echo "Next steps:"
-echo "  1. Load plugin:  claude --plugin-dir $(pwd)"
-echo "  2. Ask: 'what projects exist?' — org-context skill should fire"
-echo "  3. Ask: 'create a new plan for orglens' — should use orglens CLI"
+echo "  1. Install skills: npx skills add $(pwd) -g -a '*' -y --full-depth"
+echo "  2. Ask: 'what projects exist?' — orglens skill should fire"
+echo "  3. Ask: 'where does a design doc go?' — should read the generated reference"
 echo ""
