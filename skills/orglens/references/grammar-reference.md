@@ -6,6 +6,15 @@ This tree's grammar, rendered. It says what may exist and what each part
 is for. It does **not** say what is there — run `orglens snapshot` for that,
 and read the snapshot rather than scanning directories.
 
+## Where anything stands
+
+Every entity carries **`overview.md`** — one document, same name for every
+kind, saying where that entity stands and what is next. It is the first thing
+to read and the first place a status line is looked for.
+
+Long documents it refers to stay separate and are pointed at from it, so it
+can be read in a screen.
+
 ## What exists
 
 Patterns are relative: matched at the docs root, then inside every entity
@@ -56,8 +65,8 @@ either way.
 
 | Path | What it is for |
 |------|----------------|
-| `research-program-state.md` | Where the program stands and what is in flight. |
-| `research-question.md` | The question the program exists to answer. |
+| `overview.md` | Where the program stands, what is next, what is open. |
+| `research-question.md` | The question the program exists to answer. Often long; pointed at, not inlined. |
 | `specs/` | Design documents for the program's shared machinery. |
 | `literature/` | Papers and notes on prior work. |
 | `directions/` | Candidate directions not yet promoted to experiments. |
@@ -67,7 +76,8 @@ either way.
 
 | Path | What it is for |
 |------|----------------|
-| `design.md` | What this experiment tests and how. |
+| `overview.md` | Where the experiment stands, what is next, what is open. |
+| `design.md` | What this experiment tests and how. Often long; pointed at, not inlined. |
 | `plans/` | Numbered units of work, scoped to this experiment. |
 | `logs/` | What happened executing each plan. |
 | `findings/` | What the experiment actually showed. |

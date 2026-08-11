@@ -53,7 +53,9 @@ class TestConfigLoading:
     def test_a_second_tree_names_its_own_grammar(self, tmp_path):
         """Config, not the engine, decides which grammar governs which root."""
         grammar = tmp_path / "deck.yaml"
-        grammar.write_text("version: 2\nentities:\n  deck: capabilities/*\n")
+        grammar.write_text(
+            "version: 2\ndriver: DECK.md\nentities:\n  deck: capabilities/*\n"
+        )
         config_file = tmp_path / "config.yaml"
         config_file.write_text(f"docs_root: {tmp_path}\ngrammar: {grammar}\n")
 

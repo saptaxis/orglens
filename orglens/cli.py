@@ -60,9 +60,7 @@ def _heading(type_name: str) -> str:
 
 
 def _status_of(topo: Topology, entity):
-    # `[*declared]`, not `list(...)` — the `list` command shadows the builtin.
-    declared = topo.grammar.entity_types[entity.entity_type].structure
-    return read_status(entity.path, [*declared])
+    return read_status(entity.path, topo.grammar.documents_for(entity.entity_type))
 
 
 def _unknown(kind: str, value: str, available) -> None:

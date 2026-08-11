@@ -219,7 +219,7 @@ class TestCreation:
         from orglens.grammar import Grammar
 
         path = tmp_path / "g.yaml"
-        path.write_text("version: 2\nentities:\n  deck: capabilities/*\n")
+        path.write_text("version: 2\ndriver: DECK.md\nentities:\n  deck: capabilities/*\n")
         topo = Topology(docs_tree, Grammar.from_yaml(path))
 
         created = topo.scaffold_entity("deck", "writing")

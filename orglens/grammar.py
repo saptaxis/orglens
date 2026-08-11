@@ -65,10 +65,34 @@ class Grammar:
     version: int
     entity_types: dict[str, EntityType]
     artifact_types: dict[str, ArtifactType]
+    #: The one document that says where an entity stands. Required: every
+    #: entity has one, so an optional field would be a None branch in every
+    #: consumer that is never taken. Declared rather than hardcoded — the
+    #: engine may not know a noun — and one name per tree rather than per kind,
+    #: which buys nothing technically and everything for a human browsing.
+    driver: str
+
+    def documents_for(self, entity_type: str) -> list[str]:
+        """Where to look for an entity's status line, driver first.
+
+        Precedence, not location: the line is found wherever it lives. This
+        only decides which document is consulted first, which is why the
+        driver is declared rather than inferred from list order — a reordering
+        should not silently change what `status` reports.
+        """
+        structure = self.entity_types[entity_type].structure
+        return [self.driver] + [
+            k for k in structure if not k.endswith("/") and k != self.driver
+        ]
 
     @classmethod
     def from_yaml(cls, path: Path) -> Grammar:
         data = yaml.safe_load(Path(path).read_text()) or {}
+        if not data.get("driver"):
+            raise ValueError(
+                f"{path}: a grammar must declare `driver` — the document that "
+                f"says where an entity stands"
+            )
         declared = data.get("structure") or {}
 
         entity_types = {
@@ -91,6 +115,7 @@ class Grammar:
 
         return cls(
             version=data.get("version", 2),
+            driver=data.get("driver"),
             entity_types=entity_types,
             artifact_types=artifact_types,
         )

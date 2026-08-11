@@ -53,13 +53,14 @@ def extract_status(content: str) -> str | None:
 def read_status(path: Path, declared: list[str] | None = None) -> Status | None:
     """The status line for an entity, and where it came from.
 
-    Documents the grammar names are consulted first, then everything else
-    alphabetically. Order matters more than it looks: scanning plainly by name
-    picks `backlog.md` over `overview.md`, and `geocoding-results-Jun092026.md`
-    over both. A document the grammar can describe outranks an ad-hoc one.
+    Precedence: the driver document the grammar names, then the other documents
+    it describes, then everything else alphabetically. That order matters more
+    than it looks — scanning plainly by name picks `backlog.md` over the
+    overview, and a dated results file over both.
 
     Nothing names a *state file*. Move the line into whichever document you
-    actually maintain and it is found there.
+    actually maintain and it is found there; the driver is only where it is
+    looked for first.
     """
     preferred = [path / name for name in (declared or []) if not name.endswith("/")]
     rest = sorted(p for p in path.glob("*.md") if p not in preferred)

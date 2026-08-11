@@ -62,8 +62,7 @@ def generate_snapshot(
 
         lines += [f"## {_heading(type_name)}", ""]
         for entity in group:
-            declared = topo.grammar.entity_types[type_name]
-            status = read_status(entity.path, list(declared.structure))
+            status = read_status(entity.path, topo.grammar.documents_for(type_name))
             suffix = f" — {status.text}" if status else ""
             lines += [f"### {entity.name}{suffix}", ""]
             if entity.parent_name:

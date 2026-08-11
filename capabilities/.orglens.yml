@@ -3,6 +3,8 @@
 # root is a config question, not an engine one.
 version: 2
 
+driver: DECK.md
+
 entities:
   deck: decks/*
 

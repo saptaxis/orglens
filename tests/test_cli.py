@@ -27,6 +27,7 @@ def deck_env(tmp_path, docs_tree):
     grammar = tmp_path / "deck.yaml"
     grammar.write_text(
         "version: 2\n"
+        "driver: DECK.md\n"
         "entities:\n"
         "  deck: capabilities/*\n"
         "artifacts:\n"
@@ -225,7 +226,9 @@ class TestCheckCommand:
     def test_a_pattern_that_matches_nothing_is_reported(self, runner, tmp_path, docs_tree):
         """A mistyped glob finds nothing and raises nothing — the silent failure."""
         grammar = tmp_path / "typo.yaml"
-        grammar.write_text("version: 2\nentities:\n  project: porjects/*\n")
+        grammar.write_text(
+            "version: 2\ndriver: overview.md\nentities:\n  project: porjects/*\n"
+        )
         config_file = tmp_path / "typo-config.yaml"
         config_file.write_text(f"docs_root: {docs_tree}\ngrammar: {grammar}\n")
 

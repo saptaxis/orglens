@@ -84,7 +84,9 @@ class TestSilentFailure:
         the audit looks for beyond missing documents.
         """
         path = tmp_path / "typo.yaml"
-        path.write_text("version: 2\nentities:\n  project: porjects/*\n")
+        path.write_text(
+            "version: 2\ndriver: overview.md\nentities:\n  project: porjects/*\n"
+        )
 
         report = check.run(Topology(docs_tree, Grammar.from_yaml(path)))
 
@@ -103,6 +105,7 @@ class TestSilentFailure:
         path = tmp_path / "g.yaml"
         path.write_text(
             "version: 2\n"
+            "driver: overview.md\n"
             "entities:\n"
             "  project: projects/*\n"
             "artifacts:\n"

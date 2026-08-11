@@ -1,5 +1,11 @@
 version: 2
 
+# The one document that says where an entity stands, whatever kind it is.
+# Declared here rather than known by the engine, and the same name for every
+# kind so nothing has to look it up. Long identity documents — a research
+# question, an experiment's design — stay separate and are pointed at from it.
+driver: overview.md
+
 # What exists. Every pattern is relative: matched at the docs root, then inside
 # every entity found, until nothing new turns up. Depth is never declared — an
 # experiment is `expt-*` wherever it sits, so a client can grow projects and a
@@ -50,16 +56,15 @@ structure:
     plans/: Numbered units of work.
     logs/: What happened executing each plan.
   research-program:
-    # Order is precedence: `status` takes the first line it finds, and where a
-    # program stands answers "how is it going" better than what it is asking.
-    research-program-state.md: Where the program stands and what is in flight.
-    research-question.md: The question the program exists to answer.
+    overview.md: Where the program stands, what is next, what is open.
+    research-question.md: The question the program exists to answer. Often long; pointed at, not inlined.
     specs/: Design documents for the program's shared machinery.
     literature/: Papers and notes on prior work.
     directions/: Candidate directions not yet promoted to experiments.
     brainstorms/: Exploratory thinking, dated, not durable.
   experiment:
-    design.md: What this experiment tests and how.
+    overview.md: Where the experiment stands, what is next, what is open.
+    design.md: What this experiment tests and how. Often long; pointed at, not inlined.
     plans/: Numbered units of work, scoped to this experiment.
     logs/: What happened executing each plan.
     findings/: What the experiment actually showed.

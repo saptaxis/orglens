@@ -43,6 +43,9 @@ def docs_tree(tmp_path):
     (rp / "literature").mkdir()
     (rp / "directions").mkdir()
     (rp / "brainstorms").mkdir()
+    (rp / "overview.md").write_text(
+        "# Overview\n\n> **Status:** Design complete\n"
+    )
     (rp / "research-question.md").write_text("# Research Question\n")
     (rp / "research-program-state.md").write_text(
         "# Research Program State\n\n"
@@ -57,6 +60,7 @@ def docs_tree(tmp_path):
     (expt / "plans").mkdir(parents=True)
     (expt / "logs").mkdir()
     (expt / "findings").mkdir()
+    (expt / "overview.md").write_text("# Overview\n\n> **Status:** Running\n")
     (expt / "design.md").write_text("# Design\n")
     (expt / "plans" / "01-testbed-Feb032026.md").write_text("# 01 — Testbed\n")
     (expt / "plans" / "02-data-collection-Feb062026.md").write_text("# 02 — Data\n")

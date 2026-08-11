@@ -45,29 +45,35 @@ class TestPlacement:
 
 
 class TestMinimalDeclarations:
-    def test_a_grammar_needs_only_entities(self, tmp_path):
+    def test_a_grammar_needs_only_a_driver_and_entities(self, tmp_path):
         path = tmp_path / "g.yaml"
-        path.write_text("version: 2\nentities:\n  deck: capabilities/*\n")
+        path.write_text("version: 2\ndriver: DECK.md\nentities:\n  deck: capabilities/*\n")
 
         grammar = Grammar.from_yaml(path)
 
         assert grammar.entity_types["deck"].pattern == "capabilities/*"
         assert grammar.entity_types["deck"].structure == {}
         assert grammar.artifact_types == {}
+        assert grammar.driver == "DECK.md"
 
-    def test_an_empty_file_loads(self, tmp_path):
+    def test_a_grammar_without_a_driver_is_refused(self, tmp_path):
+        """Every entity has one document saying where it stands.
+
+        Optional would mean a None branch in every consumer that is never
+        taken, and a failure at status time instead of at load time.
+        """
         path = tmp_path / "g.yaml"
-        path.write_text("")
+        path.write_text("version: 2\nentities:\n  deck: capabilities/*\n")
 
-        grammar = Grammar.from_yaml(path)
-
-        assert grammar.entity_types == {}
+        with pytest.raises(ValueError, match="must declare `driver`"):
+            Grammar.from_yaml(path)
 
     def test_a_second_tree_is_just_a_second_file(self, tmp_path):
         """Nothing in the design assumes one grammar exists in the world."""
         path = tmp_path / "other.yaml"
         path.write_text(
             "version: 2\n"
+            "driver: DECK.md\n"
             "entities:\n"
             "  deck: capabilities/*\n"
             "artifacts:\n"
@@ -76,13 +82,23 @@ class TestMinimalDeclarations:
             "    means: One instruction to one model.\n"
             "structure:\n"
             "  deck:\n"
-            "    README.md: What the deck is for.\n"
+            "    DECK.md: What the deck is for.\n"
         )
 
         grammar = Grammar.from_yaml(path)
 
         assert grammar.artifact_types["card"].find == "cards/*.md"
-        assert grammar.entity_types["deck"].files == {"README.md": "What the deck is for."}
+        assert grammar.entity_types["deck"].files == {"DECK.md": "What the deck is for."}
+
+    def test_the_driver_is_consulted_first_whatever_the_kind(self, grammar):
+        """One name per tree, so nothing has to look it up per kind."""
+        for name in grammar.entity_types:
+            assert grammar.documents_for(name)[0] == grammar.driver
+
+    def test_the_driver_is_never_listed_twice(self, grammar):
+        for name in grammar.entity_types:
+            order = grammar.documents_for(name)
+            assert order.count(grammar.driver) == 1
 
 
 class TestMeans:
@@ -101,7 +117,9 @@ class TestMeans:
 
 def test_a_missing_find_is_an_error_not_a_silent_empty_kind(tmp_path):
     path = tmp_path / "g.yaml"
-    path.write_text("version: 2\nartifacts:\n  plan:\n    means: no glob\n")
+    path.write_text(
+        "version: 2\ndriver: overview.md\nartifacts:\n  plan:\n    means: no glob\n"
+    )
 
     with pytest.raises(KeyError):
         Grammar.from_yaml(path)
