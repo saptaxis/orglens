@@ -215,6 +215,52 @@ def new(entity_type: str, name: str, parent: str | None):
     _refresh_snapshot(topo, config)
 
 
+@cli.command(name="where")
+@click.argument("name", required=False)
+def where_cmd(name: str | None):
+    """Announce which tree, and which entity a name or this directory is in.
+
+    Everything else assumes an answer to this. Anything acting on an entity —
+    a skill restructuring a document, a check on whether work is committed —
+    needs an absolute path and the repository holding it, and guessing either
+    fails silently rather than loudly.
+    """
+    topo, config = _load_topo()
+
+    source = os.environ.get("ORGLENS_CONFIG") or "~/.config/orglens/config.yaml"
+    click.echo(f"tree:   {config.docs_root}  (config: {source})")
+
+    here = Path.cwd().resolve()
+    try:
+        click.echo(f"here:   {here.relative_to(config.docs_root.resolve())}")
+    except ValueError:
+        click.echo("here:   outside the tree")
+
+    if name:
+        try:
+            entity = topo.resolve(name)
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+    else:
+        entity = topo.at(here)
+        if entity is None:
+            click.echo("entity: none — this directory is not inside one")
+            return
+
+    click.echo(f"entity: {entity.name}  ({entity.entity_type})")
+    if entity.parent_name:
+        click.echo(f"in:     {entity.parent_name}")
+    click.echo(f"path:   {entity.path}")
+
+    root = activity._repo_root(entity.path)
+    if root is None:
+        click.echo("repo:   none — nothing is backing this up")
+        return
+    dirty = activity._dirty(root, entity.path)
+    click.echo(f"repo:   {root}  ({dirty} uncommitted)" if dirty else f"repo:   {root}  (clean)")
+
+
 @cli.command(name="check")
 def check_cmd():
     """Report where the tree has drifted from the grammar. Changes nothing."""

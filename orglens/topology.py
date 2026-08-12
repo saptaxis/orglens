@@ -95,6 +95,25 @@ class Topology:
             f"Available: {', '.join(e.name for e in entities)}"
         )
 
+    def at(self, path: Path) -> Entity | None:
+        """The deepest entity containing this path, if any.
+
+        Resolution has to be askable. A command that silently assumes which
+        entity it is standing in will eventually act on a different one — and
+        the failure is quiet, because the wrong answer looks like an answer.
+
+        Both sides are resolved before comparing: a tree reached through a
+        symlinked home directory otherwise never matches its own contents.
+        """
+        here = Path(path).resolve()
+        containing = [
+            e for e in self.list_entities()
+            if (r := e.path.resolve()) == here or r in here.parents
+        ]
+        if not containing:
+            return None
+        return max(containing, key=lambda e: len(e.path.resolve().parts))
+
     def children_of(self, entity: Entity) -> list[Entity]:
         """Entities nested anywhere beneath this one."""
         return [

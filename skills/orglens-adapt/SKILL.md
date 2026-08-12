@@ -18,11 +18,30 @@ approves before anything is written.
 
 Say: *"Using orglens-adapt to restructure `<entity>`'s driver document."*
 
-## Step 0 — preconditions, both hard
+## Step 0 — resolve, then check preconditions
 
-**The entity's files must be committed.** Run `git status --porcelain -- <entity path>`.
-If anything is modified, **stop** and say so. Git is the backup — that is the
-whole safety model, and it only works if the current version is in it.
+**Never assume which entity or which tree.** Ask:
+
+```bash
+orglens where <entity>      # or bare `orglens where` if you are standing in one
+```
+
+It prints the tree and where its config came from, the entity and its kind, its
+**absolute path**, and the repository holding it with whether that path is
+committed.
+
+All three matter. The path must be absolute because the entity may live in a
+different repository from your working directory — `orglens` answers for one
+configured tree wherever you happen to be standing. Running `git status` on a
+relative path from the wrong repo returns nothing, and **empty output reads as
+clean**, so the safety check passes exactly when it should fail.
+
+Then, both hard:
+
+**The entity's files must be committed.** If `where` reports uncommitted paths,
+**stop** and say so. Git is the backup — that is the whole safety model, and it
+only works if the current version is in it. If it reports no repository at all,
+stop: nothing is backing this up.
 
 **Never write anything outside the driver document.** Not the backlog, not a
 spec, not a plan. If content needs to move elsewhere, say where it should go
@@ -30,12 +49,10 @@ and let the human move it.
 
 ## Step 1 — find the driver document
 
-Ask the grammar. Do not assume a filename — it differs per tree, and the tree
-you are in may not be the docs tree.
+Ask the grammar. Do not assume a filename — it differs per tree.
 
 ```bash
-orglens reference | head -20        # names the driver document
-orglens list --type <kind>          # confirm the entity and its kind
+orglens reference | head -20        # names the driver document for this tree
 ```
 
 ## Step 2 — gather evidence
@@ -49,7 +66,7 @@ orglens find log <entity>           # what actually ran
 orglens find spec <entity>          # what was designed
 orglens find doc <entity>           # backlogs, handoffs, notes at the root
 orglens check                       # anything drifted
-git log --oneline -12 -- <path>     # what has actually been happening
+git log --oneline -12 -- <abs path>  # run in the repo `where` named
 ```
 
 Then read the existing driver document, the backlog if there is one, and the

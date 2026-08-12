@@ -130,6 +130,28 @@ class TestResolve:
             Topology(docs_tree, grammar).resolve("clip")
 
 
+class TestWhereAmI:
+    def test_a_directory_inside_an_entity_resolves_to_it(self, topo, docs_tree):
+        found = topo.at(docs_tree / "projects" / "clipcompose" / "plans")
+        assert found.name == "clipcompose"
+
+    def test_the_entity_directory_itself_resolves(self, topo, docs_tree):
+        assert topo.at(docs_tree / "clients" / "freightify").name == "freightify"
+
+    def test_the_deepest_entity_wins(self, topo, docs_tree):
+        """A nested entity is inside its parent; the answer is the inner one."""
+        deep = docs_tree / "research" / "physics-priors" / "expt-1-agent-behavior" / "logs"
+
+        assert topo.at(deep).name == "expt-1-agent-behavior"
+
+    def test_outside_any_entity_is_none_not_a_guess(self, topo, docs_tree):
+        assert topo.at(docs_tree) is None
+        assert topo.at(docs_tree / "projects") is None
+
+    def test_outside_the_tree_entirely_is_none(self, topo, tmp_path):
+        assert topo.at(tmp_path) is None
+
+
 class TestFindingDocuments:
     def test_across_the_whole_tree(self, topo):
         assert len(topo.find_artifacts("plan")) == 3

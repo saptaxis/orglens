@@ -193,6 +193,59 @@ class TestNewCommand:
         assert "Unknown kind: plan" in result.output
 
 
+class TestWhereCommand:
+    def test_it_names_the_tree_and_where_the_config_came_from(self, runner, cli_env, docs_tree):
+        result = runner.invoke(cli, ["where"], env=cli_env)
+
+        assert result.exit_code == 0
+        assert str(docs_tree) in result.output
+        assert "config:" in result.output
+
+    def test_a_named_entity_gives_an_absolute_path(self, runner, cli_env, docs_tree):
+        """The path is the point — a relative one cannot be acted on safely."""
+        result = runner.invoke(cli, ["where", "clipcompose"], env=cli_env)
+
+        assert result.exit_code == 0
+        assert "entity: clipcompose  (project)" in result.output
+        assert str(docs_tree / "projects" / "clipcompose") in result.output
+
+    def test_it_reports_whether_the_work_is_committed(self, runner, cli_env):
+        result = runner.invoke(cli, ["where", "clipcompose"], env=cli_env)
+
+        assert "repo:" in result.output
+
+    def test_a_nested_entity_names_what_holds_it(self, runner, cli_env):
+        result = runner.invoke(cli, ["where", "expt-1-agent-behavior"], env=cli_env)
+
+        assert "in:     physics-priors" in result.output
+
+    def test_standing_inside_an_entity_needs_no_argument(
+        self, runner, cli_env, docs_tree, monkeypatch
+    ):
+        monkeypatch.chdir(docs_tree / "projects" / "clipcompose" / "specs")
+
+        result = runner.invoke(cli, ["where"], env=cli_env)
+
+        assert "entity: clipcompose  (project)" in result.output
+        assert "here:   projects/clipcompose/specs" in result.output
+
+    def test_standing_outside_the_tree_says_so_rather_than_guessing(
+        self, runner, cli_env, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(cli, ["where"], env=cli_env)
+
+        assert result.exit_code == 0
+        assert "outside the tree" in result.output
+        assert "entity: none" in result.output
+
+    def test_an_unknown_name_fails_rather_than_resolving_to_nothing(self, runner, cli_env):
+        result = runner.invoke(cli, ["where", "nonexistent"], env=cli_env)
+
+        assert result.exit_code == 1
+
+
 class TestCheckCommand:
     def test_a_clean_tree_reports_nothing(self, runner, cli_env, docs_tree):
         (docs_tree / "clients" / "freightify" / "overview.md").write_text("# Overview\n")
