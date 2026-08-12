@@ -101,6 +101,12 @@ five months ago and no log follows the latest plan, the honest sentence is
 paragraph reconstructed from filenames. Dormant is a real answer and a useful
 one.
 
+**A driver document is a convention, not a requirement.** An entity without one
+stays fully discoverable and queryable. If there is genuinely nothing to say —
+an empty stub, an entity that is one file and a name — say so and propose
+leaving it alone. Three honest sentences beat six sections of filler, and
+filler is what teaches a reader that these documents are not worth opening.
+
 **The human sorts `Next`.** Propose an order from what is in flight and what is
 blocked, and say it is a proposal. Position is priority, and priority is not
 yours to decide.
@@ -121,6 +127,11 @@ Write the driver document in place. Then:
 
 Everything else in an authored overview ages fine. These three are the whole
 problem, so removing them is most of the job.
+
+**You are the enforcement.** A count buried in a sentence — "82 tests passing",
+"plan 04 is the latest" — cannot be detected reliably by any lint, because it is
+natural language. Nothing downstream will catch what you leave in. Read for it
+deliberately rather than assuming a checker exists.
 
 ## When the list is too long
 
