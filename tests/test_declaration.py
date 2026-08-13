@@ -1,4 +1,3 @@
-# tests/test_declaration.py
 from pathlib import Path
 from orglens.declaration import MARKER, read_marker
 
@@ -47,3 +46,8 @@ def test_a_declaration_always_includes_its_own_home(tmp_path):
     )
     marker = read_marker(tmp_path)
     assert "a" in marker.homes
+
+
+def test_a_marker_with_invalid_utf8_is_none_not_an_error(tmp_path):
+    (tmp_path / MARKER).write_bytes(b"home: \xff\xfe\n")
+    assert read_marker(tmp_path) is None

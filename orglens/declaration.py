@@ -1,4 +1,3 @@
-# orglens/declaration.py
 """The marker file: what a directory is, and sometimes what unit it declares.
 
 One filename for both, because a back-pointer is a declaration with fewer
@@ -41,7 +40,9 @@ def read_marker(directory: Path) -> Marker | None:
     path = Path(directory) / MARKER
     try:
         data = yaml.safe_load(path.read_text())
-    except (OSError, yaml.YAMLError):
+    except (OSError, ValueError, yaml.YAMLError):
+        # ValueError catches UnicodeDecodeError from read_text() on invalid
+        # UTF-8: a corrupt file must not be louder than a missing one.
         return None
     if not isinstance(data, dict):
         return None
