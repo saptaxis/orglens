@@ -75,3 +75,17 @@ def test_scan_does_not_descend_into_dot_directories(tmp_path):
     hidden.mkdir(parents=True)
     candidates = scan_roots([tmp_path])
     assert all(".cache" not in c.path.parts for c in candidates)
+
+
+def test_a_root_reached_through_a_symlink_yields_resolved_paths(tmp_path):
+    # ~/Dropbox is a symlink to ~/Library/CloudStorage/Dropbox, and sessions
+    # record the resolved form. A candidate discovered through the symlink
+    # must come back resolved, or every later comparison misses — silently.
+    real = tmp_path / "real"
+    (real / "world-model-ladder").mkdir(parents=True)
+    link = tmp_path / "via-symlink"
+    link.symlink_to(real)
+
+    home = resolve_home("world-model-ladder", scan_roots([link]))
+    assert home.path == (real / "world-model-ladder").resolve()
+    assert "via-symlink" not in home.path.parts

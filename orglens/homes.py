@@ -98,7 +98,13 @@ def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candid
             walk(child, depth + 1)
 
     for root in roots:
-        walk(Path(root).expanduser(), 1)
+        # Resolved, not merely expanded. `~/Dropbox` is a symlink to
+        # `~/Library/CloudStorage/Dropbox` here, and 1,547 of 1,667 indexed
+        # sessions record the resolved form. Walking the symlink form yields
+        # candidate paths that match none of them — and match failure is
+        # silent, because a lookup returns empty rather than raising.
+        # Resolving once at the root means every path downstream is resolved.
+        walk(Path(root).expanduser().resolve(), 1)
     return found
 
 
