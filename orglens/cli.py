@@ -3,6 +3,11 @@
 Every command asks the grammar what kinds exist. None of them knows a noun:
 that is what `orglens list --type deck` used to fail on, raising `KeyError`
 because four modules carried their own copy of the type list.
+
+Every command also speaks in units now, not folder position. A unit is
+whatever has declared itself — via a marker, resolved through `Registry` —
+and it can span several roots. Position places nothing any more; only a
+declaration does.
 """
 
 from __future__ import annotations
@@ -14,11 +19,11 @@ from pathlib import Path
 
 import click
 
-from orglens import activity, check as check_module, reference, view
+from orglens import activity, check as check_module, documents, reference, view
 from orglens.config import Config
+from orglens.declaration import MARKER
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
-from orglens.topology import Topology
 from orglens.units import Registry
 from orglens.workflow.cli import workflow as workflow_group
 
@@ -31,10 +36,10 @@ def _load_config() -> Config:
     return Config.load()
 
 
-def _load_topo() -> tuple[Topology, Config]:
-    """Load config + grammar + topology."""
+def _load_registry() -> tuple[Registry, Config]:
+    """Load config + grammar + registry."""
     config = _load_config()
-    return Topology(config.docs_root, config.load_grammar()), config
+    return Registry(config.roots, config.load_grammar()), config
 
 
 @click.group()
@@ -56,12 +61,43 @@ def _ago(ts: float) -> str:
     return f"{hours / 720:.0f}mo"
 
 
-def _heading(type_name: str) -> str:
-    return type_name.replace("-", " ").capitalize() + "s"
+def _heading(kind: str) -> str:
+    return kind.replace("-", " ").capitalize() + "s"
 
 
-def _status_of(topo: Topology, entity):
-    return read_status(entity.path, topo.grammar.documents_for(entity.entity_type))
+def _status_of(registry: Registry, unit):
+    """The authored line for a unit, checked across every home in turn.
+
+    A kind the grammar has never heard of still gets the driver document
+    looked for — `documents_for` only adds detail beyond that when the
+    grammar actually describes the kind.
+    """
+    declared = (
+        registry.grammar.documents_for(unit.kind)
+        if unit.kind in registry.grammar.entity_types
+        else [registry.grammar.driver]
+    )
+    for path in unit.paths:
+        status = read_status(path, declared)
+        if status:
+            return status
+    return None
+
+
+def _relative(path: Path, roots: list[Path]) -> Path:
+    """`path`, relative to whichever root contains it.
+
+    Resolved before compared: `~/Dropbox` is a symlink to
+    `~/Library/CloudStorage/Dropbox` here, and an unresolved comparison would
+    fail silently, falling back to the absolute path for no reason.
+    """
+    resolved = Path(path).resolve()
+    for root in roots:
+        try:
+            return resolved.relative_to(Path(root).expanduser().resolve())
+        except ValueError:
+            continue
+    return path
 
 
 def _unknown(kind: str, value: str, available) -> None:
@@ -72,62 +108,63 @@ def _unknown(kind: str, value: str, available) -> None:
 
 
 @cli.command()
-@click.option("--type", "entity_type", default=None, help="Filter by kind")
-def list(entity_type: str | None):
+@click.option("--type", "kind_filter", default=None, help="Filter by kind")
+def list(kind_filter: str | None):
     """List everything in the tree."""
-    topo, _ = _load_topo()
+    registry, _ = _load_registry()
+    units = registry.units()
+    kinds_present = sorted({u.kind for u in units})
 
-    if entity_type is not None and entity_type not in topo.grammar.entity_types:
-        _unknown("kind", entity_type, topo.grammar.entity_types)
+    if kind_filter is not None and kind_filter not in kinds_present:
+        _unknown("kind", kind_filter, kinds_present)
 
-    entities = topo.list_entities(entity_type)
-    if not entities:
+    if kind_filter is not None:
+        units = [u for u in units if u.kind == kind_filter]
+
+    if not units:
         click.echo("Nothing found.")
         return
 
-    by_type: dict[str, list] = {}
-    for entity in entities:
-        by_type.setdefault(entity.entity_type, []).append(entity)
+    by_kind: dict[str, list] = {}
+    for unit in units:
+        by_kind.setdefault(unit.kind, []).append(unit)
 
-    for type_name in topo.grammar.entity_types:
-        group = by_type.get(type_name, [])
-        if not group:
-            continue
-        click.echo(f"\n{_heading(type_name)}:")
-        for entity in group:
-            status = _status_of(topo, entity)
+    for kind in sorted(by_kind):
+        click.echo(f"\n{_heading(kind)}:")
+        for unit in by_kind[kind]:
+            status = _status_of(registry, unit)
             shown = f"  ({status.text})" if status else ""
-            within = f"  [{entity.parent_name}]" if entity.parent_name else ""
-            click.echo(f"  {entity.name}{shown}{within}")
-
+            within = f"  [{unit.part_of}]" if unit.part_of else ""
+            click.echo(f"  {unit.name}{shown}{within}")
 
 
 @cli.command()
 def status():
     """Where everything stands — the authored line, dated, beside derived facts."""
-    topo, _ = _load_topo()
-    entities = topo.list_entities()
+    registry, _ = _load_registry()
+    units = registry.units()
 
-    by_type: dict[str, list] = {}
-    for entity in entities:
-        by_type.setdefault(entity.entity_type, []).append(entity)
+    by_kind: dict[str, list] = {}
+    for unit in units:
+        by_kind.setdefault(unit.kind, []).append(unit)
 
     waiting = []
 
-    for type_name in topo.grammar.entity_types:
-        group = by_type.get(type_name, [])
-        if not group:
-            continue
-        click.echo(f"\n{_heading(type_name)}:")
-        for entity in group:
-            act = activity.read([entity.path], entity.name)
+    for kind in sorted(by_kind):
+        click.echo(f"\n{_heading(kind)}:")
+        for unit in by_kind[kind]:
+            act = activity.read(
+                unit.paths, unit.name, home_names=[h.name for h in unit.homes]
+            )
             facts = []
             # Counted from the grammar's own kinds, so a tree with different
             # documents reports on those instead of on nothing.
-            for kind in topo.grammar.artifact_types:
-                held = topo.find_artifacts(kind, entity.name)
+            for artifact_kind in registry.grammar.artifact_types:
+                held = documents.find(registry, artifact_kind, unit.name)
                 if held:
-                    facts.append(f"{len(held)} {kind}" + ("s" if len(held) > 1 else ""))
+                    facts.append(
+                        f"{len(held)} {artifact_kind}" + ("s" if len(held) > 1 else "")
+                    )
             if act.touched:
                 facts.append(f"{_ago(act.touched)} ago")
             if act.sessions:
@@ -137,9 +174,9 @@ def status():
             if act.dirty:
                 facts.append(f"{act.dirty} uncommitted")
 
-            click.echo(f"  {entity.name:<32} {' · '.join(facts) or '—'}")
+            click.echo(f"  {unit.name:<32} {' · '.join(facts) or '—'}")
 
-            status_line = _status_of(topo, entity)
+            status_line = _status_of(registry, unit)
             if status_line:
                 # Dated, because three of these are five months behind the tree.
                 # A stale line is then a quote, not a claim about today.
@@ -151,7 +188,7 @@ def status():
                 click.echo(f'      "{status_line.text}"{age}')
 
             if act.waiting:
-                waiting.append((entity.name, act))
+                waiting.append((unit.name, act))
 
     if waiting:
         click.echo("\nWaiting on you:")
@@ -166,114 +203,128 @@ def status():
 
 @cli.command()
 @click.argument("artifact_type")
-@click.argument("entity", required=False)
-def find(artifact_type: str, entity: str | None):
-    """Find documents by kind, optionally scoped to one entity."""
-    topo, config = _load_topo()
+@click.argument("unit_name", required=False)
+def find(artifact_type: str, unit_name: str | None):
+    """Find documents by kind, optionally scoped to one unit."""
+    registry, _ = _load_registry()
 
-    if artifact_type not in topo.grammar.artifact_types:
-        _unknown("document kind", artifact_type, topo.grammar.artifact_types)
+    if artifact_type not in registry.grammar.artifact_types:
+        _unknown("document kind", artifact_type, registry.grammar.artifact_types)
 
-    artifacts = topo.find_artifacts(artifact_type, entity)
-    if not artifacts:
+    found = documents.find(registry, artifact_type, unit_name)
+    if not found:
         click.echo(f"No {artifact_type}s found.")
         return
 
-    for artifact in artifacts:
-        try:
-            shown = artifact.path.relative_to(config.docs_root)
-        except ValueError:
-            shown = artifact.path
-        click.echo(f"  {artifact.name:<45} [{artifact.entity_name}]  {shown}")
+    for item in found:
+        shown = _relative(item.path, registry.roots)
+        click.echo(f"  {item.name:<45} [{item.unit}]  {shown}")
+
+
+def _write_marker(target: Path, name: str, kind: str | None, part_of: str | None) -> None:
+    lines = [f"home: {name}", f"unit: {name}"]
+    if kind:
+        lines.append(f"kind: {kind}")
+    if part_of:
+        lines.append(f"part_of: {part_of}")
+    lines.append("homes:")
+    lines.append(f"  - {name}")
+    (target / MARKER).write_text("\n".join(lines) + "\n")
 
 
 @cli.command()
-@click.argument("entity_type")
-@click.argument("name")
-@click.option("--parent", default=None, help="Create it inside this entity")
-def new(entity_type: str, name: str, parent: str | None):
-    """Create an entity: a directory, plus whatever the grammar says it holds.
+@click.argument("path")
+@click.option("--kind", default=None, help="Label for this unit")
+@click.option("--part-of", default=None, help="The unit this is part of")
+def new(path: str, kind: str | None, part_of: str | None):
+    """Create a unit: a directory, and the declaration that names it.
 
-    Documents are written directly — the grammar describes how to name them and
-    nothing parses a filename, so there is nothing for a command to compute.
+    Position no longer places anything — the path given is exactly where the
+    directory lands. Its one home takes the directory's own name; more homes
+    are a `.orglens.yml` edit away.
     """
-    topo, config = _load_topo()
+    registry, config = _load_registry()
+    target = Path(path).expanduser()
 
-    if entity_type not in topo.grammar.entity_types:
-        _unknown("kind", entity_type, topo.grammar.entity_types)
-
-    try:
-        path = topo.scaffold_entity(entity_type, name, parent=parent)
-    except ValueError as exc:
-        click.echo(str(exc), err=True)
+    if target.exists():
+        click.echo(f"{target} already exists", err=True)
         sys.exit(1)
 
-    try:
-        shown = path.relative_to(config.docs_root)
-    except ValueError:
-        shown = path
-    click.echo(f"Created {entity_type}: {shown}")
-    _refresh_snapshot(topo, config)
+    target.mkdir(parents=True)
+    _write_marker(target, target.name, kind, part_of)
+
+    click.echo(f"Created {kind or 'unit'}: {target}")
+    _refresh_snapshot(registry, config)
+
+
+def _home_line(home) -> str:
+    shown = str(home.path) if home.path is not None else "absent"
+    return f"{home.name:<40} {shown:<32} ({home.how})"
 
 
 @cli.command(name="where")
 @click.argument("name", required=False)
 def where_cmd(name: str | None):
-    """Announce which tree, and which entity a name or this directory is in.
+    """Announce which roots, and which unit a name or this directory is in.
 
-    Everything else assumes an answer to this. Anything acting on an entity —
-    a skill restructuring a document, a check on whether work is committed —
-    needs an absolute path and the repository holding it, and guessing either
-    fails silently rather than loudly.
+    Everything else assumes an answer to this. Anything acting on a unit — a
+    skill restructuring a document, a check on whether work is committed —
+    needs an absolute path and knows what it is acting on, and guessing
+    either fails silently rather than loudly.
     """
-    topo, config = _load_topo()
+    registry, _ = _load_registry()
 
     source = os.environ.get("ORGLENS_CONFIG") or "~/.config/orglens/config.yaml"
-    click.echo(f"tree:   {config.docs_root}  (config: {source})")
+    click.echo(f"roots:  {registry.roots[0]}  (config: {source})")
+    for extra in registry.roots[1:]:
+        click.echo(f"        {extra}")
 
     here = Path.cwd().resolve()
-    try:
-        click.echo(f"here:   {here.relative_to(config.docs_root.resolve())}")
-    except ValueError:
-        click.echo("here:   outside the tree")
+    shown_here = None
+    for root in registry.roots:
+        try:
+            shown_here = here.relative_to(Path(root).expanduser().resolve())
+            break
+        except ValueError:
+            continue
+    click.echo(
+        f"here:   {shown_here}" if shown_here is not None else "here:   outside the roots"
+    )
 
     if name:
         try:
-            entity = topo.resolve(name)
+            unit = registry.resolve(name)
         except ValueError as exc:
             click.echo(str(exc), err=True)
             sys.exit(1)
     else:
-        entity = topo.at(here)
-        if entity is None:
-            click.echo("entity: none — this directory is not inside one")
+        unit = registry.at(here)
+        if unit is None:
+            click.echo("unit:   none — this directory is not inside a declared unit")
             return
 
-    click.echo(f"entity: {entity.name}  ({entity.entity_type})")
-    if entity.parent_name:
-        click.echo(f"in:     {entity.parent_name}")
-    click.echo(f"path:   {entity.path}")
+    click.echo(f"unit:   {unit.name}  ({unit.kind})")
+    if unit.part_of:
+        click.echo(f"in:     {unit.part_of}")
 
-    root = activity._repo_root(entity.path)
-    if root is None:
-        click.echo("repo:   none — nothing is backing this up")
+    if not unit.homes:
+        click.echo("homes:  (none declared)")
         return
-    dirty = activity._dirty(root, entity.path)
-    click.echo(f"repo:   {root}  ({dirty} uncommitted)" if dirty else f"repo:   {root}  (clean)")
+
+    first, *rest = unit.homes
+    click.echo(f"homes:  {_home_line(first)}")
+    for home in rest:
+        click.echo(f"        {_home_line(home)}")
 
 
 @cli.command(name="check")
 def check_cmd():
     """Report where the tree has drifted from the grammar. Changes nothing."""
-    config = _load_config()
-    registry = Registry(config.roots, config.load_grammar())
+    registry, _ = _load_registry()
     report = check_module.run(registry)
 
     for drift in report.drifted:
-        try:
-            shown = drift.path.relative_to(config.docs_root)
-        except ValueError:
-            shown = drift.path
+        shown = _relative(drift.path, registry.roots)
         names = ", ".join(m.name for m in drift.missing)
         click.echo(f"{str(shown):<42} missing {names}")
         for missing in drift.missing:
@@ -283,15 +334,13 @@ def check_cmd():
                 )
 
     for path in report.undeclared:
-        try:
-            shown = path.relative_to(config.docs_root)
-        except ValueError:
-            shown = path
+        shown = _relative(path, registry.roots)
         click.echo(f"undeclared: {shown}")
 
     for unit_name, home_name in report.weak:
         click.echo(
-            f"weak home: {unit_name} ({home_name}) — resolved by directory name only"
+            f"{unit_name}: home '{home_name}' resolved by directory name only "
+            "— renaming it will detach"
         )
 
     for kind in report.unmatched:
@@ -306,13 +355,13 @@ def check_cmd():
 @click.option("--stdout", is_flag=True, help="Print instead of writing")
 def snapshot(stdout: bool):
     """Generate a snapshot of what is in the tree."""
-    topo, config = _load_topo()
+    registry, config = _load_registry()
 
     if stdout:
-        click.echo(generate_snapshot(topo, config))
+        click.echo(generate_snapshot(registry, config))
         return
     output = config.snapshot_path
-    generate_snapshot(topo, config, output_path=output)
+    generate_snapshot(registry, config, output_path=output)
     click.echo(f"Snapshot written to {output}")
 
 
@@ -320,8 +369,8 @@ def snapshot(stdout: bool):
 @click.option("--out", default=None, help="Write here instead of printing")
 def reference_cmd(out: str | None):
     """Render the grammar as the skill's vocabulary reference."""
-    topo, _ = _load_topo()
-    text = reference.render(topo.grammar)
+    registry, _ = _load_registry()
+    text = reference.render(registry.grammar)
     if out:
         path = Path(out).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -331,10 +380,10 @@ def reference_cmd(out: str | None):
     click.echo(text)
 
 
-def _refresh_snapshot(topo: Topology, config: Config):
+def _refresh_snapshot(registry: Registry, config: Config):
     """Silently refresh the snapshot after write operations."""
     try:
-        generate_snapshot(topo, config, output_path=config.snapshot_path)
+        generate_snapshot(registry, config, output_path=config.snapshot_path)
     except Exception:
         pass  # Non-critical — don't fail the main operation
 
@@ -345,45 +394,48 @@ def _refresh_snapshot(topo: Topology, config: Config):
 @click.option("--base-url", default=None,
               help="Where the docs are served. Defaults to config docs_base_url.")
 def view_cmd(out: str, do_open: bool, base_url: str | None):
-    """Render where every entity stands, and open it.
+    """Render where every unit stands, and open it.
 
     Joins what the tree knows (plans, packets, uncommitted work) with what scad
     knows (sessions, notes, open questions). Everything is recomputed here, so
     the page cannot drift the way a written status line does.
     """
-    topo, config = _load_topo()
+    registry, config = _load_registry()
 
-    by_type: dict[str, list] = {}
-    for entity in topo.list_entities():
-        by_type.setdefault(entity.entity_type, []).append(entity)
+    by_kind: dict[str, list] = {}
+    for unit in registry.units():
+        by_kind.setdefault(unit.kind, []).append(unit)
 
     headings = [
-        (name, name.title() + "s") for name in topo.grammar.artifact_types
+        (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
     ]
 
     groups = []
-    for type_name in topo.grammar.entity_types:
+    for kind in sorted(by_kind):
         rows = []
-        for entity in by_type.get(type_name, []):
-            status = _status_of(topo, entity)
+        for unit in by_kind[kind]:
+            status = _status_of(registry, unit)
             rows.append(
                 {
-                    "name": entity.name,
-                    "path": entity.path,
+                    "name": unit.name,
+                    "path": unit.declared_at,
                     "why": status.text if status else None,
-                    "activity": activity.read([entity.path], entity.name),
+                    "activity": activity.read(
+                        unit.paths, unit.name,
+                        home_names=[h.name for h in unit.homes],
+                    ),
                     "artifacts": [
-                        (heading, topo.find_artifacts(kind, entity.name))
-                        for kind, heading in headings
+                        (heading, documents.find(registry, artifact_kind, unit.name))
+                        for artifact_kind, heading in headings
                     ],
                     # Top-level documents — backlogs, handoffs, dated notes. No
                     # document kind claims them, and they are often the way in.
-                    "docs": topo.documents(entity),
-                    "dirs": topo.subdirectories(entity),
+                    "docs": documents.loose(unit),
+                    "dirs": documents.subdirectories(unit),
                 }
             )
         if rows:
-            groups.append((_heading(type_name), rows))
+            groups.append((_heading(kind), rows))
 
     ctx = {"docs_root": config.docs_root, "base_url": base_url or config.docs_base_url}
     path = view.write(view.render(groups, ctx), Path(out))

@@ -12,36 +12,71 @@ def runner():
     return CliRunner()
 
 
-def _config(tmp_path, docs_root) -> dict:
-    """A config file naming this tree, as an env dict ready for `runner.invoke`."""
+def _roots_config(tmp_path, roots, grammar_path=None) -> dict:
+    """A config file naming these roots, as an env dict for `runner.invoke`."""
     config_dir = tmp_path / "config"
     config_dir.mkdir(exist_ok=True)
-    config_file = config_dir / f"config-{docs_root.name}.yaml"
-    config_file.write_text(f"docs_root: {docs_root}\n")
+    config_file = config_dir / f"config-{len(list(config_dir.iterdir()))}.yaml"
+    lines = ["roots:"] + [f"  - {r}" for r in roots]
+    if grammar_path:
+        lines.append(f"grammar: {grammar_path}")
+    config_file.write_text("\n".join(lines) + "\n")
     return {"ORGLENS_CONFIG": str(config_file)}
 
 
-def _declare(path, unit: str, kind: str) -> None:
+def _declare(path, unit: str, kind: str, part_of: str | None = None) -> None:
     """Write a marker that declares `path` as its own unit, home named after it."""
     path.mkdir(parents=True, exist_ok=True)
-    (path / MARKER).write_text(
-        f"home: {unit}\nunit: {unit}\nkind: {kind}\nhomes:\n  - {unit}\n"
-    )
+    lines = [f"home: {unit}", f"unit: {unit}", f"kind: {kind}"]
+    if part_of:
+        lines.append(f"part_of: {part_of}")
+    lines.append(f"homes:\n  - {unit}")
+    (path / MARKER).write_text("\n".join(lines) + "\n")
 
 
 @pytest.fixture
-def cli_env(tmp_path, docs_tree):
-    """Set up config file and return env dict for CLI invocation."""
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    config_file = config_dir / "config.yaml"
-    config_file.write_text(f"docs_root: {docs_tree}\n")
-    return {"ORGLENS_CONFIG": str(config_file)}
+def units_tree(tmp_path):
+    """A one-root tree of declared units, one per real kind in the default grammar."""
+    docs = tmp_path / "docs"
+
+    clipcompose = docs / "projects" / "clipcompose"
+    _declare(clipcompose, "clipcompose", "project")
+    (clipcompose / "specs").mkdir()
+    (clipcompose / "plans").mkdir()
+    (clipcompose / "overview.md").write_text("# Overview\n\n> **Status:** Active\n")
+    (clipcompose / "plans" / "01-packaging-Feb252026.md").write_text("# 01 — Packaging\n")
+    (clipcompose / "specs" / "agent-integration.md").write_text("# Agent Integration\n")
+
+    orglens = docs / "projects" / "orglens"
+    _declare(orglens, "orglens", "project")
+    (orglens / "overview.md").write_text("# Overview\n\n> **Status:** Design complete\n")
+
+    physics = docs / "research" / "physics-priors"
+    _declare(physics, "physics-priors", "research-program")
+    (physics / "overview.md").write_text("# Overview\n\n> **Status:** Design complete\n")
+
+    expt = physics / "expt-1-agent-behavior"
+    _declare(expt, "expt-1-agent-behavior", "experiment", part_of="physics-priors")
+    (expt / "plans").mkdir()
+    (expt / "overview.md").write_text("# Overview\n\n> **Status:** Running\n")
+    (expt / "plans" / "01-testbed-Feb032026.md").write_text("# 01 — Testbed\n")
+
+    freightify = docs / "clients" / "freightify"
+    _declare(freightify, "freightify", "client")
+    (freightify / "overview.md").write_text("# Overview\n\n> **Status:** Active\n")
+
+    return docs
 
 
 @pytest.fixture
-def deck_env(tmp_path, docs_tree):
-    """A grammar with a kind the engine has never heard of."""
+def cli_env(tmp_path, units_tree):
+    """Config env for the units tree."""
+    return _roots_config(tmp_path, [units_tree])
+
+
+@pytest.fixture
+def deck_env(tmp_path, units_tree):
+    """A grammar with a kind the engine has never heard of, and one declared unit of it."""
     grammar = tmp_path / "deck.yaml"
     grammar.write_text(
         "version: 2\n"
@@ -53,13 +88,12 @@ def deck_env(tmp_path, docs_tree):
         "    find: cards/*.md\n"
         "    means: One instruction to one model.\n"
     )
-    (docs_tree / "capabilities" / "writing").mkdir(parents=True)
-    (docs_tree / "capabilities" / "writing" / "cards").mkdir()
-    (docs_tree / "capabilities" / "writing" / "cards" / "voice.md").write_text("# Voice\n")
+    writing = units_tree / "capabilities" / "writing"
+    _declare(writing, "writing", "deck")
+    (writing / "cards").mkdir()
+    (writing / "cards" / "voice.md").write_text("# Voice\n")
 
-    config_file = tmp_path / "deck-config.yaml"
-    config_file.write_text(f"docs_root: {docs_tree}\ngrammar: {grammar}\n")
-    return {"ORGLENS_CONFIG": str(config_file)}
+    return _roots_config(tmp_path, [units_tree], grammar_path=grammar)
 
 
 class TestListCommand:
@@ -75,7 +109,7 @@ class TestListCommand:
         assert "clipcompose" in result.output
         assert "physics-priors" not in result.output
 
-    def test_a_nested_entity_shows_what_holds_it(self, runner, cli_env):
+    def test_a_nested_unit_shows_what_it_is_part_of(self, runner, cli_env):
         result = runner.invoke(cli, ["list", "--type", "experiment"], env=cli_env)
         assert result.exit_code == 0
         assert "[physics-priors]" in result.output
@@ -92,6 +126,7 @@ class TestListCommand:
 
 class TestAKindTheEngineHasNeverHeardOf:
     def test_listing_it_needs_no_python_change(self, runner, deck_env):
+        """`deck` is a unit's declared kind, not one the grammar names."""
         result = runner.invoke(cli, ["list", "--type", "deck"], env=deck_env)
 
         assert result.exit_code == 0
@@ -103,23 +138,25 @@ class TestAKindTheEngineHasNeverHeardOf:
         assert result.exit_code == 0
         assert "voice.md" in result.output
 
-    def test_creating_one_needs_no_python_change(self, runner, deck_env, docs_tree):
-        result = runner.invoke(cli, ["new", "deck", "interior"], env=deck_env)
+    def test_creating_one_needs_no_python_change(self, runner, deck_env, units_tree):
+        target = units_tree / "capabilities" / "interior"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "deck"], env=deck_env)
 
         assert result.exit_code == 0
-        assert (docs_tree / "capabilities" / "interior").is_dir()
+        assert target.is_dir()
+        assert (target / MARKER).exists()
 
 
 class TestStatusCommand:
-    def test_status_shows_entities(self, runner, cli_env):
+    def test_status_shows_units(self, runner, cli_env):
         result = runner.invoke(cli, ["status"], env=cli_env)
         assert result.exit_code == 0
         assert "clipcompose" in result.output
         assert "Active" in result.output
 
-    def test_the_authored_line_is_quoted_whole(self, runner, cli_env, docs_tree):
+    def test_the_authored_line_is_quoted_whole(self, runner, cli_env, units_tree):
         """It is a sentence someone wrote, not a field to be trimmed."""
-        overview = docs_tree / "projects" / "clipcompose" / "overview.md"
+        overview = units_tree / "projects" / "clipcompose" / "overview.md"
         overview.write_text(
             "# Overview\n\n"
             "> **Status:** Plans 01-04 complete; v2 plan on branch v2-plan1\n"
@@ -149,10 +186,18 @@ class TestFindCommand:
         assert result.exit_code == 0
         assert "01-packaging-Feb252026.md" in result.output
 
-    def test_find_scoped_reaches_children(self, runner, cli_env):
-        result = runner.invoke(cli, ["find", "plan", "physics-priors"], env=cli_env)
+    def test_find_scoped_to_a_part_finds_its_own_documents(self, runner, cli_env):
+        """A part is its own unit now — scoping to it, not to its parent,
+        is what reaches its documents."""
+        result = runner.invoke(cli, ["find", "plan", "expt-1-agent-behavior"], env=cli_env)
         assert result.exit_code == 0
         assert "01-testbed-Feb032026.md" in result.output
+
+    def test_find_scoped_to_the_parent_does_not_reach_its_parts(self, runner, cli_env):
+        """A unit's documents are its own homes' documents — a part's
+        documents belong to the part, not to whatever it is declared part of."""
+        result = runner.invoke(cli, ["find", "plan", "physics-priors"], env=cli_env)
+        assert "01-testbed-Feb032026.md" not in result.output
 
     def test_find_specs(self, runner, cli_env):
         result = runner.invoke(cli, ["find", "spec", "clipcompose"], env=cli_env)
@@ -160,9 +205,9 @@ class TestFindCommand:
         assert "agent-integration.md" in result.output
 
     def test_a_document_with_no_recognisable_name_is_still_found(
-        self, runner, cli_env, docs_tree
+        self, runner, cli_env, units_tree
     ):
-        (docs_tree / "projects" / "clipcompose" / "plans" / "02-stg-setup.md").write_text("x")
+        (units_tree / "projects" / "clipcompose" / "plans" / "02-stg-setup.md").write_text("x")
 
         result = runner.invoke(cli, ["find", "plan", "clipcompose"], env=cli_env)
 
@@ -176,78 +221,90 @@ class TestFindCommand:
 
 
 class TestNewCommand:
-    def test_new_project(self, runner, cli_env, docs_tree):
-        result = runner.invoke(cli, ["new", "project", "test-tool"], env=cli_env)
-        assert result.exit_code == 0
-        assert (docs_tree / "projects" / "test-tool" / "overview.md").exists()
+    def test_new_unit(self, runner, cli_env, units_tree):
+        target = units_tree / "projects" / "test-tool"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
 
-    def test_new_entity_inside_a_parent(self, runner, cli_env, docs_tree):
-        """The full name is given — nothing numbers a directory any more."""
+        assert result.exit_code == 0
+        assert (target / MARKER).exists()
+        assert target.is_dir()
+
+    def test_the_declaration_names_the_unit_and_kind(self, runner, cli_env, units_tree):
+        target = units_tree / "projects" / "test-tool"
+        runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+
+        result = runner.invoke(cli, ["where", "test-tool"], env=cli_env)
+        assert "unit:   test-tool  (project)" in result.output
+
+    def test_part_of_is_recorded(self, runner, cli_env, units_tree):
+        target = units_tree / "research" / "physics-priors" / "expt-2-world-model"
         result = runner.invoke(
             cli,
-            ["new", "experiment", "expt-2-world-model", "--parent", "physics-priors"],
+            ["new", str(target), "--kind", "experiment", "--part-of", "physics-priors"],
             env=cli_env,
         )
 
         assert result.exit_code == 0
-        assert (
-            docs_tree / "research" / "physics-priors" / "expt-2-world-model" / "design.md"
-        ).exists()
+        where = runner.invoke(cli, ["where", "expt-2-world-model"], env=cli_env)
+        assert "in:     physics-priors" in where.output
 
-    def test_a_name_the_pattern_would_not_find_is_refused(self, runner, cli_env):
+    def test_position_places_nothing(self, runner, cli_env, tmp_path):
+        """The path given is exactly where the directory lands — no pattern
+        decides that any more, so anywhere at all is a legal place to create."""
+        target = tmp_path / "somewhere-else" / "my-thing"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+
+        assert result.exit_code == 0
+        assert target.is_dir()
+
+    def test_creating_over_an_existing_directory_is_refused(self, runner, cli_env, units_tree):
         result = runner.invoke(
-            cli, ["new", "experiment", "world-model", "--parent", "physics-priors"],
+            cli, ["new", str(units_tree / "projects" / "clipcompose"), "--kind", "project"],
             env=cli_env,
         )
 
         assert result.exit_code == 1
-        assert "would not be found" in result.output
-
-    def test_documents_are_not_created_by_the_cli(self, runner, cli_env):
-        """`new plan` is gone: nothing computes a filename, so nothing can."""
-        result = runner.invoke(cli, ["new", "plan", "clipcompose"], env=cli_env)
-
-        assert result.exit_code == 1
-        assert "Unknown kind: plan" in result.output
+        assert "already exists" in result.output
 
 
 class TestWhereCommand:
-    def test_it_names_the_tree_and_where_the_config_came_from(self, runner, cli_env, docs_tree):
+    def test_it_names_the_roots_and_where_the_config_came_from(self, runner, cli_env, units_tree):
         result = runner.invoke(cli, ["where"], env=cli_env)
 
         assert result.exit_code == 0
-        assert str(docs_tree) in result.output
+        assert str(units_tree) in result.output
         assert "config:" in result.output
 
-    def test_a_named_entity_gives_an_absolute_path(self, runner, cli_env, docs_tree):
+    def test_a_named_unit_gives_an_absolute_path(self, runner, cli_env, units_tree):
         """The path is the point — a relative one cannot be acted on safely."""
         result = runner.invoke(cli, ["where", "clipcompose"], env=cli_env)
 
         assert result.exit_code == 0
-        assert "entity: clipcompose  (project)" in result.output
-        assert str(docs_tree / "projects" / "clipcompose") in result.output
+        assert "unit:   clipcompose  (project)" in result.output
+        assert str(units_tree / "projects" / "clipcompose") in result.output
 
-    def test_it_reports_whether_the_work_is_committed(self, runner, cli_env):
+    def test_it_says_how_each_home_resolved(self, runner, cli_env):
+        """`clipcompose` declares its own home via marker — the strongest rung."""
         result = runner.invoke(cli, ["where", "clipcompose"], env=cli_env)
 
-        assert "repo:" in result.output
+        assert "(marker)" in result.output
 
-    def test_a_nested_entity_names_what_holds_it(self, runner, cli_env):
+    def test_a_part_names_what_it_belongs_to(self, runner, cli_env):
         result = runner.invoke(cli, ["where", "expt-1-agent-behavior"], env=cli_env)
 
         assert "in:     physics-priors" in result.output
 
-    def test_standing_inside_an_entity_needs_no_argument(
-        self, runner, cli_env, docs_tree, monkeypatch
+    def test_standing_inside_a_unit_needs_no_argument(
+        self, runner, cli_env, units_tree, monkeypatch
     ):
-        monkeypatch.chdir(docs_tree / "projects" / "clipcompose" / "specs")
+        monkeypatch.chdir(units_tree / "projects" / "clipcompose" / "specs")
 
         result = runner.invoke(cli, ["where"], env=cli_env)
 
-        assert "entity: clipcompose  (project)" in result.output
+        assert "unit:   clipcompose  (project)" in result.output
         assert "here:   projects/clipcompose/specs" in result.output
 
-    def test_standing_outside_the_tree_says_so_rather_than_guessing(
+    def test_standing_outside_the_roots_says_so_rather_than_guessing(
         self, runner, cli_env, tmp_path, monkeypatch
     ):
         monkeypatch.chdir(tmp_path)
@@ -255,13 +312,36 @@ class TestWhereCommand:
         result = runner.invoke(cli, ["where"], env=cli_env)
 
         assert result.exit_code == 0
-        assert "outside the tree" in result.output
-        assert "entity: none" in result.output
+        assert "outside the roots" in result.output
+        assert "unit:   none" in result.output
 
     def test_an_unknown_name_fails_rather_than_resolving_to_nothing(self, runner, cli_env):
         result = runner.invoke(cli, ["where", "nonexistent"], env=cli_env)
 
         assert result.exit_code == 1
+
+    def test_a_home_across_two_roots(self, runner, tmp_path, grammar):
+        """The reason units exist: a code checkout and a docs checkout, one unit."""
+        docs = tmp_path / "traitful-docs" / "docs"
+        code = tmp_path / "code"
+        unit_docs = docs / "projects" / "orglens"
+        unit_docs.mkdir(parents=True)
+        (unit_docs / MARKER).write_text(
+            "home: traitful-docs/docs/projects/orglens\n"
+            "unit: orglens\nkind: project\n"
+            "homes:\n  - orglens\n  - traitful-docs/docs/projects/orglens\n"
+        )
+        (code / "orglens").mkdir(parents=True)
+        (code / "traitful-docs" / "docs" / "projects" / "orglens").mkdir(parents=True)
+
+        result = runner.invoke(
+            cli, ["where", "orglens"], env=_roots_config(tmp_path, [docs, code])
+        )
+
+        assert "unit:   orglens  (project)" in result.output
+        assert "orglens" in result.output
+        assert "(name)" in result.output
+        assert "(marker)" in result.output
 
 
 class TestCheckCommand:
@@ -280,7 +360,7 @@ class TestCheckCommand:
         (proj / "specs").mkdir()
         (proj / "specs" / "x.md").write_text("# Spec\n")
 
-        result = runner.invoke(cli, ["check"], env=_config(tmp_path, docs))
+        result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [docs]))
 
         assert result.exit_code == 0
         assert "No drift" in result.output
@@ -289,7 +369,7 @@ class TestCheckCommand:
         docs = tmp_path / "docs"
         proj = docs / "projects" / "clipcompose"
         _declare(proj, "clipcompose", "project")  # no overview.md written
-        env = _config(tmp_path, docs)
+        env = _roots_config(tmp_path, [docs])
 
         check = runner.invoke(cli, ["check"], env=env)
         listing = runner.invoke(cli, ["list"], env=env)
@@ -305,24 +385,42 @@ class TestCheckCommand:
         _declare(near, "llm-probing", "research-program")
         (near / "question.md").write_text("# Question\n")
 
-        result = runner.invoke(cli, ["check"], env=_config(tmp_path, docs))
+        result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [docs]))
 
         assert "likely the same thing" in result.output
         assert "question.md" in result.output
 
     def test_undeclared_work_is_reported_never_gated(self, runner, tmp_path):
         """A directory that never declared itself is the migration worklist,
-        not a silent gap: `check` names it, and `list` shows it regardless."""
+        not a silent gap: `check` names it, and `list` does not see it at all
+        — it is not a unit, only a candidate."""
         docs = tmp_path / "docs"
         (docs / "projects" / "resume").mkdir(parents=True)  # no marker
-        env = _config(tmp_path, docs)
+        env = _roots_config(tmp_path, [docs])
 
         check = runner.invoke(cli, ["check"], env=env)
-        listing = runner.invoke(cli, ["list"], env=env)
 
         assert check.exit_code == 0
+        assert "undeclared: " in check.output
         assert "resume" in check.output
-        assert "resume" in listing.output
+
+    def test_a_home_resolved_by_name_only_is_reported_as_weak(self, runner, tmp_path):
+        docs = tmp_path / "traitful-docs" / "docs"
+        code = tmp_path / "code"
+        unit_docs = docs / "projects" / "orglens"
+        unit_docs.mkdir(parents=True)
+        (unit_docs / MARKER).write_text(
+            "home: traitful-docs/docs/projects/orglens\n"
+            "unit: orglens\nkind: project\n"
+            "homes:\n  - orglens\n  - traitful-docs/docs/projects/orglens\n"
+        )
+        (unit_docs / "overview.md").write_text("# Overview\n")
+        (code / "orglens").mkdir(parents=True)
+        (code / "traitful-docs" / "docs" / "projects" / "orglens").mkdir(parents=True)
+
+        result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [docs, code]))
+
+        assert "orglens: home 'orglens' resolved by directory name only" in result.output
 
 
 class TestSnapshotCommand:
@@ -335,6 +433,36 @@ class TestSnapshotCommand:
         result = runner.invoke(cli, ["snapshot", "--stdout"], env=cli_env)
         assert result.exit_code == 0
         assert "Topology Snapshot" in result.output
+
+
+class TestAgainstTheSharedTwoRootFixture:
+    """The fixture other modules already use for the marker-spans-two-roots
+    case, pointed at through the CLI rather than the `Registry` directly."""
+
+    def test_where_names_the_unit_and_how_each_home_resolved(
+        self, runner, two_root_tree, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path / "code" / "orglens")
+        env = _roots_config(tmp_path, two_root_tree.roots)
+
+        result = runner.invoke(cli, ["where"], env=env)
+
+        assert "orglens" in result.output
+        assert "(name)" in result.output
+
+    def test_list_groups_by_declared_kind(self, runner, two_root_tree, tmp_path):
+        env = _roots_config(tmp_path, two_root_tree.roots)
+
+        result = runner.invoke(cli, ["list"], env=env)
+
+        assert "orglens" in result.output
+
+    def test_check_prints_undeclared_candidates(self, runner, two_root_tree, tmp_path):
+        env = _roots_config(tmp_path, two_root_tree.roots)
+
+        result = runner.invoke(cli, ["check"], env=env)
+
+        assert "reelmill" in result.output
 
 
 class TestReferenceCommand:
