@@ -120,15 +120,25 @@ def resolve_home(name: str, candidates: list[Candidate]) -> Home:
         # the very home being looked up.
         return c.marker_home is not None and c.marker_home not in (name, repo)
 
-    for how, match in (
-        ("marker", lambda c: c.marker_home == name or c.marker_home == repo),
+    def joined(c: Candidate) -> Path:
+        return c.path / subpath if subpath else c.path
+
+    # A marker can claim a home two different ways, and they are not the
+    # same shape: claiming the full name (subpath and all) means the
+    # candidate's own directory *is* the answer, while claiming only the
+    # repository segment means the subpath still has to be joined on. Merging
+    # them into one boolean was the bug — a full-name match got the subpath
+    # joined a second time, landing on a directory that never existed.
+    for how, match, path_of in (
+        ("marker", lambda c: c.marker_home == name, lambda c: c.path),
+        ("marker", lambda c: c.marker_home == repo, joined),
         ("remote", lambda c: not spoken_for(c)
-         and c.remote is not None and c.remote.split("/")[-1] == repo),
-        ("name", lambda c: not spoken_for(c) and c.name == repo),
+         and c.remote is not None and c.remote.split("/")[-1] == repo, joined),
+        ("name", lambda c: not spoken_for(c) and c.name == repo, joined),
     ):
         for candidate in candidates:
             if match(candidate):
-                path = candidate.path / subpath if subpath else candidate.path
+                path = path_of(candidate)
                 if not path.exists():
                     # A home declared before its folder was created, or a
                     # subpath since moved. Every downstream consumer relies on

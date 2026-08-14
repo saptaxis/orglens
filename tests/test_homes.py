@@ -84,6 +84,27 @@ def test_a_subpath_that_does_not_exist_is_absent(tmp_path):
     assert home.how == "absent"
 
 
+def test_a_marker_claiming_the_full_name_is_not_double_joined(tmp_path):
+    # A marker may name the whole home, subpath included. Joining the subpath
+    # again would point at a directory that does not exist — and the existence
+    # check would then report a home that is plainly there as absent.
+    #
+    # Rooted *at* traitful-docs rather than above it: scan_roots never yields
+    # a root as its own candidate, so no directory is literally named
+    # "traitful-docs" to rescue a broken match via the name rung. That rescue
+    # is what let this bug hide inside the two-root fixture in units.py.
+    deep = tmp_path / "traitful-docs" / "docs" / "projects" / "orglens"
+    deep.mkdir(parents=True)
+    (deep / MARKER).write_text("home: traitful-docs/docs/projects/orglens\n")
+
+    home = resolve_home(
+        "traitful-docs/docs/projects/orglens",
+        scan_roots([tmp_path / "traitful-docs"]),
+    )
+    assert home.path == deep
+    assert home.how == "marker"
+
+
 def test_a_directory_declared_elsewhere_does_not_shadow_a_coincidental_name(tmp_path):
     # A docs checkout and a code checkout can share a leaf name — that is the
     # ordinary case, not an edge case. The docs folder here has already named
