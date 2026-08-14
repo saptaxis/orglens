@@ -270,6 +270,15 @@ class TestCheckCommand:
         proj = docs / "projects" / "clipcompose"
         _declare(proj, "clipcompose", "project")
         (proj / "overview.md").write_text("# Overview\n")
+        # One of each artifact kind, so the default grammar's plan/log/spec
+        # globs have somewhere to match — without this the tree is drift-free
+        # but still reports those kinds as unmatched anywhere.
+        (proj / "plans").mkdir()
+        (proj / "plans" / "01-x-Feb252026.md").write_text("# 01\n")
+        (proj / "logs").mkdir()
+        (proj / "logs" / "01-x-Feb252026-log.md").write_text("# Log\n")
+        (proj / "specs").mkdir()
+        (proj / "specs" / "x.md").write_text("# Spec\n")
 
         result = runner.invoke(cli, ["check"], env=_config(tmp_path, docs))
 

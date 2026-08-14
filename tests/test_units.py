@@ -40,6 +40,30 @@ def test_undeclared_folders_matching_a_pattern_are_candidates(two_root_tree, tmp
     assert not any(p.name == "orglens" for p in found)
 
 
+def test_a_subdirectory_of_a_declared_unit_is_not_a_candidate(two_root_tree, tmp_path):
+    # A folder inside a declared unit's home belongs to that unit. Reporting
+    # it as undeclared work pads the migration worklist with every specs/ and
+    # plans/ directory in the tree, which is the same as reporting nothing.
+    (tmp_path / "traitful-docs" / "docs" / "projects" / "orglens" / "specs").mkdir(parents=True, exist_ok=True)
+    found = two_root_tree.candidates()
+    assert not any("specs" in p.parts for p in found)
+
+
+def test_a_grandchild_of_a_matched_directory_is_not_a_candidate(two_root_tree, tmp_path):
+    """`fnmatch`'s `*` used to cross `/`, so `projects/*` matched two levels
+    deep as readily as one. `reelmill` is undeclared and owned by nothing, so
+    only `Path.match`'s right-anchoring — not the ownership exclusion — can
+    be what keeps its subdirectory out.
+    """
+    nested = tmp_path / "traitful-docs" / "docs" / "projects" / "reelmill" / "subdir"
+    nested.mkdir(parents=True)
+
+    found = two_root_tree.candidates()
+
+    assert any(p.name == "reelmill" for p in found)
+    assert not any(p.name == "subdir" for p in found)
+
+
 def test_part_of_replaces_folder_nesting(tmp_path, grammar):
     docs = tmp_path / "docs"
     parent = docs / "research" / "physics-priors"

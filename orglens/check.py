@@ -12,6 +12,12 @@ they are the other two naming conventions actually in use, and listing them
 would be noise. What has not declared itself at all is a different question,
 answered by `undeclared` — the migration worklist, and the reason nothing
 goes dark while the tree is half declared.
+
+A glob that matches nothing anywhere is a different silent failure again —
+not an undeclared directory, but a mistyped or misplaced pattern that quietly
+stops finding documents it should. `operators/*.md` once pointed one
+directory too high and found nothing, and nothing said so. `unmatched` is
+what says so.
 """
 
 from __future__ import annotations
@@ -20,7 +26,7 @@ from dataclasses import dataclass, field
 from difflib import get_close_matches
 from pathlib import Path
 
-from orglens.units import Registry
+from orglens.units import Registry, Unit
 
 
 @dataclass(frozen=True)
@@ -50,9 +56,29 @@ class Report:
     #: Renaming such a directory detaches the home silently, which is the one
     #: failure the ladder cannot prevent — only announce.
     weak: list[tuple[str, str]] = field(default_factory=list)
+    #: Document kinds whose glob matches nothing anywhere. A mistyped glob
+    #: finds no documents and raises nothing, so without this it fails
+    #: silently — the one way this design can still go wrong quietly.
+    unmatched: list[str] = field(default_factory=list)
 
     def __bool__(self) -> bool:
-        return bool(self.drifted or self.undeclared or self.weak)
+        return bool(self.drifted or self.undeclared or self.weak or self.unmatched)
+
+
+def _holds_any(units: list[Unit], pattern: str) -> bool:
+    """Whether some home, of some unit, holds a file matching this glob at
+    any depth.
+
+    Written the way `documents.find` (Task 6) will look up a kind's files, so
+    this check can move there later without changing what it means — only
+    where it is asked from.
+    """
+    return any(
+        path.is_file()
+        for unit in units
+        for home in unit.paths
+        for path in home.rglob(pattern)
+    )
 
 
 def run(registry: Registry) -> Report:
@@ -92,8 +118,15 @@ def run(registry: Registry) -> Report:
         if home.how == "name"
     ]
 
+    unmatched = [
+        name
+        for name, artifact_type in registry.grammar.artifact_types.items()
+        if not _holds_any(units, artifact_type.find)
+    ]
+
     return Report(
         drifted=drifted,
         undeclared=registry.candidates(),
         weak=weak,
+        unmatched=unmatched,
     )

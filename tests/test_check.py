@@ -23,11 +23,23 @@ def declared_tree(tmp_path, grammar):
     """Two quiet, fully-declared units: enough to prove `check` stays silent
     on a tree that holds what the grammar describes, and still lets each test
     add exactly the drift it wants to see.
+
+    clipcompose carries one real plan, log and spec so every artifact kind in
+    the default grammar has at least one match somewhere in the tree — without
+    that, the quiet tree would trip `unmatched` on kinds no test here is about.
+    A directory nested inside a declared unit's home is owned by that unit,
+    not undeclared work, so this does not add anything to `undeclared`.
     """
     docs = tmp_path / "docs"
     clipcompose = docs / "projects" / "clipcompose"
     _declare(clipcompose, "clipcompose", "project")
     (clipcompose / "overview.md").write_text("# Overview\n")
+    (clipcompose / "plans").mkdir()
+    (clipcompose / "plans" / "01-packaging-Feb252026.md").write_text("# 01 — Packaging\n")
+    (clipcompose / "logs").mkdir()
+    (clipcompose / "logs" / "01-packaging-Feb252026-log.md").write_text("# Log\n")
+    (clipcompose / "specs").mkdir()
+    (clipcompose / "specs" / "agent-integration.md").write_text("# Agent Integration\n")
 
     orglens = docs / "projects" / "orglens"
     _declare(orglens, "orglens", "project")
@@ -135,6 +147,34 @@ class TestSilentFailure:
         report = check.run(Registry([declared_tree], grammar))
 
         assert any(p.name == "resume" for p in report.undeclared)
+
+    def test_a_document_kind_with_no_instances_is_reported(self, declared_tree, tmp_path):
+        """The real bank declares three kinds it holds none of.
+
+        A glob at the wrong depth looks exactly like this, which is how the
+        capabilities grammar came to point `operators/*.md` at documents that
+        actually live one directory lower. `candidates()` only ever iterates
+        `entity_types`, so this failure mode is not the one `undeclared`
+        superseded — it needs its own field.
+        """
+        path = tmp_path / "g.yaml"
+        path.write_text(
+            "version: 2\n"
+            "driver: overview.md\n"
+            "entities:\n"
+            "  project: projects/*\n"
+            "artifacts:\n"
+            "  memo:\n"
+            "    find: memos/*.md\n"
+            "    means: Nothing writes these.\n"
+        )
+
+        report = check.run(Registry([declared_tree], Grammar.from_yaml(path)))
+
+        assert report.unmatched == ["memo"]
+
+    def test_a_document_kind_that_matches_somewhere_is_not_reported(self, registry):
+        assert check.run(registry).unmatched == []
 
 
 def test_undeclared_candidates_are_reported(two_root_tree):

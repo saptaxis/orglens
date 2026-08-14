@@ -294,6 +294,10 @@ def check_cmd():
             f"weak home: {unit_name} ({home_name}) — resolved by directory name only"
         )
 
+    for kind in report.unmatched:
+        glob = registry.grammar.artifact_types[kind].find
+        click.echo(f"no {kind} found anywhere (looked for {glob})")
+
     if not report:
         click.echo("No drift.")
 

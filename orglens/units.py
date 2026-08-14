@@ -13,7 +13,6 @@ worklist, and it is why nothing goes dark while the tree is half declared.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from pathlib import Path
 
 from orglens.declaration import MARKER, read_marker
@@ -153,16 +152,28 @@ class Registry:
         sweep is depth-bounded and already done; an unbounded `rglob` over a
         code root walks build output and dependency folders, which is the
         expense the whole index exists to avoid.
+
+        Matched with `Path.match`, not `fnmatch`: `fnmatch`'s `*` crosses `/`,
+        so `projects/*` would match `projects/orglens/specs` as readily as
+        `projects/orglens` — every `specs/` and `plans/` in the tree offered
+        up as a migration candidate, which is the same as reporting nothing.
+        `Path.match` is right-anchored and stops at the separator.
+
+        A directory nested *inside* a declared unit's home is owned by that
+        unit, not undeclared — excluded whether or not it happens to be the
+        home path exactly, which is why the test is "under a home" rather
+        than "equal to a home".
         """
-        declared = {u.declared_at.resolve() for u in self.units()}
-        homes = {p.resolve() for u in self.units() for p in u.paths}
+        owned = {u.declared_at.resolve() for u in self.units()} | {
+            p.resolve() for u in self.units() for p in u.paths
+        }
         found: list[Path] = []
         for candidate in self._scan():
             resolved = candidate.path.resolve()
-            if resolved in declared or resolved in homes:
+            if any(resolved.is_relative_to(o) for o in owned):
                 continue
             if any(
-                fnmatch(str(candidate.path), f"*/{et.pattern}")
+                candidate.path.match(et.pattern)
                 for et in self.grammar.entity_types.values()
             ):
                 found.append(candidate.path)
