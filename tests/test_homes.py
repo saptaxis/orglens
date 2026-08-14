@@ -77,6 +77,33 @@ def test_scan_does_not_descend_into_dot_directories(tmp_path):
     assert all(".cache" not in c.path.parts for c in candidates)
 
 
+def test_a_subpath_that_does_not_exist_is_absent(tmp_path):
+    (tmp_path / "traitful-docs").mkdir()
+    home = resolve_home("traitful-docs/docs/projects/orglens", scan_roots([tmp_path]))
+    assert home.path is None
+    assert home.how == "absent"
+
+
+def test_a_directory_declared_elsewhere_does_not_shadow_a_coincidental_name(tmp_path):
+    # A docs checkout and a code checkout can share a leaf name — that is the
+    # ordinary case, not an edge case. The docs folder here has already named
+    # itself something else via marker, so it must not answer for "orglens"
+    # just because its basename happens to match.
+    decoy = tmp_path / "decoy_root" / "orglens"
+    decoy.mkdir(parents=True)
+    (decoy / MARKER).write_text(
+        "home: something-else\nunit: something-else\nkind: project\n"
+        "homes:\n  - something-else\n"
+    )
+    real = tmp_path / "real_root" / "orglens"
+    real.mkdir(parents=True)
+
+    candidates = scan_roots([tmp_path / "decoy_root", tmp_path / "real_root"])
+    home = resolve_home("orglens", candidates)
+    assert home.path == real
+    assert home.how == "name"
+
+
 def test_a_root_reached_through_a_symlink_yields_resolved_paths(tmp_path):
     # ~/Dropbox is a symlink to ~/Library/CloudStorage/Dropbox, and sessions
     # record the resolved form. A candidate discovered through the symlink

@@ -112,14 +112,29 @@ def resolve_home(name: str, candidates: list[Candidate]) -> Home:
     """Locate a home by the ladder, saying which rung answered."""
     repo, _, subpath = name.partition("/")
 
+    def spoken_for(c: Candidate) -> bool:
+        # A directory carrying a marker has already answered what home it is.
+        # A weaker rung must not overrule that with a coincidental basename
+        # or remote match for a *different* name — otherwise a project's docs
+        # checkout, sharing a leaf name with its code checkout, could shadow
+        # the very home being looked up.
+        return c.marker_home is not None and c.marker_home not in (name, repo)
+
     for how, match in (
         ("marker", lambda c: c.marker_home == name or c.marker_home == repo),
-        ("remote", lambda c: c.remote is not None and c.remote.split("/")[-1] == repo),
-        ("name", lambda c: c.name == repo),
+        ("remote", lambda c: not spoken_for(c)
+         and c.remote is not None and c.remote.split("/")[-1] == repo),
+        ("name", lambda c: not spoken_for(c) and c.name == repo),
     ):
         for candidate in candidates:
             if match(candidate):
                 path = candidate.path / subpath if subpath else candidate.path
+                if not path.exists():
+                    # A home declared before its folder was created, or a
+                    # subpath since moved. Every downstream consumer relies on
+                    # a Home with a path existing, so the check happens once,
+                    # here, rather than being repeated at every call site.
+                    continue
                 return Home(name=name, path=path, how=how)
 
     return Home(name=name, path=None, how="absent")
