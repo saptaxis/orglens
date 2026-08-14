@@ -1,5 +1,7 @@
 """The commands, and what they refuse to know on their own."""
 
+import subprocess
+
 import pytest
 from click.testing import CliRunner
 
@@ -381,6 +383,104 @@ class TestWhereCommand:
         assert "orglens" in result.output
         assert "(name)" in result.output
         assert "(marker)" in result.output
+
+
+def _git(*args, cwd):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+class TestWhereReportsCommitStatus:
+    """`orglens-adapt`'s safety gate depends on this: it must see uncommitted
+    paths or "no repository" before rewriting a driver document. The old
+    single-repo `repo:` line was dropped when a unit grew several homes, so
+    neither string it looked for could ever appear — the gate always
+    passed, including exactly when it should have failed. This is one line
+    per home rather than one line total, because a unit now spans several
+    repositories.
+    """
+
+    def test_an_uncommitted_home_reports_its_count(self, runner, tmp_path):
+        # `pytest`'s own `tmp_path` embeds the test's function name in the
+        # directory it hands back — which, here, itself contains the word
+        # "uncommitted" — so the assertion below checks for the exact count
+        # rather than the bare word, or it would pass by finding its own
+        # path rather than anything `where` printed.
+        docs = tmp_path / "docs"
+        proj = docs / "projects" / "clipcompose"
+        _declare(proj, "clipcompose", "project")  # writes the marker itself
+        _git("init", "-q", cwd=proj)
+        (proj / "overview.md").write_text("# Overview\n")
+        # Both the marker and overview.md are untracked after `git init`.
+
+        result = runner.invoke(
+            cli, ["where", "clipcompose"], env=_roots_config(tmp_path, [docs])
+        )
+
+        assert "2 uncommitted" in result.output
+
+    def test_a_home_with_no_repository_says_nothing_is_backing_it_up(
+        self, runner, tmp_path
+    ):
+        docs = tmp_path / "docs"
+        proj = docs / "projects" / "clipcompose"
+        _declare(proj, "clipcompose", "project")
+
+        result = runner.invoke(
+            cli, ["where", "clipcompose"], env=_roots_config(tmp_path, [docs])
+        )
+
+        assert "none — nothing is backing this up" in result.output
+
+    def test_a_fully_committed_home_reports_clean(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        proj = docs / "projects" / "clipcompose"
+        _declare(proj, "clipcompose", "project")
+        (proj / "overview.md").write_text("# Overview\n")
+        _git("init", "-q", cwd=proj)
+        _git("config", "user.email", "a@b.c", cwd=proj)
+        _git("config", "user.name", "a", cwd=proj)
+        _git("add", "-A", cwd=proj)
+        _git("commit", "-q", "-m", "init", cwd=proj)
+
+        result = runner.invoke(
+            cli, ["where", "clipcompose"], env=_roots_config(tmp_path, [docs])
+        )
+
+        assert "(clean)" in result.output
+
+    def test_each_home_reports_its_own_repository(self, runner, tmp_path):
+        """A unit spanning a committed code home and an uncommitted docs home
+        must say so for *each*, not report on the first and go quiet about
+        the rest.
+        """
+        docs = tmp_path / "traitful-docs" / "docs"
+        code = tmp_path / "code"
+        unit_docs = docs / "projects" / "orglens"
+        unit_docs.mkdir(parents=True)
+        (unit_docs / MARKER).write_text(
+            "home: traitful-docs/docs/projects/orglens\n"
+            "unit: orglens\nkind: project\n"
+            "homes:\n  - orglens\n  - traitful-docs/docs/projects/orglens\n"
+        )
+        _git("init", "-q", cwd=docs.parent)  # the traitful-docs repo root
+        (unit_docs / "overview.md").write_text("# Overview\n")  # left uncommitted
+        code_home = code / "orglens"
+        code_home.mkdir(parents=True)
+        _git("init", "-q", cwd=code_home)
+        _git("config", "user.email", "a@b.c", cwd=code_home)
+        _git("config", "user.name", "a", cwd=code_home)
+        (code / "traitful-docs" / "docs" / "projects" / "orglens").mkdir(parents=True)
+
+        result = runner.invoke(
+            cli, ["where", "orglens"], env=_roots_config(tmp_path, [docs, code])
+        )
+
+        # A wholly-new untracked directory collapses to one line under `git
+        # status`, so this is "1 uncommitted" rather than one per file — the
+        # count is not the point here, only that the docs home says so at
+        # all while the code home separately says `(clean)`.
+        assert "uncommitted" in result.output
+        assert "(clean)" in result.output
 
 
 class TestCheckCommand:

@@ -283,6 +283,26 @@ def _home_line(home) -> str:
     return f"{home.name:<40} {shown:<32} ({home.how})"
 
 
+def _repo_line(home) -> str:
+    """Whether this home's files are safely committed, and where.
+
+    `orglens-adapt`'s precondition is exactly this: git is the whole backup
+    model, and it only works if the current version is in it. A unit can
+    span several repositories now, so this is one line per home rather than
+    the single `repo:` line `where` used to print — dropping that block
+    silently turned the safety gate into a no-op, since empty output reads
+    as clean.
+    """
+    if home.path is None:
+        return f"{home.name:<40} (home absent on this machine)"
+    root = activity._repo_root(home.path)
+    if root is None:
+        return f"{home.name:<40} none — nothing is backing this up"
+    dirty = activity._dirty(root, home.path)
+    status = f"{dirty} uncommitted" if dirty else "clean"
+    return f"{home.name:<40} {str(root):<32} ({status})"
+
+
 @cli.command(name="where")
 @click.argument("name", required=False)
 def where_cmd(name: str | None):
@@ -336,6 +356,10 @@ def where_cmd(name: str | None):
     click.echo(f"homes:  {_home_line(first)}")
     for home in rest:
         click.echo(f"        {_home_line(home)}")
+
+    click.echo(f"repos:  {_repo_line(first)}")
+    for home in rest:
+        click.echo(f"        {_repo_line(home)}")
 
 
 @cli.command(name="check")
