@@ -31,7 +31,7 @@ ENGINE = ROOT / "orglens"
 #: drift they would otherwise be blamed for. `workflow/` has its own check.
 FACE = ("cli.py", "check.py", "config.py", "declaration.py", "documents.py",
         "grammar.py", "homes.py", "reference.py", "snapshot.py", "state.py",
-        "topology.py", "units.py")
+        "units.py")
 
 
 def default_grammar() -> Grammar:

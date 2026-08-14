@@ -28,16 +28,6 @@ class EntityType:
     structure: dict[str, str] = field(default_factory=dict)
 
     @property
-    def container(self) -> str:
-        """The directory part of the pattern — where a new one is placed.
-
-        Empty when the pattern names the directory itself, which is how a type
-        comes to live directly inside its parent rather than under a bucket.
-        """
-        head, _, _ = self.pattern.rpartition("/")
-        return head
-
-    @property
     def files(self) -> dict[str, str]:
         return {k: v for k, v in self.structure.items() if not k.endswith("/")}
 
@@ -72,15 +62,19 @@ class Grammar:
     #: which buys nothing technically and everything for a human browsing.
     driver: str
 
-    def documents_for(self, entity_type: str) -> list[str]:
+    def documents_for(self, kind: str | None = None) -> list[str]:
         """Where to look for an entity's status line, driver first.
 
         Precedence, not location: the line is found wherever it lives. This
         only decides which document is consulted first, which is why the
         driver is declared rather than inferred from list order — a reordering
         should not silently change what `status` reports.
+
+        Kind carries no behaviour: an unknown or omitted kind still gets the
+        driver, which is the one document every entity has.
         """
-        structure = self.entity_types[entity_type].structure
+        entity_type = self.entity_types.get(kind) if kind is not None else None
+        structure = entity_type.structure if entity_type else {}
         return [self.driver] + [
             k for k in structure if not k.endswith("/") and k != self.driver
         ]

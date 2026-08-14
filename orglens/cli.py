@@ -72,11 +72,7 @@ def _status_of(registry: Registry, unit):
     looked for — `documents_for` only adds detail beyond that when the
     grammar actually describes the kind.
     """
-    declared = (
-        registry.grammar.documents_for(unit.kind)
-        if unit.kind in registry.grammar.entity_types
-        else [registry.grammar.driver]
-    )
+    declared = registry.grammar.documents_for(unit.kind)
     for path in unit.paths:
         status = read_status(path, declared)
         if status:

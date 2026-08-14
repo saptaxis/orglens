@@ -22,7 +22,7 @@ def config(config_yaml):
 
 class TestConfigLoading:
     def test_loads_docs_root(self, config):
-        assert config.docs_root == Path("/tmp/test-docs")
+        assert config.roots[0] == Path("/tmp/test-docs")
 
     def test_loads_grammar_name(self, config):
         assert config.grammar_name == "default"
@@ -43,7 +43,7 @@ class TestConfigLoading:
         config_file = tmp_path / "config.yaml"
         config_file.write_text("docs_root: ~/some/path\n")
         config = Config.from_yaml(config_file)
-        assert "~" not in str(config.docs_root)
+        assert "~" not in str(config.roots[0])
 
     def test_loads_grammar(self, config):
         grammar = config.load_grammar()
@@ -81,7 +81,6 @@ def test_docs_root_still_works_and_becomes_the_first_root(tmp_path):
     cfg.write_text(f"docs_root: {tmp_path / 'docs'}\n")
     config = Config.from_yaml(cfg)
     assert config.roots == [tmp_path / "docs"]
-    assert config.docs_root == tmp_path / "docs"
 
 
 def test_neither_key_is_an_error(tmp_path):

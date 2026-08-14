@@ -17,11 +17,6 @@ class Config:
     docs_base_url: str = "http://localhost:8000"
     _config_dir: Path | None = None
 
-    @property
-    def docs_root(self) -> Path:
-        """The first root. Kept while callers are migrated to `roots`."""
-        return self.roots[0]
-
     @classmethod
     def from_yaml(cls, path: Path) -> Config:
         """Load config from a YAML file."""

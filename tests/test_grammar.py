@@ -32,16 +32,13 @@ class TestLoading:
 
 
 class TestPlacement:
-    def test_the_container_is_the_head_of_the_pattern(self, grammar):
-        assert grammar.entity_types["project"].container == "projects"
-        assert grammar.entity_types["research-program"].container == "research"
-
-    def test_a_bare_pattern_has_no_container(self, grammar):
-        """`expt-*` names the directory itself, so it sits in its parent."""
-        assert grammar.entity_types["experiment"].container == ""
-
     def test_the_artifact_directory_is_the_head_of_the_glob(self, grammar):
         assert grammar.artifact_types["plan"].directory == "plans"
+
+    def test_entity_type_no_longer_has_a_container(self, grammar):
+        """Placement came from a pattern's head; nothing places by pattern now."""
+        entity_type = next(iter(grammar.entity_types.values()))
+        assert not hasattr(entity_type, "container")
 
 
 class TestMinimalDeclarations:
@@ -99,6 +96,12 @@ class TestMinimalDeclarations:
         for name in grammar.entity_types:
             order = grammar.documents_for(name)
             assert order.count(grammar.driver) == 1
+
+    def test_documents_for_does_not_require_a_kind(self, grammar):
+        assert grammar.documents_for()[0] == grammar.driver
+
+    def test_documents_for_an_unknown_kind_is_driver_only(self, grammar):
+        assert grammar.documents_for("something-nobody-declared") == [grammar.driver]
 
 
 class TestMeans:

@@ -101,11 +101,7 @@ def _heading(kind: str) -> str:
 
 
 def _status_of(registry: Registry, unit):
-    declared = (
-        registry.grammar.documents_for(unit.kind)
-        if unit.kind in registry.grammar.entity_types
-        else [registry.grammar.driver]
-    )
+    declared = registry.grammar.documents_for(unit.kind)
     for path in unit.paths:
         status = read_status(path, declared)
         if status:
