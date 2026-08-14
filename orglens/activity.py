@@ -258,7 +258,7 @@ def _home_clause(paths: list[Path], names: list[str]) -> tuple[str, list[str]]:
         params += [f"/workspace/{repo}", f"/workspace/{repo}/%"]
     if not clauses:
         return "0", []
-    return " or ".join(clauses), params
+    return "(" + " or ".join(clauses) + ")", params
 
 
 def _sessions(
@@ -299,7 +299,7 @@ def _sessions(
         row = db.execute(
             "select t.ts, t.role, substr(t.text, 1, 240) from turns t "
             "join sessions s on s.id = t.session_id "
-            f"where ({clause}) and t.text is not null and t.text != '' "
+            f"where {clause} and t.text is not null and t.text != '' "
             "order by t.ts desc limit 1",
             params,
         ).fetchone()
