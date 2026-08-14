@@ -27,13 +27,31 @@ class Document:
     unit: str
 
 
-def _claimed_by_parts(registry: Registry, unit: Unit) -> list[Path]:
-    """Home paths belonging to units that declared themselves part of this one."""
-    return [
-        p.resolve()
-        for part in registry.parts_of(unit)
-        for p in part.paths
-    ]
+def _claimed_by(registry: Registry, unit: Unit) -> list[Path]:
+    """Home paths this unit's documents must not claim.
+
+    Two different reasons a directory is someone else's: it declared
+    `part_of` this unit — the roll-up relationship, unaffected by where the
+    directories actually sit — or its home simply lies inside this unit's
+    own home, regardless of whether `part_of` was ever written. The spec
+    says a unit's documents are "everything matching under its homes, minus
+    whatever a nested unit's home claims" — containment, not only declared
+    parentage, decides ownership. A unit declared nested in another's home
+    without `part_of` used to have its documents counted by both; this is
+    what stops that. A home identical to one of this unit's own (the
+    ordinary shared-home case) is deliberately left unclaimed here — only a
+    genuinely nested *other* home is excluded.
+    """
+    own = {p.resolve() for p in unit.paths}
+    claimed = {p.resolve() for part in registry.parts_of(unit) for p in part.paths}
+    for other in registry.units():
+        if other.name == unit.name:
+            continue
+        for p in other.paths:
+            resolved = p.resolve()
+            if resolved not in own and any(resolved.is_relative_to(o) for o in own):
+                claimed.add(resolved)
+    return sorted(claimed)
 
 
 def _containers(home: Path, directory: str) -> list[Path]:
@@ -55,9 +73,20 @@ def _containers(home: Path, directory: str) -> list[Path]:
 
 
 def find(
-    registry: Registry, kind: str, unit_name: str | None = None
+    registry: Registry, kind: str, unit: Unit | str | None = None
 ) -> list[Document]:
     """Documents of a kind, at any depth under a unit's homes.
+
+    `unit` takes a `Unit` the caller already resolved, a bare name for
+    genuine user input (`orglens find plan <name>`), or nothing for every
+    unit. A caller iterating `registry.units()` and calling back in with
+    `unit.name` was re-resolving a name that was never ambiguous in the
+    first place — and two markers declaring the same unit name (a `cp -R`,
+    a worktree, a Dropbox conflicted copy) turned that into `Registry.resolve`
+    raising out of the loop, taking every *other* unit's row down with it.
+    Accepting the `Unit` itself skips resolution altogether; only a plain
+    string still asks `resolve` to adjudicate, which is the right place for
+    that question to be asked and answered.
 
     A container nested inside a same-named container — an archived
     experiment's own `plans/` preserved under the parent's `plans/archive/`
@@ -76,15 +105,18 @@ def find(
     """
     artifact = registry.grammar.artifact_types[kind]
     file_pattern = Path(artifact.find).name
-    units = (
-        [registry.resolve(unit_name)] if unit_name is not None else registry.units()
-    )
+    if unit is None:
+        units = registry.units()
+    elif isinstance(unit, Unit):
+        units = [unit]
+    else:
+        units = [registry.resolve(unit)]
 
     found: list[Document] = []
-    for unit in units:
-        excluded = _claimed_by_parts(registry, unit)
+    for one in units:
+        excluded = _claimed_by(registry, one)
         seen: set[Path] = set()
-        for home in unit.paths:
+        for home in one.paths:
             for container in _containers(home, artifact.directory):
                 for path in sorted(container.rglob(file_pattern)):
                     if not path.is_file():
@@ -96,8 +128,10 @@ def find(
                         e == resolved or e in resolved.parents for e in excluded
                     ):
                         continue
+                    if any(part.startswith(".") for part in path.relative_to(home).parts):
+                        continue
                     seen.add(resolved)
-                    found.append(Document(path.name, kind, path, unit.name))
+                    found.append(Document(path.name, kind, path, one.name))
     return found
 
 

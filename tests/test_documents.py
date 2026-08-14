@@ -72,6 +72,38 @@ def test_a_nested_unit_claims_its_own_documents(tmp_path, grammar):
     assert [p.name for p in expt_plans] == ["01-a-Feb012026.md"]
 
 
+def test_a_nested_units_home_is_excluded_by_containment_alone(tmp_path, grammar):
+    """The spec excludes 'whatever a nested unit's home claims' from a
+    unit's documents by containment, not only by declared `part_of`. A unit
+    declared inside another's home without ever writing `part_of` used to
+    have its documents counted by both — the old exclusion only looked at
+    who named this unit as their parent.
+    """
+    docs = tmp_path / "docs"
+    parent = docs / "projects" / "parent"
+    (parent / "plans").mkdir(parents=True)
+    (parent / "plans" / "01-p-Feb012026.md").write_text("# p\n")
+    (parent / MARKER).write_text(
+        "home: parent\nunit: parent\nkind: project\nhomes:\n  - parent\n"
+    )
+
+    child = parent / "sub-thing"
+    (child / "plans").mkdir(parents=True)
+    (child / "plans" / "01-c-Feb012026.md").write_text("# c\n")
+    # Deliberately no part_of — containment alone must exclude this.
+    (child / MARKER).write_text(
+        "home: sub\nunit: sub-thing\nkind: project\nhomes:\n  - sub\n"
+    )
+
+    registry = Registry([docs], grammar)
+
+    parent_plans = documents.find(registry, "plan", "parent")
+    assert [d.name for d in parent_plans] == ["01-p-Feb012026.md"]
+
+    child_plans = documents.find(registry, "plan", "sub-thing")
+    assert [d.name for d in child_plans] == ["01-c-Feb012026.md"]
+
+
 def test_find_without_a_unit_returns_everything(nested_docs):
     assert len(documents.find(nested_docs, "plan")) == 7
 
@@ -120,6 +152,60 @@ def test_subdirectories_leaves_out_hidden_ones(tmp_path, grammar):
     found = documents.subdirectories(unit)
 
     assert [d.name for d in found] == ["plans"]
+
+
+def test_doc_does_not_recurse_into_hidden_directories(tmp_path, grammar):
+    """`doc`'s find is a bare `*.md` with no container, so `_containers`
+    hands back the home itself and `rglob` walks everything beneath it —
+    `scan_roots`, `subdirectories` and `loose` all skip dotted entries;
+    `find` was the only one that did not, and on the real orglens tree that
+    meant 52 of 80 `doc` hits lived inside `.superpowers/` and `.claude/`.
+    """
+    home = tmp_path / "unit-a"
+    (home / ".superpowers" / "skill").mkdir(parents=True)
+    (home / ".superpowers" / "skill" / "SKILL.md").write_text("# skill\n")
+    (home / "real.md").write_text("# real\n")
+    (home / MARKER).write_text(
+        "home: unit-a\nunit: unit-a\nkind: project\nhomes:\n  - unit-a\n"
+    )
+
+    registry = Registry([tmp_path], grammar)
+    found = documents.find(registry, "doc", "unit-a")
+
+    assert [d.name for d in found] == ["real.md"]
+
+
+def test_find_accepts_an_already_resolved_unit_bypassing_name_lookup(tmp_path, grammar):
+    """Two markers naming the same unit must not make every *other* unit's
+    documents unreachable. `status`, `view` and `snapshot` already hold a
+    `Unit` object per iteration of their loop; if `find` re-resolves it by
+    name, an unrelated duplicate anywhere in the tree raises `ValueError`
+    out of that loop and takes the whole command down. Passing the `Unit`
+    itself must skip resolution entirely, while a bare name — genuine user
+    input — must still raise on the same ambiguity.
+    """
+    docs = tmp_path / "docs"
+    a = docs / "projects" / "dup-a"
+    b = docs / "projects" / "dup-b"
+    (a / "plans").mkdir(parents=True)
+    (b / "plans").mkdir(parents=True)
+    (a / "plans" / "01-a-Feb012026.md").write_text("# a\n")
+    (b / "plans" / "01-b-Feb012026.md").write_text("# b\n")
+    (a / MARKER).write_text("home: dup-a\nunit: dup\nkind: project\nhomes:\n  - dup-a\n")
+    (b / MARKER).write_text("home: dup-b\nunit: dup\nkind: project\nhomes:\n  - dup-b\n")
+
+    registry = Registry([docs], grammar)
+    units = registry.units()
+    assert len(units) == 2
+
+    by_declared_at = {u.declared_at: u for u in units}
+    found_a = documents.find(registry, "plan", by_declared_at[a])
+    assert [d.name for d in found_a] == ["01-a-Feb012026.md"]
+    found_b = documents.find(registry, "plan", by_declared_at[b])
+    assert [d.name for d in found_b] == ["01-b-Feb012026.md"]
+
+    with pytest.raises(ValueError):
+        documents.find(registry, "plan", "dup")
 
 
 def test_a_shared_home_is_seen_by_each_unit_that_shares_it(tmp_path, grammar):
