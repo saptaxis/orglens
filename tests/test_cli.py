@@ -4,11 +4,29 @@ import pytest
 from click.testing import CliRunner
 
 from orglens.cli import cli
+from orglens.declaration import MARKER
 
 
 @pytest.fixture
 def runner():
     return CliRunner()
+
+
+def _config(tmp_path, docs_root) -> dict:
+    """A config file naming this tree, as an env dict ready for `runner.invoke`."""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(exist_ok=True)
+    config_file = config_dir / f"config-{docs_root.name}.yaml"
+    config_file.write_text(f"docs_root: {docs_root}\n")
+    return {"ORGLENS_CONFIG": str(config_file)}
+
+
+def _declare(path, unit: str, kind: str) -> None:
+    """Write a marker that declares `path` as its own unit, home named after it."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / MARKER).write_text(
+        f"home: {unit}\nunit: {unit}\nkind: {kind}\nhomes:\n  - {unit}\n"
+    )
 
 
 @pytest.fixture
@@ -247,48 +265,55 @@ class TestWhereCommand:
 
 
 class TestCheckCommand:
-    def test_a_clean_tree_reports_nothing(self, runner, cli_env, docs_tree):
-        (docs_tree / "clients" / "freightify" / "overview.md").write_text("# Overview\n")
+    def test_a_clean_tree_reports_nothing(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        proj = docs / "projects" / "clipcompose"
+        _declare(proj, "clipcompose", "project")
+        (proj / "overview.md").write_text("# Overview\n")
 
-        result = runner.invoke(cli, ["check"], env=cli_env)
+        result = runner.invoke(cli, ["check"], env=_config(tmp_path, docs))
 
         assert result.exit_code == 0
+        assert "No drift" in result.output
 
-    def test_drift_is_reported_and_nothing_is_hidden(self, runner, cli_env, docs_tree):
-        bare = docs_tree / "projects" / "resume"
-        bare.mkdir()
+    def test_drift_is_reported_and_nothing_is_hidden(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        proj = docs / "projects" / "clipcompose"
+        _declare(proj, "clipcompose", "project")  # no overview.md written
+        env = _config(tmp_path, docs)
 
-        check = runner.invoke(cli, ["check"], env=cli_env)
-        listing = runner.invoke(cli, ["list"], env=cli_env)
+        check = runner.invoke(cli, ["check"], env=env)
+        listing = runner.invoke(cli, ["list"], env=env)
 
         assert check.exit_code == 0
-        assert "resume" in check.output
+        assert "clipcompose" in check.output
         assert "overview.md" in check.output
-        assert "resume" in listing.output  # reported, never gated
+        assert "clipcompose" in listing.output  # reported, never gated
 
-    def test_a_near_miss_is_named(self, runner, cli_env, docs_tree):
-        near = docs_tree / "research" / "llm-probing"
-        near.mkdir()
+    def test_a_near_miss_is_named(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        near = docs / "research" / "llm-probing"
+        _declare(near, "llm-probing", "research-program")
         (near / "question.md").write_text("# Question\n")
 
-        result = runner.invoke(cli, ["check"], env=cli_env)
+        result = runner.invoke(cli, ["check"], env=_config(tmp_path, docs))
 
         assert "likely the same thing" in result.output
         assert "question.md" in result.output
 
-    def test_a_pattern_that_matches_nothing_is_reported(self, runner, tmp_path, docs_tree):
-        """A mistyped glob finds nothing and raises nothing — the silent failure."""
-        grammar = tmp_path / "typo.yaml"
-        grammar.write_text(
-            "version: 2\ndriver: overview.md\nentities:\n  project: porjects/*\n"
-        )
-        config_file = tmp_path / "typo-config.yaml"
-        config_file.write_text(f"docs_root: {docs_tree}\ngrammar: {grammar}\n")
+    def test_undeclared_work_is_reported_never_gated(self, runner, tmp_path):
+        """A directory that never declared itself is the migration worklist,
+        not a silent gap: `check` names it, and `list` shows it regardless."""
+        docs = tmp_path / "docs"
+        (docs / "projects" / "resume").mkdir(parents=True)  # no marker
+        env = _config(tmp_path, docs)
 
-        result = runner.invoke(cli, ["check"], env={"ORGLENS_CONFIG": str(config_file)})
+        check = runner.invoke(cli, ["check"], env=env)
+        listing = runner.invoke(cli, ["list"], env=env)
 
-        assert "matches nothing" in result.output
-        assert "porjects/*" in result.output
+        assert check.exit_code == 0
+        assert "resume" in check.output
+        assert "resume" in listing.output
 
 
 class TestSnapshotCommand:

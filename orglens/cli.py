@@ -19,6 +19,7 @@ from orglens.config import Config
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
 from orglens.topology import Topology
+from orglens.units import Registry
 from orglens.workflow.cli import workflow as workflow_group
 
 
@@ -264,8 +265,9 @@ def where_cmd(name: str | None):
 @cli.command(name="check")
 def check_cmd():
     """Report where the tree has drifted from the grammar. Changes nothing."""
-    topo, config = _load_topo()
-    report = check_module.run(topo)
+    config = _load_config()
+    registry = Registry(config.roots, config.load_grammar())
+    report = check_module.run(registry)
 
     for drift in report.drifted:
         try:
@@ -280,8 +282,17 @@ def check_cmd():
                     f"{'':<42} (has {missing.resembles} — likely the same thing)"
                 )
 
-    for barren in report.barren:
-        click.echo(f"pattern matches nothing: {barren}")
+    for path in report.undeclared:
+        try:
+            shown = path.relative_to(config.docs_root)
+        except ValueError:
+            shown = path
+        click.echo(f"undeclared: {shown}")
+
+    for unit_name, home_name in report.weak:
+        click.echo(
+            f"weak home: {unit_name} ({home_name}) — resolved by directory name only"
+        )
 
     if not report:
         click.echo("No drift.")

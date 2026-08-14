@@ -6,32 +6,6 @@ from orglens.declaration import MARKER
 from orglens.units import Registry
 
 
-@pytest.fixture
-def two_root_tree(tmp_path, grammar):
-    """A docs root and a code root, with one unit spanning both."""
-    docs = tmp_path / "traitful-docs" / "docs"
-    code = tmp_path / "code"
-
-    unit_docs = docs / "projects" / "orglens"
-    unit_docs.mkdir(parents=True)
-    (unit_docs / MARKER).write_text(
-        "home: traitful-docs/docs/projects/orglens\n"
-        "unit: orglens\nkind: project\n"
-        "homes:\n  - orglens\n  - traitful-docs/docs/projects/orglens\n"
-    )
-    (unit_docs / "overview.md").write_text("# Overview\n")
-
-    (code / "orglens").mkdir(parents=True)
-    (code / "traitful-docs").mkdir(parents=True)
-    # the docs repo, so the subpath home resolves
-    (code / "traitful-docs" / "docs" / "projects" / "orglens").mkdir(parents=True)
-
-    # an undeclared folder that matches the grammar's project pattern
-    (docs / "projects" / "reelmill").mkdir(parents=True)
-
-    return Registry([docs, code], grammar)
-
-
 def test_a_declaration_makes_a_unit(two_root_tree):
     units = two_root_tree.units()
     assert [u.name for u in units] == ["orglens"]
