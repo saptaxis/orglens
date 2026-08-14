@@ -40,3 +40,19 @@ def test_the_base_is_configurable():
     assert doc_url(ROOT / "a/b.md", ROOT, "https://docs.example.com") == (
         "https://docs.example.com/a/b/"
     )
+
+
+def test_a_document_under_the_second_root_still_gets_a_served_url():
+    """A unit can span more than one root — a document under the second one
+    must not silently fall back to a `file://` link just because only the
+    first root was checked."""
+    other = Path("/code")
+    assert doc_url(other / "notes.md", [ROOT, other], BASE) == (
+        "http://localhost:8000/notes/"
+    )
+
+
+def test_a_document_under_neither_root_falls_back_to_the_filesystem():
+    assert doc_url(
+        Path("/elsewhere/notes.md"), [ROOT, Path("/code")], BASE
+    ).startswith("file://")

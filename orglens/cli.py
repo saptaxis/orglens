@@ -100,6 +100,20 @@ def _relative(path: Path, roots: list[Path]) -> Path:
     return path
 
 
+def _under_a_root(path: Path, roots: list[Path]) -> bool:
+    """Whether `path` sits under any configured root.
+
+    Resolved before compared, same as every other path-meets-root check here:
+    `~/Dropbox` is a symlink to `~/Library/CloudStorage/Dropbox`, and an
+    unresolved comparison would miss silently.
+    """
+    resolved = Path(path).resolve()
+    return any(
+        resolved == (r := Path(root).expanduser().resolve()) or resolved.is_relative_to(r)
+        for root in roots
+    )
+
+
 def _unknown(kind: str, value: str, available) -> None:
     click.echo(
         f"Unknown {kind}: {value}. Available: {', '.join(available)}", err=True
@@ -254,6 +268,17 @@ def new(path: str, kind: str | None, part_of: str | None):
     _write_marker(target, target.name, kind, part_of)
 
     click.echo(f"Created {kind or 'unit'}: {target}")
+    if not _under_a_root(target, registry.roots):
+        # Warn, don't refuse: a unit outside every root is allowed to exist,
+        # it is simply un-met until a root is added or someone works in it —
+        # `Registry.at` reads a marker directly on the way up, roots or not.
+        source = os.environ.get("ORGLENS_CONFIG") or "~/.config/orglens/config.yaml"
+        click.echo(
+            "note: this is under none of your configured roots, so `list`, "
+            "`status`, `snapshot`, and `check` will not see it. Add its root "
+            f"to {source}, or resolve it directly with `orglens where` while "
+            "standing inside it."
+        )
     _refresh_snapshot(registry, config)
 
 
@@ -437,7 +462,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         if rows:
             groups.append((_heading(kind), rows))
 
-    ctx = {"docs_root": config.docs_root, "base_url": base_url or config.docs_base_url}
+    ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url}
     path = view.write(view.render(groups, ctx), Path(out))
     click.echo(f"wrote {path}")
     if do_open:

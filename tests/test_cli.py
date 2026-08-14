@@ -266,6 +266,45 @@ class TestNewCommand:
         assert result.exit_code == 1
         assert "already exists" in result.output
 
+    def test_creating_under_a_root_is_quiet(self, runner, cli_env, units_tree):
+        """No enumeration blind spot here — no note needed."""
+        target = units_tree / "projects" / "test-tool"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+
+        assert result.exit_code == 0
+        assert "note:" not in result.output
+
+    def test_creating_outside_every_root_warns_but_still_creates(self, runner, cli_env, tmp_path):
+        """`list`, `status`, `snapshot` and `check` only sweep the configured
+        roots — a unit created outside all of them would otherwise be a
+        silent blind spot, reachable only by `where` while standing inside
+        it. Warn, don't refuse: the model allows this, un-met until a root
+        is added or someone works in it."""
+        target = tmp_path / "elsewhere" / "my-thing"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+
+        assert result.exit_code == 0
+        assert target.is_dir()
+        assert (target / MARKER).exists()
+        assert "note:" in result.output
+        assert "none of your configured roots" in result.output
+
+    def test_a_root_reached_through_a_symlink_is_still_recognised(
+        self, runner, tmp_path, units_tree
+    ):
+        """Resolved before compared: `~/Dropbox` is a symlink to
+        `~/Library/CloudStorage/Dropbox` here, and an unresolved comparison
+        would warn about a unit that is, in fact, right where it should be."""
+        link = tmp_path / "via-symlink"
+        link.symlink_to(units_tree)
+        env = _roots_config(tmp_path, [link])
+
+        target = link / "projects" / "test-tool"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=env)
+
+        assert result.exit_code == 0
+        assert "note:" not in result.output
+
 
 class TestWhereCommand:
     def test_it_names_the_roots_and_where_the_config_came_from(self, runner, cli_env, units_tree):
@@ -463,6 +502,39 @@ class TestAgainstTheSharedTwoRootFixture:
         result = runner.invoke(cli, ["check"], env=env)
 
         assert "reelmill" in result.output
+
+
+class TestViewCommand:
+    def test_a_document_under_the_second_root_gets_a_served_link(self, runner, tmp_path):
+        """`view` used to build its URL context from `config.docs_root` — the
+        first root only — so a document living under the second root
+        silently fell back to a `file://` link instead of a served one."""
+        root_a = tmp_path / "docs"
+        root_b = tmp_path / "code"
+        home = root_a / "projects" / "sample"
+        home.mkdir(parents=True)
+        (home / MARKER).write_text(
+            "home: sample\nunit: sample\nkind: project\n"
+            "homes:\n  - sample\n  - sample-code\n"
+        )
+        (home / "overview.md").write_text("# Overview\n")
+        second_home = root_b / "sample-code"
+        second_home.mkdir(parents=True)
+        (second_home / "notes.md").write_text("# Notes\n")
+
+        out = tmp_path / "view.html"
+        env = _roots_config(tmp_path, [root_a, root_b])
+        result = runner.invoke(
+            cli,
+            ["view", "--out", str(out), "--no-open", "--base-url", "http://localhost:9999"],
+            env=env,
+        )
+
+        assert result.exit_code == 0
+        page = out.read_text()
+        assert "notes.md" in page
+        assert "http://localhost:9999" in page
+        assert "file://" not in page
 
 
 class TestReferenceCommand:
