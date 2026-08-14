@@ -151,14 +151,16 @@ def _packets(path: Path) -> tuple[int, int]:
 
 
 @lru_cache(maxsize=1)
-def _live_by_project(index: Path) -> dict[str, list[dict]]:
-    """Sessions whose process is still running, grouped by project.
+def _live_entries(index: Path) -> list[dict]:
+    """Every session whose process is still running right now, unfiled by
+    project — grouping by scad's `project` column is exactly the coincidence
+    this module exists to delete. `_live_for` does the actual filing, by cwd.
 
-    Liveness is a `kill(pid, 0)` against the registry Claude maintains; the
-    project comes from the index. Claude-only — codex and kimi keep no
-    equivalent registry, so their live work is invisible here.
+    Liveness is a `kill(pid, 0)` against the registry Claude maintains.
+    Claude-only — codex and kimi keep no equivalent registry, so their live
+    work is invisible here.
     """
-    out: dict[str, list[dict]] = {}
+    out: list[dict] = []
     if not LIVE_REGISTRY.is_dir():
         return out
     db = None
@@ -177,26 +179,49 @@ def _live_by_project(index: Path) -> dict[str, list[dict]]:
             os.kill(pid, 0)
         except OSError:
             continue
-        project = None
+        label = None
         if db is not None:
             row = db.execute(
-                "select project, coalesce(nullif(name,''), nullif(title,'')) "
+                "select coalesce(nullif(name,''), nullif(title,'')) "
                 "from sessions where id = ?",
                 (data.get("sessionId"),),
             ).fetchone()
-            project, label = (row or (None, None))
-        out.setdefault(project or "unfiled", []).append(
+            label = row[0] if row else None
+        out.append(
             {
                 "pid": pid,
                 "session": data.get("sessionId"),
                 "cwd": data.get("cwd"),
                 "kind": data.get("kind"),
-                "name": (label if db is not None else None),
+                "name": label,
             }
         )
     if db is not None:
         db.close()
     return out
+
+
+def _live_for(paths: list[Path], home_names: list[str], index: Path) -> list[dict]:
+    """Live sessions whose cwd is under one of this unit's homes.
+
+    Matches by cwd, the same evidence `_sessions` joins on — not scad's
+    `project` column, which is the exact coincidence this branch exists to
+    delete. A live session running in a unit's docs home used to be filed
+    under the docs repository's own project name and never show as running
+    against the unit at all.
+    """
+    resolved = [str(Path(p).resolve()) for p in paths]
+    containers = [f"/workspace/{name.split('/')[0]}" for name in home_names]
+
+    def under(cwd: str, prefixes: list[str]) -> bool:
+        return any(cwd == p or cwd.startswith(p + "/") for p in prefixes)
+
+    return [
+        entry
+        for entry in _live_entries(index)
+        if entry.get("cwd")
+        and (under(entry["cwd"], resolved) or under(entry["cwd"], containers))
+    ]
 
 
 def _epoch(ts) -> int | None:
@@ -385,16 +410,24 @@ def read(
     if not paths:
         return activity
 
-    primary = paths[0]
-    root = _repo_root(primary)
-    if root is not None:
-        activity.touched = _last_commit(root, primary)
-        activity.dirty = sum(_dirty(_repo_root(p) or p, p) for p in paths)
+    # Every fact below spans every home, not only `paths[0]`. A unit whose
+    # docs home happened to be listed first used to report the docs home's
+    # commit date, its plan count and nothing else — missing the code home's
+    # workflow packets and its more recent commits entirely.
+    roots = [(p, _repo_root(p)) for p in paths]
+    commits = [
+        c for p, r in roots if r and (c := _last_commit(r, p)) is not None
+    ]
+    activity.touched = max(commits) if commits else None
+    activity.dirty = sum(_dirty(r or p, p) for p, r in roots)
     activity.modified = max((_newest_mtime(p) or 0) for p in paths) or None
 
-    activity.live = _live_by_project(index).get(name, [])
-    activity.plan = _latest_plan(primary)
-    activity.packets, activity.blocked = _packets(primary)
+    activity.live = _live_for(paths, home_names, index)
+    plans = [p for path in paths if (p := _latest_plan(path)) is not None]
+    activity.plan = max(plans) if plans else None
+    packets = [_packets(p) for p in paths]
+    activity.packets = sum(total for total, _ in packets)
+    activity.blocked = sum(blocked for _, blocked in packets)
     (
         activity.sessions,
         activity.last_session,
