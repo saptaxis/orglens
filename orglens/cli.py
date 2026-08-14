@@ -170,7 +170,7 @@ def status():
             # Counted from the grammar's own kinds, so a tree with different
             # documents reports on those instead of on nothing.
             for artifact_kind in registry.grammar.artifact_types:
-                held = documents.find(registry, artifact_kind, unit.name)
+                held = documents.find(registry, artifact_kind, unit)
                 if held:
                     facts.append(
                         f"{len(held)} {artifact_kind}" + ("s" if len(held) > 1 else "")
@@ -368,6 +368,17 @@ def check_cmd():
         glob = registry.grammar.artifact_types[kind].find
         click.echo(f"no {kind} found anywhere (looked for {glob})")
 
+    for dup in report.duplicates:
+        shown = ", ".join(str(_relative(p, registry.roots)) for p in dup.paths)
+        click.echo(f"{dup.name}: declared as a unit in more than one place — {shown}")
+
+    for collision in report.collisions:
+        shown = ", ".join(str(_relative(p, registry.roots)) for p in collision.paths)
+        click.echo(
+            f"{collision.unit}: home '{collision.home}' matches more than one "
+            f"directory — {shown}"
+        )
+
     if not report:
         click.echo("No drift.")
 
@@ -446,7 +457,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
                         home_names=[h.name for h in unit.homes],
                     ),
                     "artifacts": [
-                        (heading, documents.find(registry, artifact_kind, unit.name))
+                        (heading, documents.find(registry, artifact_kind, unit))
                         for artifact_kind, heading in headings
                     ],
                     # Top-level documents — backlogs, handoffs, dated notes. No

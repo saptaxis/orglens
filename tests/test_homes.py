@@ -2,7 +2,13 @@ import subprocess
 from pathlib import Path
 
 from orglens.declaration import MARKER
-from orglens.homes import Candidate, normalise_remote, resolve_home, scan_roots
+from orglens.homes import (
+    Candidate,
+    candidates_for,
+    normalise_remote,
+    resolve_home,
+    scan_roots,
+)
 
 
 def test_normalise_remote_strips_host_alias_and_suffix():
@@ -123,6 +129,31 @@ def test_a_directory_declared_elsewhere_does_not_shadow_a_coincidental_name(tmp_
     home = resolve_home("orglens", candidates)
     assert home.path == real
     assert home.how == "name"
+
+
+def test_candidates_for_names_every_directory_that_could_have_won(tmp_path):
+    """`resolve_home` has to pick one path and does — by scan order. That
+    hides a real tie: two docs checkouts named the same thing, where the
+    real code home's plans go invisible with only a `weak` row as a clue.
+    `candidates_for` is what lets `check` say the tie existed at all.
+    """
+    a = tmp_path / "root-a" / "alpha"
+    b = tmp_path / "root-b" / "alpha"
+    a.mkdir(parents=True)
+    b.mkdir(parents=True)
+    candidates = scan_roots([tmp_path / "root-a", tmp_path / "root-b"])
+
+    rivals = candidates_for("alpha", candidates)
+
+    assert {c.path for c in rivals} == {a, b}
+
+
+def test_candidates_for_names_one_when_resolution_is_unambiguous(tmp_path):
+    d = tmp_path / "world-model-ladder"
+    d.mkdir()
+    candidates = scan_roots([tmp_path])
+
+    assert [c.path for c in candidates_for("world-model-ladder", candidates)] == [d]
 
 
 def test_a_root_reached_through_a_symlink_yields_resolved_paths(tmp_path):

@@ -108,8 +108,14 @@ def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candid
     return found
 
 
-def resolve_home(name: str, candidates: list[Candidate]) -> Home:
-    """Locate a home by the ladder, saying which rung answered."""
+def _rungs(name: str, candidates: list[Candidate]):
+    """Walk the ladder, yielding `(how, [(candidate, path), ...])` for the
+    first rung that has any existing match.
+
+    Shared by `resolve_home`, which wants only the first pair, and
+    `candidates_for`, which wants every pair at that same rung — the
+    difference between "the answer" and "everyone who could have answered".
+    """
     repo, _, subpath = name.partition("/")
 
     def spoken_for(c: Candidate) -> bool:
@@ -136,15 +142,34 @@ def resolve_home(name: str, candidates: list[Candidate]) -> Home:
          and c.remote is not None and c.remote.split("/")[-1] == repo, joined),
         ("name", lambda c: not spoken_for(c) and c.name == repo, joined),
     ):
-        for candidate in candidates:
-            if match(candidate):
-                path = path_of(candidate)
-                if not path.exists():
-                    # A home declared before its folder was created, or a
-                    # subpath since moved. Every downstream consumer relies on
-                    # a Home with a path existing, so the check happens once,
-                    # here, rather than being repeated at every call site.
-                    continue
-                return Home(name=name, path=path, how=how)
+        existing = [
+            (c, path_of(c)) for c in candidates if match(c) and path_of(c).exists()
+        ]
+        # A home declared before its folder was created, or a subpath since
+        # moved, is filtered out here rather than at every call site — every
+        # downstream consumer relies on a `Home` with a path existing.
+        if existing:
+            yield how, existing
 
+
+def resolve_home(name: str, candidates: list[Candidate]) -> Home:
+    """Locate a home by the ladder, saying which rung answered."""
+    for how, existing in _rungs(name, candidates):
+        _, path = existing[0]
+        return Home(name=name, path=path, how=how)
     return Home(name=name, path=None, how="absent")
+
+
+def candidates_for(name: str, candidates: list[Candidate]) -> list[Candidate]:
+    """Every candidate that would satisfy this name at the rung that wins —
+    not only the first, which is what `resolve_home` returns and what a
+    caller standing on one machine sees.
+
+    Two directories can tie at the same rung: two docs checkouts both named
+    `alpha`, or two repositories whose remote both end in `owner/alpha`. The
+    ladder still answers — it has to, resolution needs one path — but the
+    tie is real and worth reporting, which is what `check` uses this for.
+    """
+    for _, existing in _rungs(name, candidates):
+        return [c for c, _ in existing]
+    return []

@@ -81,7 +81,7 @@ def generate_snapshot(
                 lines += ["**Documents:** " + ", ".join(f"`{d}`" for d in loose_docs), ""]
 
             for artifact_kind in registry.grammar.artifact_types:
-                held = documents.find(registry, artifact_kind, unit.name)
+                held = documents.find(registry, artifact_kind, unit)
                 if held:
                     lines.append(f"**{artifact_kind.title()}s:** {len(held)}")
                     lines += [f"- `{a.name}`" for a in held[-3:]]

@@ -27,6 +27,7 @@ from difflib import get_close_matches
 from pathlib import Path
 
 from orglens import documents
+from orglens.homes import candidates_for
 from orglens.units import Registry
 
 
@@ -47,23 +48,60 @@ class Drift:
 
 
 @dataclass(frozen=True)
+class Duplicate:
+    """A unit name declared by more than one marker — a `cp -R`, a git
+    worktree, a Dropbox conflicted copy, a template folder. Left unreported,
+    every consumer that resolves this name by exact match raises, which used
+    to take `status`, `view`, `snapshot` and `find` down for every unit, not
+    only this one.
+    """
+    name: str
+    paths: list[Path] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Collision:
+    """A home name that more than one candidate directory could have
+    answered for — the ladder still picks one, by scan order, but the tie
+    is real. `weak` says a resolution is fragile; this says it was actually
+    contested.
+    """
+    unit: str
+    home: str
+    paths: list[Path] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class Report:
     drifted: list[Drift] = field(default_factory=list)
     #: Directories that look like work and have not declared themselves. The
     #: migration worklist, and the reason nothing goes dark while the tree is
     #: half declared.
     undeclared: list[Path] = field(default_factory=list)
-    #: (unit, home) pairs where identity came only from the directory name.
-    #: Renaming such a directory detaches the home silently, which is the one
-    #: failure the ladder cannot prevent — only announce.
+    #: (unit, home) pairs where identity came only from the directory name or
+    #: a git remote's repository-name tail. Both discard information a marker
+    #: would have kept — a rename detaches the first silently, an owner
+    #: collision resolves the second silently and confidently — which is the
+    #: one failure the ladder cannot prevent, only announce.
     weak: list[tuple[str, str]] = field(default_factory=list)
     #: Document kinds whose glob matches nothing anywhere. A mistyped glob
     #: finds no documents and raises nothing, so without this it fails
     #: silently — the one way this design can still go wrong quietly.
     unmatched: list[str] = field(default_factory=list)
+    #: Unit names declared by more than one marker.
+    duplicates: list[Duplicate] = field(default_factory=list)
+    #: Home names more than one candidate directory could have satisfied.
+    collisions: list[Collision] = field(default_factory=list)
 
     def __bool__(self) -> bool:
-        return bool(self.drifted or self.undeclared or self.weak or self.unmatched)
+        return bool(
+            self.drifted
+            or self.undeclared
+            or self.weak
+            or self.unmatched
+            or self.duplicates
+            or self.collisions
+        )
 
 
 def run(registry: Registry) -> Report:
@@ -96,11 +134,16 @@ def run(registry: Registry) -> Report:
             if missing:
                 drifted.append(Drift(entity=unit.name, path=home, missing=missing))
 
+    # `name` discards everything but a directory's basename; `remote` discards
+    # the host and owner, keeping only the repository-name tail. Both can
+    # answer confidently for the wrong directory, which is exactly the
+    # failure `weak` exists to surface — the old filter caught only the
+    # first of the two.
     weak = [
         (unit.name, home.name)
         for unit in units
         for home in unit.homes
-        if home.how == "name"
+        if home.how in ("name", "remote")
     ]
 
     # `documents.find` matches a kind's container by name at any depth
@@ -113,9 +156,39 @@ def run(registry: Registry) -> Report:
         if not documents.find(registry, name)
     ]
 
+    by_name: dict[str, list[Path]] = {}
+    for unit in units:
+        by_name.setdefault(unit.name, []).append(unit.declared_at)
+    duplicates = [
+        Duplicate(name=name, paths=sorted(paths))
+        for name, paths in sorted(by_name.items())
+        if len(paths) > 1
+    ]
+
+    scan = registry.scan()
+    seen: set[tuple[str, str]] = set()
+    collisions = []
+    for unit in units:
+        for home in unit.homes:
+            key = (unit.name, home.name)
+            if key in seen:
+                continue
+            seen.add(key)
+            rivals = candidates_for(home.name, scan)
+            if len(rivals) > 1:
+                collisions.append(
+                    Collision(
+                        unit=unit.name,
+                        home=home.name,
+                        paths=sorted(c.path for c in rivals),
+                    )
+                )
+
     return Report(
         drifted=drifted,
         undeclared=registry.candidates(),
         weak=weak,
         unmatched=unmatched,
+        duplicates=duplicates,
+        collisions=collisions,
     )

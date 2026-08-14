@@ -223,3 +223,76 @@ def test_a_home_resolved_by_name_only_is_reported_as_weak(two_root_tree):
 
 def test_a_report_with_only_undeclared_rows_is_still_truthy(two_root_tree):
     assert bool(check.run(two_root_tree))
+
+
+def test_a_duplicated_unit_name_is_reported_with_both_declaring_paths(
+    declared_tree, grammar
+):
+    """Two markers saying the same `unit:` used to make `Registry.resolve`
+    raise out of a loop that iterated every unit and re-resolved each one by
+    its own already-known name — taking `status`, `view` and `snapshot` down
+    for every unit, not only the duplicated one. `check` is where this must
+    surface instead.
+    """
+    a = declared_tree / "projects" / "dup-a"
+    b = declared_tree / "projects" / "dup-b"
+    _declare(a, "dup", "project")
+    _declare(b, "dup", "project")
+
+    report = check.run(Registry([declared_tree], grammar))
+
+    dup = next(d for d in report.duplicates if d.name == "dup")
+    assert set(dup.paths) == {a, b}
+
+
+def test_a_unique_unit_name_is_never_reported_as_duplicate(registry):
+    report = check.run(registry)
+    assert report.duplicates == []
+
+
+def test_a_home_resolved_by_remote_tail_is_also_reported_as_weak(tmp_path, grammar):
+    """The remote rung matches on the repository-name tail alone, discarding
+    the host and owner — an owner collision resolves silently and
+    confidently. `weak` used to flag only `how == 'name'`.
+    """
+    import subprocess
+
+    d = tmp_path / "renamed-locally"
+    d.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin",
+         "git@github.com:saptaxis/world-model-ladder.git"],
+        cwd=d, check=True,
+    )
+    (d / MARKER).write_text(
+        "unit: world-model-ladder\nkind: project\n"
+        "homes:\n  - world-model-ladder\n"
+    )
+
+    report = check.run(Registry([tmp_path], grammar))
+
+    assert ("world-model-ladder", "world-model-ladder") in report.weak
+
+
+def test_two_candidates_claiming_one_home_name_are_named(tmp_path, grammar):
+    """Confirmed live: in a two-root tree a home named `alpha` resolved to a
+    docs folder of that name because it came first in scan order, making the
+    real code home's plans invisible, with only a `weak` row as a clue.
+    """
+    docs_root = tmp_path / "docs-root"
+    code_root = tmp_path / "code-root"
+    decoy = docs_root / "alpha"
+    real = code_root / "alpha"
+    decoy.mkdir(parents=True)
+    real.mkdir(parents=True)
+    unit_dir = docs_root / "projects" / "widget"
+    unit_dir.mkdir(parents=True)
+    (unit_dir / MARKER).write_text(
+        "unit: widget\nkind: project\nhomes:\n  - alpha\n"
+    )
+
+    report = check.run(Registry([docs_root, code_root], grammar))
+
+    collision = next(c for c in report.collisions if c.home == "alpha")
+    assert set(collision.paths) == {decoy, real}

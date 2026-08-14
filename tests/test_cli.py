@@ -461,6 +461,69 @@ class TestCheckCommand:
 
         assert "orglens: home 'orglens' resolved by directory name only" in result.output
 
+    def test_duplicate_unit_names_are_reported_with_their_declaring_paths(
+        self, runner, tmp_path
+    ):
+        """A `cp -R`, a worktree, or a Dropbox conflicted copy can leave two
+        markers both saying `unit: dup`. That must show up as a named row,
+        not a crash — see `TestDuplicateDeclarations` below for the crash
+        this used to cause everywhere else.
+        """
+        docs = tmp_path / "docs"
+        a = docs / "projects" / "dup-a"
+        b = docs / "projects" / "dup-b"
+        _declare(a, "dup", "project")
+        _declare(b, "dup", "project")
+        env = _roots_config(tmp_path, [docs])
+
+        result = runner.invoke(cli, ["check"], env=env)
+
+        assert result.exit_code == 0
+        assert "declared as a unit in more than one place" in result.output
+        assert "dup-a" in result.output
+        assert "dup-b" in result.output
+
+
+class TestDuplicateDeclarations:
+    """Two markers naming the same unit — a copy-pasted folder, a worktree, a
+    Dropbox conflicted copy — used to raise `ValueError` out of a loop that
+    passed an already-resolved `Unit.name` back into `Registry.resolve`,
+    taking every command down for every unit, not only the duplicated one.
+    """
+
+    def test_status_survives_a_duplicated_unit_name(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        _declare(docs / "projects" / "dup-a", "dup", "project")
+        _declare(docs / "projects" / "dup-b", "dup", "project")
+        _declare(docs / "projects" / "unrelated", "unrelated", "project")
+        env = _roots_config(tmp_path, [docs])
+
+        result = runner.invoke(cli, ["status"], env=env)
+
+        assert result.exit_code == 0
+        assert "unrelated" in result.output
+
+    def test_view_survives_a_duplicated_unit_name(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        _declare(docs / "projects" / "dup-a", "dup", "project")
+        _declare(docs / "projects" / "dup-b", "dup", "project")
+        env = _roots_config(tmp_path, [docs])
+        out = tmp_path / "view.html"
+
+        result = runner.invoke(cli, ["view", "--out", str(out), "--no-open"], env=env)
+
+        assert result.exit_code == 0
+
+    def test_snapshot_survives_a_duplicated_unit_name(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        _declare(docs / "projects" / "dup-a", "dup", "project")
+        _declare(docs / "projects" / "dup-b", "dup", "project")
+        env = _roots_config(tmp_path, [docs])
+
+        result = runner.invoke(cli, ["snapshot", "--stdout"], env=env)
+
+        assert result.exit_code == 0
+
 
 class TestSnapshotCommand:
     def test_snapshot_writes_file(self, runner, cli_env):
