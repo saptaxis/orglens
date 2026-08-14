@@ -50,6 +50,31 @@ class Registry:
             self._candidates = scan_roots(self.roots)
         return self._candidates
 
+    def scan(self) -> list[Candidate]:
+        """The raw sweep, for callers that need to reason about candidates
+        directly rather than through a resolved `Unit` — `check`, checking
+        whether a home name could have resolved to more than one directory.
+        """
+        return self._scan()
+
+    def _homes_of(self, marker) -> tuple[Home, ...]:
+        """Resolve a marker's declared homes, plus the directory it was
+        found in — a home whether or not it named itself via `home:`.
+
+        The spec documents a subfolder declaration that omits `home:`
+        entirely, so `marker.home` can be absent while the directory is
+        still, unambiguously, one of the unit's homes: it is where the
+        declaration was read from. Checked by resolved path rather than by
+        name, so a directory that *did* name itself and already resolved
+        into `homes` below is not counted twice.
+        """
+        homes = tuple(resolve_home(name, self._scan()) for name in marker.homes)
+        declaring = marker.path.resolve()
+        if any(h.path is not None and h.path.resolve() == declaring for h in homes):
+            return homes
+        own = Home(name=marker.home or marker.path.name, path=marker.path, how="marker")
+        return (own,) + homes
+
     def units(self) -> list[Unit]:
         """Every declared unit under the roots."""
         if self._units is not None:
@@ -64,9 +89,7 @@ class Registry:
                 Unit(
                     name=marker.unit,
                     kind=marker.kind or "",
-                    homes=tuple(
-                        resolve_home(name, self._scan()) for name in marker.homes
-                    ),
+                    homes=self._homes_of(marker),
                     part_of=marker.part_of,
                     declared_at=candidate.path,
                 )
@@ -108,7 +131,7 @@ class Registry:
         return Unit(
             name=marker.unit,
             kind=marker.kind or "",
-            homes=tuple(resolve_home(n, self._scan()) for n in marker.homes),
+            homes=self._homes_of(marker),
             part_of=marker.part_of,
             declared_at=directory,
         )

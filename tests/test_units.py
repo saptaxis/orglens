@@ -93,6 +93,25 @@ def test_part_of_replaces_folder_nesting(tmp_path, grammar):
     assert [u.name for u in registry.parts_of(parent_unit)] == ["expt-5"]
 
 
+def test_a_marker_without_home_still_carries_its_own_directory(tmp_path, grammar):
+    """The spec says a subfolder declaration omits `home:` entirely — the
+    canonical documented case — and that the marker's own directory is a
+    home "whether or not it was listed". A marker naming only `homes:` and
+    no `home:` used to lose its own directory outright: nothing in
+    `marker.homes` named it, so nothing resolved it, so it was absent from
+    `unit.paths` even though it is the one directory known with certainty —
+    it is where the declaration was read from.
+    """
+    docs = tmp_path / "docs" / "projects" / "beta"
+    docs.mkdir(parents=True)
+    (docs / MARKER).write_text("unit: beta\nkind: project\nhomes:\n  - beta-code\n")
+
+    registry = Registry([docs.parent.parent], grammar)
+    unit = registry.resolve("beta")
+
+    assert docs.resolve() in [p.resolve() for p in unit.paths]
+
+
 def test_a_missing_declaration_never_hides_a_directory(two_root_tree, tmp_path):
     # reelmill has no declaration and is not a unit — and is still reported.
     assert not any(u.name == "reelmill" for u in two_root_tree.units())
