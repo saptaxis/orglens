@@ -12,10 +12,15 @@ from orglens.grammar import Grammar
 
 @dataclass
 class Config:
-    docs_root: Path
+    roots: list[Path]
     grammar_name: str
     docs_base_url: str = "http://localhost:8000"
     _config_dir: Path | None = None
+
+    @property
+    def docs_root(self) -> Path:
+        """The first root. Kept while callers are migrated to `roots`."""
+        return self.roots[0]
 
     @classmethod
     def from_yaml(cls, path: Path) -> Config:
@@ -23,15 +28,18 @@ class Config:
         with open(path) as f:
             data = yaml.safe_load(f) or {}
 
-        if "docs_root" not in data:
-            raise ValueError("docs_root is required in config")
-
-        docs_root = Path(data["docs_root"]).expanduser()
-        grammar_name = data.get("grammar", "default")
+        # `docs_root` is the one-tree spelling of `roots`. Both are accepted:
+        # a config written before units still names one tree, and that tree is
+        # simply the first root.
+        declared = data.get("roots") or (
+            [data["docs_root"]] if data.get("docs_root") else None
+        )
+        if not declared:
+            raise ValueError("roots is required in config (or docs_root, for one tree)")
 
         return cls(
-            docs_root=docs_root,
-            grammar_name=grammar_name,
+            roots=[Path(r).expanduser() for r in declared],
+            grammar_name=data.get("grammar", "default"),
             # Where the tree is served. `mkdocs serve` by default; set it to a
             # published site and the same links work from anywhere.
             docs_base_url=(data.get("docs_base_url") or "http://localhost:8000").rstrip("/"),
