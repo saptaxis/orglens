@@ -63,10 +63,16 @@ def find(
     experiment's own `plans/` preserved under the parent's `plans/archive/`
     — matches `_containers` twice, so the file under it would otherwise be
     yielded once per container that reaches it. Deduplicated on the
-    resolved path rather than by excluding nested containers: a file is one
-    document and belongs to a unit once, which covers every way containers
-    can overlap rather than only the same-name nesting found so far. Order
-    is the first occurrence, so it stays the stable, sorted order below.
+    resolved path, but *per unit*, not across the whole call: within one
+    unit a file is counted once however many containers enclose it, while
+    two units that share a home each see the file, because that is what a
+    shared home is for — the spec is explicit that the same repository can
+    be a home of two different units, and a shared library genuinely
+    belongs to both. A global dedup would hand the file to whichever unit
+    happened to sort first and silently drop it for the other, which is a
+    unit losing its own documents, not a duplicate being removed. Order is
+    the first occurrence within each unit, so it stays the stable, sorted
+    order below.
     """
     artifact = registry.grammar.artifact_types[kind]
     file_pattern = Path(artifact.find).name
@@ -75,9 +81,9 @@ def find(
     )
 
     found: list[Document] = []
-    seen: set[Path] = set()
     for unit in units:
         excluded = _claimed_by_parts(registry, unit)
+        seen: set[Path] = set()
         for home in unit.paths:
             for container in _containers(home, artifact.directory):
                 for path in sorted(container.rglob(file_pattern)):

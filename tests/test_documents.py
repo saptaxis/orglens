@@ -99,3 +99,34 @@ def test_a_container_nested_inside_itself_is_not_double_counted(tmp_path, gramma
     found = documents.find(registry, "plan", "physics-priors")
 
     assert len(found) == 1
+
+
+def test_a_shared_home_is_seen_by_each_unit_that_shares_it(tmp_path, grammar):
+    """Homes can be shared: the same repository can be a home of two
+    different units, and a shared library genuinely belongs to both. Dedup
+    must stay scoped to one unit's own overlapping containers — deduping
+    across the whole call would hand a shared file to whichever unit sorts
+    first and silently drop it for the other, which is a unit losing its
+    own documents, not a duplicate being removed.
+    """
+    shared = tmp_path / "shared"
+    (shared / "plans").mkdir(parents=True)
+    (shared / "plans" / "01-x-Feb012026.md").write_text("# x\n")
+
+    a = tmp_path / "unit-a"
+    a.mkdir()
+    (a / MARKER).write_text(
+        "home: unit-a\nunit: unit-a\nkind: project\nhomes:\n  - unit-a\n  - shared\n"
+    )
+
+    b = tmp_path / "unit-b"
+    b.mkdir()
+    (b / MARKER).write_text(
+        "home: unit-b\nunit: unit-b\nkind: project\nhomes:\n  - unit-b\n  - shared\n"
+    )
+
+    registry = Registry([tmp_path], grammar)
+    found = documents.find(registry, "plan")
+
+    assert len(found) == 2
+    assert {d.unit for d in found} == {"unit-a", "unit-b"}
