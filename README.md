@@ -132,7 +132,7 @@ the same vocabulary, and the copies drifted. **The grammar is the declaration**
 
 The grammar is data, not code. Adding a kind is one line and needs no Python
 change: `deck: capabilities/*` is a working example, exercised by
-`capabilities/.orglens.yml`.
+`capabilities/.orglens-grammar.yml`.
 
 ## How Discovery Works
 
