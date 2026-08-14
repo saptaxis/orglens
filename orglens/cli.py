@@ -120,7 +120,7 @@ def status():
             continue
         click.echo(f"\n{_heading(type_name)}:")
         for entity in group:
-            act = activity.read(entity.path, entity.name)
+            act = activity.read([entity.path], entity.name)
             facts = []
             # Counted from the grammar's own kinds, so a tree with different
             # documents reports on those instead of on nothing.
@@ -371,7 +371,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
                     "name": entity.name,
                     "path": entity.path,
                     "why": status.text if status else None,
-                    "activity": activity.read(entity.path, entity.name),
+                    "activity": activity.read([entity.path], entity.name),
                     "artifacts": [
                         (heading, topo.find_artifacts(kind, entity.name))
                         for kind, heading in headings

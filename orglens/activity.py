@@ -229,8 +229,42 @@ _OPEN = {"awaiting-user", "awaiting-question", "in-flight"}
 _EMPTY: tuple = (0, None, 0, None, [], [], [], [])
 
 
-def _sessions(name: str, index: Path) -> tuple:
-    """Sessions scad attributed to this entity, and their open questions."""
+def _home_clause(paths: list[Path], names: list[str]) -> tuple[str, list[str]]:
+    """SQL matching sessions that ran in, or under, any of these homes.
+
+    The join used to be `where project = <entity name>`, which worked only
+    while a repository happened to be named after the work. neuronal-degeneracy
+    is one unit with 1,281 sessions that split into two buckets under that
+    rule — 682 under its own name, 599 under `traitful-docs`.
+
+    Paths are resolved because `~/Dropbox` is a symlink to
+    `~/Library/CloudStorage/Dropbox` and 1,547 of 1,667 sessions record the
+    resolved form. An unresolved home matches nothing, and says so by
+    reporting zero rather than by failing.
+
+    Container paths are matched by name because a dispatched session's cwd is
+    `/workspace/<repo>`, which no host path can match — 37 sessions, 35 of
+    them orglens's own. That is scad's mounting convention, not a guess.
+    """
+    clauses: list[str] = []
+    params: list[str] = []
+    for path in paths:
+        resolved = str(Path(path).resolve())
+        clauses.append("(cwd = ? or cwd like ?)")
+        params += [resolved, resolved + "/%"]
+    for name in names:
+        repo = name.split("/")[0]
+        clauses.append("(cwd = ? or cwd like ?)")
+        params += [f"/workspace/{repo}", f"/workspace/{repo}/%"]
+    if not clauses:
+        return "0", []
+    return " or ".join(clauses), params
+
+
+def _sessions(
+    paths: list[Path], name: str, index: Path, home_names: list[str] | None = None
+) -> tuple:
+    """Sessions scad attributed to this unit, and their open questions."""
     if not index.exists():
         return _EMPTY
     try:
@@ -238,17 +272,18 @@ def _sessions(name: str, index: Path) -> tuple:
     except sqlite3.Error:
         return _EMPTY
     try:
+        clause, params = _home_clause(paths, home_names or [])
         count, last, turns = db.execute(
             "select count(*), max(coalesce(ended, started)), "
-            "sum(coalesce(n_turns, 0)) from sessions where project = ?",
-            (name,),
+            f"sum(coalesce(n_turns, 0)) from sessions where {clause}",
+            params,
         ).fetchone()
         agents = [
             row[0]
             for row in db.execute(
-                "select distinct agent from sessions where project = ? "
+                f"select distinct agent from sessions where {clause} "
                 "and agent is not null order by agent",
-                (name,),
+                params,
             )
         ]
         # A note is *about* an entity, which is not the same as being *written
@@ -264,9 +299,9 @@ def _sessions(name: str, index: Path) -> tuple:
         row = db.execute(
             "select t.ts, t.role, substr(t.text, 1, 240) from turns t "
             "join sessions s on s.id = t.session_id "
-            "where s.project = ? and t.text is not null and t.text != '' "
+            f"where ({clause}) and t.text is not null and t.text != '' "
             "order by t.ts desc limit 1",
-            (name,),
+            params,
         ).fetchone()
         last_turn = (
             {"at": _epoch(row[0]), "role": row[1], "text": row[2]} if row else None
@@ -280,15 +315,15 @@ def _sessions(name: str, index: Path) -> tuple:
                 "at": _epoch(at),
                 "agent": agent,
                 "outcome": outcome,
-                "name": name or title,
+                "name": row_name or title,
                 "turns": n_turns or 0,
                 "open": outcome in _OPEN,
             }
-            for at, agent, outcome, name, title, n_turns in db.execute(
+            for at, agent, outcome, row_name, title, n_turns in db.execute(
                 "select coalesce(ended, started), agent, outcome, name, title, "
-                "n_turns from sessions where project = ? and kind = 'main' "
+                f"n_turns from sessions where {clause} and kind = 'main' "
                 "order by coalesce(ended, started) desc limit 8",
-                (name,),
+                params,
             )
         ]
 
@@ -315,9 +350,9 @@ def _sessions(name: str, index: Path) -> tuple:
             {"question": q, "at": (int(at) // 1000 if at else None)}
             for q, at in db.execute(
                 "select needs, coalesce(ended, started) from sessions "
-                "where project = ? and needs is not null and needs != '' "
+                f"where {clause} and needs is not null and needs != '' "
                 "order by coalesce(ended, started) desc",
-                (name,),
+                params,
             )
         ]
     except sqlite3.Error:
@@ -337,20 +372,29 @@ def _sessions(name: str, index: Path) -> tuple:
     )
 
 
-def read(path: Path, name: str, index: Path = SCAD_INDEX) -> Activity:
-    """Everything derivable about one entity. Never raises."""
-    path = Path(path)
+def read(
+    paths: list[Path],
+    name: str,
+    index: Path = SCAD_INDEX,
+    home_names: list[str] | None = None,
+) -> Activity:
+    """Everything derivable about one unit. Never raises."""
+    paths = [Path(p) for p in paths]
+    home_names = home_names or []
     activity = Activity()
+    if not paths:
+        return activity
 
-    root = _repo_root(path)
+    primary = paths[0]
+    root = _repo_root(primary)
     if root is not None:
-        activity.touched = _last_commit(root, path)
-        activity.dirty = _dirty(root, path)
-    activity.modified = _newest_mtime(path)
+        activity.touched = _last_commit(root, primary)
+        activity.dirty = sum(_dirty(_repo_root(p) or p, p) for p in paths)
+    activity.modified = max((_newest_mtime(p) or 0) for p in paths) or None
 
     activity.live = _live_by_project(index).get(name, [])
-    activity.plan = _latest_plan(path)
-    activity.packets, activity.blocked = _packets(path)
+    activity.plan = _latest_plan(primary)
+    activity.packets, activity.blocked = _packets(primary)
     (
         activity.sessions,
         activity.last_session,
@@ -360,5 +404,5 @@ def read(path: Path, name: str, index: Path = SCAD_INDEX) -> Activity:
         activity.agents,
         activity.needs,
         activity.notes,
-    ) = _sessions(name, index)
+    ) = _sessions(paths, name, index, home_names)
     return activity
