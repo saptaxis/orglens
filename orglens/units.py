@@ -1,0 +1,169 @@
+"""What units exist, and which one you are standing in.
+
+Two operations with different requirements, and conflating them is what made
+this hard. Resolution walks *up* from a directory until a marker turns up: no
+roots, no index, no config, so a fresh clone answers immediately. Enumeration
+sweeps the roots, and is the only thing that needs to know where to look.
+
+A directory matching one of the grammar's old positional patterns but carrying
+no declaration is a *candidate*, not a unit. That is the whole migration
+worklist, and it is why nothing goes dark while the tree is half declared.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from fnmatch import fnmatch
+from pathlib import Path
+
+from orglens.declaration import MARKER, read_marker
+from orglens.grammar import Grammar
+from orglens.homes import Candidate, Home, resolve_home, scan_roots
+
+
+@dataclass(frozen=True)
+class Unit:
+    name: str
+    kind: str
+    homes: tuple[Home, ...]
+    part_of: str | None
+    #: The directory whose marker declared it. One per unit; `check` says so
+    #: when that stops being true.
+    declared_at: Path
+
+    @property
+    def paths(self) -> list[Path]:
+        """Every home present on this machine. Absent homes are ordinary."""
+        return [h.path for h in self.homes if h.path is not None]
+
+
+class Registry:
+    def __init__(self, roots: list[Path], grammar: Grammar):
+        self.roots = [Path(r).expanduser() for r in roots]
+        self.grammar = grammar
+        self._candidates: list[Candidate] | None = None
+        self._units: list[Unit] | None = None
+
+    # ── the sweep ────────────────────────────────────────────────────────
+
+    def _scan(self) -> list[Candidate]:
+        if self._candidates is None:
+            self._candidates = scan_roots(self.roots)
+        return self._candidates
+
+    def units(self) -> list[Unit]:
+        """Every declared unit under the roots."""
+        if self._units is not None:
+            return self._units
+
+        found: list[Unit] = []
+        for candidate in self._scan():
+            marker = read_marker(candidate.path)
+            if marker is None or not marker.declares:
+                continue
+            found.append(
+                Unit(
+                    name=marker.unit,
+                    kind=marker.kind or "",
+                    homes=tuple(
+                        resolve_home(name, self._scan()) for name in marker.homes
+                    ),
+                    part_of=marker.part_of,
+                    declared_at=candidate.path,
+                )
+            )
+        self._units = sorted(found, key=lambda u: u.name)
+        return self._units
+
+    # ── resolution ───────────────────────────────────────────────────────
+
+    def at(self, path: Path) -> Unit | None:
+        """The unit whose home contains this path, found by walking up.
+
+        Deliberately independent of the sweep: it reads markers on the way up,
+        so it answers in a container or a fresh clone where no index exists.
+        Where several homes contain the path, the deepest wins.
+        """
+        here = Path(path).expanduser().resolve()
+        for directory in [here, *here.parents]:
+            marker = read_marker(directory)
+            if marker is None:
+                continue
+            if marker.declares:
+                return self._unit_from(marker, directory)
+            if marker.home:
+                for unit in self.units():
+                    if any(h.name == marker.home for h in unit.homes):
+                        return unit
+        # No marker anywhere above. Fall back to the sweep, which knows homes
+        # that carry no marker of their own because they resolved by remote or
+        # by directory name.
+        for unit in self.units():
+            for home in unit.homes:
+                resolved = home.path.resolve() if home.path else None
+                if resolved and (resolved == here or resolved in here.parents):
+                    return unit
+        return None
+
+    def _unit_from(self, marker, directory: Path) -> Unit:
+        return Unit(
+            name=marker.unit,
+            kind=marker.kind or "",
+            homes=tuple(resolve_home(n, self._scan()) for n in marker.homes),
+            part_of=marker.part_of,
+            declared_at=directory,
+        )
+
+    def resolve(self, name: str) -> Unit:
+        """Resolve a partial name to a single unit."""
+        units = self.units()
+        for group in (
+            [u for u in units if u.name == name],
+            [u for u in units if u.name.startswith(name)],
+            [u for u in units if name in u.name],
+        ):
+            if len(group) == 1:
+                return group[0]
+            if len(group) > 1:
+                raise ValueError(
+                    f"'{name}' matches multiple units: "
+                    + ", ".join(u.name for u in group)
+                )
+        raise ValueError(
+            f"No unit '{name}' found. Available: {', '.join(u.name for u in units)}"
+        )
+
+    def parts_of(self, unit: Unit) -> list[Unit]:
+        """Units that declared themselves part of this one.
+
+        Stated, never derived from folder depth — which is what lets a unit be
+        regrouped without anything being renamed.
+        """
+        return [u for u in self.units() if u.part_of == unit.name]
+
+    # ── what has not declared itself ─────────────────────────────────────
+
+    def candidates(self) -> list[Path]:
+        """Directories that look like work and carry no declaration.
+
+        The grammar's positional patterns, demoted: they no longer say what
+        exists, only what is worth asking about. A report, never a gate.
+
+        Matched against the sweep rather than by `rglob` per pattern. The
+        sweep is depth-bounded and already done; an unbounded `rglob` over a
+        code root walks build output and dependency folders, which is the
+        expense the whole index exists to avoid.
+        """
+        declared = {u.declared_at.resolve() for u in self.units()}
+        homes = {p.resolve() for u in self.units() for p in u.paths}
+        found: list[Path] = []
+        for candidate in self._scan():
+            resolved = candidate.path.resolve()
+            if resolved in declared or resolved in homes:
+                continue
+            if any(
+                fnmatch(str(candidate.path), f"*/{et.pattern}")
+                for et in self.grammar.entity_types.values()
+            ):
+                found.append(candidate.path)
+        return sorted(found)

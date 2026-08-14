@@ -30,7 +30,8 @@ ENGINE = ROOT / "orglens"
 #: is true rather than declaring what may exist, and they were built after the
 #: drift they would otherwise be blamed for. `workflow/` has its own check.
 FACE = ("cli.py", "check.py", "config.py", "declaration.py", "grammar.py",
-        "homes.py", "reference.py", "snapshot.py", "state.py", "topology.py")
+        "homes.py", "reference.py", "snapshot.py", "state.py", "topology.py",
+        "units.py")
 
 
 def default_grammar() -> Grammar:
