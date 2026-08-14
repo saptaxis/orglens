@@ -46,9 +46,10 @@ orglens find plan
 orglens find plan physics-priors
 orglens find spec orglens
 
-# Create a new entity — the name is given in full; nothing is numbered for you
-orglens new project my-tool
-orglens new experiment expt-2-world-model --parent physics-priors
+# Create a unit: a directory, and the declaration that names it. The path
+# given is exactly where it lands — nothing is numbered for you.
+orglens new docs/projects/my-tool --kind project
+orglens new docs/research/physics-priors/expt-2-world-model --kind experiment --part-of physics-priors
 
 # Report where the tree has drifted from the grammar. Reports only.
 orglens check
@@ -68,8 +69,8 @@ write it.
 |---------|-------------|
 | `orglens list [--type TYPE]` | List all entities, optionally filtered by type |
 | `orglens status` | Show aggregated status across all entities |
-| `orglens find KIND [ENTITY]` | Find documents of a kind, optionally scoped to an entity and its children |
-| `orglens new TYPE NAME [--parent ENTITY]` | Create an entity and whatever the grammar says it holds |
+| `orglens find KIND [UNIT]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own |
+| `orglens new PATH [--kind KIND] [--part-of UNIT]` | Create a unit: a directory, and the declaration that names it |
 | `orglens check` | Report where the tree has drifted. Reports only — never gates |
 | `orglens snapshot [--stdout]` | Generate a topology snapshot (markdown) |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
