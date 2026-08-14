@@ -78,12 +78,14 @@ class Report:
     #: migration worklist, and the reason nothing goes dark while the tree is
     #: half declared.
     undeclared: list[Path] = field(default_factory=list)
-    #: (unit, home) pairs where identity came only from the directory name or
-    #: a git remote's repository-name tail. Both discard information a marker
-    #: would have kept — a rename detaches the first silently, an owner
-    #: collision resolves the second silently and confidently — which is the
-    #: one failure the ladder cannot prevent, only announce.
-    weak: list[tuple[str, str]] = field(default_factory=list)
+    #: (unit, home, how) rows where identity came only from the directory
+    #: name or a git remote's repository-name tail. Both discard information
+    #: a marker would have kept — a rename detaches the first silently, an
+    #: owner collision resolves the second silently and confidently — which
+    #: is the one failure the ladder cannot prevent, only announce. `how` is
+    #: carried so the printer can say which of the two actually happened,
+    #: rather than always naming the first.
+    weak: list[tuple[str, str, str]] = field(default_factory=list)
     #: Document kinds whose glob matches nothing anywhere. A mistyped glob
     #: finds no documents and raises nothing, so without this it fails
     #: silently — the one way this design can still go wrong quietly.
@@ -140,7 +142,7 @@ def run(registry: Registry) -> Report:
     # failure `weak` exists to surface — the old filter caught only the
     # first of the two.
     weak = [
-        (unit.name, home.name)
+        (unit.name, home.name, home.how)
         for unit in units
         for home in unit.homes
         if home.how in ("name", "remote")
@@ -170,6 +172,16 @@ def run(registry: Registry) -> Report:
     collisions = []
     for unit in units:
         for home in unit.homes:
+            # `declaring` and `absent` never walked the ladder in the first
+            # place — `declaring` is the directory a marker was read from,
+            # pinned directly rather than resolved by name, and re-running
+            # the ladder on its bare basename (the ordinary case for a
+            # subfolder declaration with no `home:` key) would "find" every
+            # unrelated directory sharing that name as a contest that never
+            # happened. Only a name the ladder actually walked can have been
+            # actually contested.
+            if home.how not in ("marker", "remote", "name"):
+                continue
             key = (unit.name, home.name)
             if key in seen:
                 continue

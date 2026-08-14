@@ -67,12 +67,24 @@ class Registry:
         declaration was read from. Checked by resolved path rather than by
         name, so a directory that *did* name itself and already resolved
         into `homes` below is not counted twice.
+
+        Marked `how="declaring"` rather than `"marker"` — it is stronger
+        evidence than any ladder rung (the marker was read from this exact
+        directory, nothing was matched at all) but it is not a ladder
+        answer, and `check`'s collision report walks the ladder again for
+        every home name it sees. A directory named after its own code
+        repository with no `home:` key is the ordinary case for a subfolder
+        declaration, and re-running the ladder on its bare basename would
+        "find" every unrelated directory sharing that name as a contested
+        match that never actually occurred.
         """
         homes = tuple(resolve_home(name, self._scan()) for name in marker.homes)
         declaring = marker.path.resolve()
         if any(h.path is not None and h.path.resolve() == declaring for h in homes):
             return homes
-        own = Home(name=marker.home or marker.path.name, path=marker.path, how="marker")
+        own = Home(
+            name=marker.home or marker.path.name, path=marker.path, how="declaring"
+        )
         return (own,) + homes
 
     def units(self) -> list[Unit]:

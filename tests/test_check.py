@@ -218,7 +218,7 @@ def test_a_home_resolved_by_name_only_is_reported_as_weak(two_root_tree):
     report = check.run(two_root_tree)
     # `orglens` in the code root has no marker and no git remote, so it can
     # only have resolved by directory name — renaming it detaches silently.
-    assert ("orglens", "orglens") in report.weak
+    assert ("orglens", "orglens", "name") in report.weak
 
 
 def test_a_report_with_only_undeclared_rows_is_still_truthy(two_root_tree):
@@ -272,7 +272,7 @@ def test_a_home_resolved_by_remote_tail_is_also_reported_as_weak(tmp_path, gramm
 
     report = check.run(Registry([tmp_path], grammar))
 
-    assert ("world-model-ladder", "world-model-ladder") in report.weak
+    assert ("world-model-ladder", "world-model-ladder", "remote") in report.weak
 
 
 def test_two_candidates_claiming_one_home_name_are_named(tmp_path, grammar):
@@ -296,3 +296,23 @@ def test_two_candidates_claiming_one_home_name_are_named(tmp_path, grammar):
 
     collision = next(c for c in report.collisions if c.home == "alpha")
     assert set(collision.paths) == {decoy, real}
+
+
+def test_a_synthetic_declaring_home_is_never_reported_as_a_collision(tmp_path, grammar):
+    """A subfolder declaration with no `home:` key — the spec's normal case,
+    and what the real markers use — pins its own directory directly rather
+    than resolving it through the ladder. An unrelated directory elsewhere
+    sharing that basename must not be reported as a contest that never
+    happened. "A docs folder named after its code repo" is the archetypal
+    layout in this tree, so this would otherwise fire on most units.
+    """
+    docs_root = tmp_path / "docs-root"
+    code_root = tmp_path / "code-root"
+    eps = docs_root / "projects" / "eps"
+    eps.mkdir(parents=True)
+    (eps / MARKER).write_text("unit: eps\nkind: project\n")
+    (code_root / "eps").mkdir(parents=True)  # unrelated, shares the basename only
+
+    report = check.run(Registry([docs_root, code_root], grammar))
+
+    assert not any(c.home == "eps" for c in report.collisions)

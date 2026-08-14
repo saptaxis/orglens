@@ -382,11 +382,17 @@ def check_cmd():
         shown = _relative(path, registry.roots)
         click.echo(f"undeclared: {shown}")
 
-    for unit_name, home_name in report.weak:
-        click.echo(
-            f"{unit_name}: home '{home_name}' resolved by directory name only "
-            "— renaming it will detach"
-        )
+    for unit_name, home_name, how in report.weak:
+        if how == "remote":
+            click.echo(
+                f"{unit_name}: home '{home_name}' resolved by a git remote's "
+                "repository name only — an owner collision would resolve silently"
+            )
+        else:
+            click.echo(
+                f"{unit_name}: home '{home_name}' resolved by directory name only "
+                "— renaming it will detach"
+            )
 
     for kind in report.unmatched:
         glob = registry.grammar.artifact_types[kind].find

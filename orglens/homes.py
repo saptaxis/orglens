@@ -38,7 +38,7 @@ class Candidate:
 class Home:
     name: str
     path: Path | None
-    how: str  # marker | remote | name | absent
+    how: str  # marker | remote | name | absent | declaring
 
 
 def normalise_remote(url: str) -> str | None:

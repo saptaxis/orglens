@@ -560,6 +560,38 @@ class TestCheckCommand:
         result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [docs, code]))
 
         assert "orglens: home 'orglens' resolved by directory name only" in result.output
+        assert "owner collision" not in result.output
+
+    def test_a_home_resolved_by_remote_only_names_an_owner_collision_not_a_rename(
+        self, runner, tmp_path
+    ):
+        """The `name`-rung message ("renaming it will detach") is both false
+        for a `remote`-rung home — it did not resolve by name, and renaming
+        will not detach it — and it hides the real exposure: the remote rung
+        matches only the repository-name tail, discarding the owner, so a
+        different owner's repo of the same name would resolve just as
+        confidently.
+        """
+        d = tmp_path / "renamed-locally"
+        d.mkdir()
+        _git("init", "-q", cwd=d)
+        _git(
+            "remote", "add", "origin",
+            "git@github.com:saptaxis/world-model-ladder.git", cwd=d,
+        )
+        (d / MARKER).write_text(
+            "unit: world-model-ladder\nkind: project\n"
+            "homes:\n  - world-model-ladder\n"
+        )
+
+        result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [tmp_path]))
+
+        assert (
+            "world-model-ladder: home 'world-model-ladder' resolved by a git "
+            "remote's repository name only — an owner collision would resolve "
+            "silently" in result.output
+        )
+        assert "renaming it will detach" not in result.output
 
     def test_duplicate_unit_names_are_reported_with_their_declaring_paths(
         self, runner, tmp_path
