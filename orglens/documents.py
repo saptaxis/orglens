@@ -57,7 +57,17 @@ def _containers(home: Path, directory: str) -> list[Path]:
 def find(
     registry: Registry, kind: str, unit_name: str | None = None
 ) -> list[Document]:
-    """Documents of a kind, at any depth under a unit's homes."""
+    """Documents of a kind, at any depth under a unit's homes.
+
+    A container nested inside a same-named container — an archived
+    experiment's own `plans/` preserved under the parent's `plans/archive/`
+    — matches `_containers` twice, so the file under it would otherwise be
+    yielded once per container that reaches it. Deduplicated on the
+    resolved path rather than by excluding nested containers: a file is one
+    document and belongs to a unit once, which covers every way containers
+    can overlap rather than only the same-name nesting found so far. Order
+    is the first occurrence, so it stays the stable, sorted order below.
+    """
     artifact = registry.grammar.artifact_types[kind]
     file_pattern = Path(artifact.find).name
     units = (
@@ -65,6 +75,7 @@ def find(
     )
 
     found: list[Document] = []
+    seen: set[Path] = set()
     for unit in units:
         excluded = _claimed_by_parts(registry, unit)
         for home in unit.paths:
@@ -73,10 +84,13 @@ def find(
                     if not path.is_file():
                         continue
                     resolved = path.resolve()
+                    if resolved in seen:
+                        continue
                     if any(
                         e == resolved or e in resolved.parents for e in excluded
                     ):
                         continue
+                    seen.add(resolved)
                     found.append(Document(path.name, kind, path, unit.name))
     return found
 

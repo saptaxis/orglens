@@ -74,3 +74,28 @@ def test_a_nested_unit_claims_its_own_documents(tmp_path, grammar):
 
 def test_find_without_a_unit_returns_everything(nested_docs):
     assert len(documents.find(nested_docs, "plan")) == 7
+
+
+def test_a_container_nested_inside_itself_is_not_double_counted(tmp_path, grammar):
+    """An archived experiment's own `plans/` folder, preserved under the
+    parent's `plans/archive/`, is a `plans/` inside a `plans/` — plausible,
+    not contrived. Matching the container by name at any depth means both
+    the outer and the inner directory match, and without dedup the same
+    file is yielded once per container that reaches it.
+    """
+    docs = tmp_path / "docs"
+    prog = docs / "research" / "physics-priors"
+    prog.mkdir(parents=True)
+    (prog / MARKER).write_text(
+        "home: p\nunit: physics-priors\nkind: research-program\nhomes:\n  - p\n"
+    )
+    (tmp_path / "p").mkdir()
+
+    nested = prog / "plans" / "archive" / "plans"
+    nested.mkdir(parents=True)
+    (nested / "01-old-Jan012026.md").write_text("# old\n")
+
+    registry = Registry([docs, tmp_path], grammar)
+    found = documents.find(registry, "plan", "physics-priors")
+
+    assert len(found) == 1

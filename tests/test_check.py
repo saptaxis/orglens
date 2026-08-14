@@ -176,6 +176,38 @@ class TestSilentFailure:
     def test_a_document_kind_that_matches_somewhere_is_not_reported(self, registry):
         assert check.run(registry).unmatched == []
 
+    def test_a_document_reachable_only_at_depth_is_not_reported_unmatched(
+        self, declared_tree, tmp_path
+    ):
+        """`plans/archive/x.md` is real work, one level below where the
+        pattern's text literally reaches. A shallow check of the raw glob
+        text treats that as "no plan documents anywhere" and reports a
+        working kind as unmatched — worse than not checking at all, since
+        `unmatched` exists to catch a *mistyped* glob, not a working one.
+        """
+        path = tmp_path / "g.yaml"
+        path.write_text(
+            "version: 2\n"
+            "driver: overview.md\n"
+            "entities:\n"
+            "  project: projects/*\n"
+            "artifacts:\n"
+            "  plan:\n"
+            "    find: plans/*.md\n"
+            "    means: Numbered units of work.\n"
+        )
+        clipcompose = declared_tree / "projects" / "clipcompose"
+        # Only an archived plan remains — nothing at the depth the pattern's
+        # text literally names.
+        (clipcompose / "plans" / "01-packaging-Feb252026.md").unlink()
+        archive = clipcompose / "plans" / "archive"
+        archive.mkdir()
+        (archive / "00-old-Jan012026.md").write_text("# old\n")
+
+        report = check.run(Registry([declared_tree], Grammar.from_yaml(path)))
+
+        assert "plan" not in report.unmatched
+
 
 def test_undeclared_candidates_are_reported(two_root_tree):
     report = check.run(two_root_tree)

@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 from difflib import get_close_matches
 from pathlib import Path
 
-from orglens.units import Registry, Unit
+from orglens import documents
+from orglens.units import Registry
 
 
 @dataclass(frozen=True)
@@ -63,22 +64,6 @@ class Report:
 
     def __bool__(self) -> bool:
         return bool(self.drifted or self.undeclared or self.weak or self.unmatched)
-
-
-def _holds_any(units: list[Unit], pattern: str) -> bool:
-    """Whether some home, of some unit, holds a file matching this glob at
-    any depth.
-
-    Written the way `documents.find` (Task 6) will look up a kind's files, so
-    this check can move there later without changing what it means — only
-    where it is asked from.
-    """
-    return any(
-        path.is_file()
-        for unit in units
-        for home in unit.paths
-        for path in home.rglob(pattern)
-    )
 
 
 def run(registry: Registry) -> Report:
@@ -118,10 +103,14 @@ def run(registry: Registry) -> Report:
         if home.how == "name"
     ]
 
+    # `documents.find` matches a kind's container by name at any depth
+    # rather than taking the glob text literally, so a document one level
+    # below where the pattern's text reaches — `plans/archive/x.md` for
+    # `plans/*.md` — still counts as a match rather than a false unmatched.
     unmatched = [
         name
-        for name, artifact_type in registry.grammar.artifact_types.items()
-        if not _holds_any(units, artifact_type.find)
+        for name in registry.grammar.artifact_types
+        if not documents.find(registry, name)
     ]
 
     return Report(
