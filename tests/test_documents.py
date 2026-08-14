@@ -101,6 +101,27 @@ def test_a_container_nested_inside_itself_is_not_double_counted(tmp_path, gramma
     assert len(found) == 1
 
 
+def test_subdirectories_leaves_out_hidden_ones(tmp_path, grammar):
+    """The only test of this exclusion lived against the deleted
+    `Topology.subdirectories` and went with the module. `.git`, `.claude`
+    and the like are real directories a unit's home holds; they are not
+    navigation surface.
+    """
+    home = tmp_path / "unit-a"
+    (home / "plans").mkdir(parents=True)
+    (home / ".git").mkdir()
+    (home / MARKER).write_text(
+        "home: unit-a\nunit: unit-a\nkind: project\nhomes:\n  - unit-a\n"
+    )
+
+    registry = Registry([tmp_path], grammar)
+    unit = registry.resolve("unit-a")
+
+    found = documents.subdirectories(unit)
+
+    assert [d.name for d in found] == ["plans"]
+
+
 def test_a_shared_home_is_seen_by_each_unit_that_shares_it(tmp_path, grammar):
     """Homes can be shared: the same repository can be a home of two
     different units, and a shared library genuinely belongs to both. Dedup

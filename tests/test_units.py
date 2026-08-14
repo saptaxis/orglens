@@ -97,3 +97,60 @@ def test_a_missing_declaration_never_hides_a_directory(two_root_tree, tmp_path):
     # reelmill has no declaration and is not a unit — and is still reported.
     assert not any(u.name == "reelmill" for u in two_root_tree.units())
     assert any(p.name == "reelmill" for p in two_root_tree.candidates())
+
+
+def _declare(root: Path, dirname: str, unit_name: str) -> None:
+    """A minimal declared unit: one home, named after its own directory."""
+    home = root / dirname
+    home.mkdir(parents=True)
+    (home / MARKER).write_text(
+        f"home: {dirname}\nunit: {unit_name}\nkind: project\nhomes:\n  - {dirname}\n"
+    )
+
+
+class TestResolveFallbacks:
+    """`resolve`'s three passes came across from the deleted `Topology.resolve`
+    unchanged, and are live in `orglens where <name>` — an exact match always
+    existed as its own test, but the prefix, substring, ambiguous and
+    no-match branches never got one of their own once `test_topology.py`
+    went with the module it was written against.
+    """
+
+    @pytest.fixture
+    def registry(self, tmp_path, grammar):
+        root = tmp_path / "root"
+        _declare(root, "orglens", "orglens")
+        _declare(root, "orglens-web", "orglens-web")
+        return Registry([root], grammar)
+
+    def test_exact_wins_over_a_longer_prefix_match(self, registry):
+        assert registry.resolve("orglens").name == "orglens"
+
+    def test_an_unambiguous_prefix_resolves(self, registry):
+        assert registry.resolve("orglens-w").name == "orglens-web"
+
+    def test_an_unambiguous_substring_resolves(self, tmp_path, grammar):
+        root = tmp_path / "root"
+        _declare(root, "the-orglens-thing", "the-orglens-thing")
+        registry = Registry([root], grammar)
+
+        assert registry.resolve("orglens").name == "the-orglens-thing"
+
+    def test_an_ambiguous_prefix_names_every_match(self, tmp_path, grammar):
+        root = tmp_path / "root"
+        _declare(root, "web-app", "web-app")
+        _declare(root, "web-api", "web-api")
+        registry = Registry([root], grammar)
+
+        with pytest.raises(ValueError) as excinfo:
+            registry.resolve("web")
+
+        assert "web-app" in str(excinfo.value)
+        assert "web-api" in str(excinfo.value)
+
+    def test_no_match_lists_what_is_available(self, registry):
+        with pytest.raises(ValueError) as excinfo:
+            registry.resolve("nothing-like-that")
+
+        assert "orglens" in str(excinfo.value)
+        assert "orglens-web" in str(excinfo.value)
