@@ -40,13 +40,23 @@ def test_undeclared_folders_matching_a_pattern_are_candidates(two_root_tree, tmp
     assert not any(p.name == "orglens" for p in found)
 
 
-def test_a_subdirectory_of_a_declared_unit_is_not_a_candidate(two_root_tree, tmp_path):
-    # A folder inside a declared unit's home belongs to that unit. Reporting
-    # it as undeclared work pads the migration worklist with every specs/ and
-    # plans/ directory in the tree, which is the same as reporting nothing.
-    (tmp_path / "traitful-docs" / "docs" / "projects" / "orglens" / "specs").mkdir(parents=True, exist_ok=True)
+def test_a_matching_directory_inside_a_declared_home_is_not_a_candidate(two_root_tree, tmp_path):
+    # `expt-*` is a single-segment pattern, so this directory matches it even
+    # sitting inside a declared unit's home — Path.match's separator rule does
+    # not save us here. Only excluding what is *under* a claimed home does,
+    # which is what this test exists to hold in place.
+    #
+    # (`docs/projects/orglens/specs` was tried here first and looked right,
+    # but it turned out to pass on the separator fix alone: `specs` sits two
+    # segments below `projects`, so `Path.match('projects/*')` already
+    # rejects it without the containment exclusion ever being exercised.
+    # `expt-*` is one segment, so it matches regardless of nesting depth —
+    # the containment exclusion is the only thing left that can stop it.)
+    (tmp_path / "traitful-docs" / "docs" / "projects" / "orglens" / "expt-1").mkdir(
+        parents=True, exist_ok=True
+    )
     found = two_root_tree.candidates()
-    assert not any("specs" in p.parts for p in found)
+    assert not any(p.name == "expt-1" for p in found)
 
 
 def test_a_grandchild_of_a_matched_directory_is_not_a_candidate(two_root_tree, tmp_path):
