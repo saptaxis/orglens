@@ -192,7 +192,7 @@ change: `deck: capabilities/*` is a working example, exercised by
    session in any of a unit's homes is that unit's — which is how one body of
    work stops being two unrelated numbers
 
-Status is the first `> **Status:** ...` line found in a unit's documents,
+Status is the first line carrying a bolded `Status:` marker in blockquote form, found in a unit's documents,
 looking at the ones `structure` names first. Nothing declares a state file, so
 moving the line into whichever document you actually maintain works. It is
 always reported with its age — an authored sentence can go stale, and a dated
