@@ -921,3 +921,19 @@ class TestReferenceCommand:
 
         assert result.exit_code == 0
         assert out.read_text().startswith("<!-- generated")
+
+
+class TestCountPluralisation:
+    """`1 session`, not `1 sessions` — the counts sit inline in a dense line."""
+
+    def test_one_is_singular(self):
+        from orglens.cli import _count
+
+        assert _count(1, "session") == "1 session"
+        assert _count(1, "packet") == "1 packet"
+
+    def test_other_counts_are_plural(self):
+        from orglens.cli import _count
+
+        assert _count(0, "session") == "0 sessions"
+        assert _count(2, "plan") == "2 plans"

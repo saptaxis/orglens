@@ -61,6 +61,13 @@ def _ago(ts: float) -> str:
     return f"{hours / 720:.0f}mo"
 
 
+def _count(n: int, noun: str) -> str:
+    """`1 session`, not `1 sessions`. The counts sit inline in a dense line,
+    where a wrong plural reads as a bug in the number rather than the grammar.
+    """
+    return f"{n} {noun}" + ("s" if n != 1 else "")
+
+
 def _heading(kind: str) -> str:
     return kind.replace("-", " ").capitalize() + "s"
 
@@ -231,13 +238,13 @@ def status():
                 held = documents.find(registry, artifact_kind, unit)
                 if held:
                     facts.append(
-                        f"{len(held)} {artifact_kind}" + ("s" if len(held) > 1 else "")
+                        _count(len(held), artifact_kind)
                     )
             facts.extend(_dated(act))
             if act.sessions:
-                facts.append(f"{act.sessions} sessions")
+                facts.append(_count(act.sessions, "session"))
             if act.packets:
-                facts.append(f"{act.packets} packets")
+                facts.append(_count(act.packets, "packet"))
             if act.dirty:
                 facts.append(f"{act.dirty} uncommitted")
 
