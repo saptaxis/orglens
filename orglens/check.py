@@ -42,8 +42,11 @@ class Missing:
 
 @dataclass(frozen=True)
 class Drift:
+    #: The unit, not one of its homes. A declared file belongs to whichever
+    #: home the grammar's structure actually implies — a code repository
+    #: should never carry `overview.md` — so naming a home here would point
+    #: the fix at the wrong place as often as the right one.
     entity: str
-    path: Path
     missing: list[Missing] = field(default_factory=list)
 
 
@@ -124,22 +127,38 @@ def run(registry: Registry) -> Report:
             if unit.kind in registry.grammar.entity_types
             else {}
         )
+        if not declared:
+            continue
+
+        # What each home actually holds, gathered once so a declared file
+        # can be checked against every home before it is called missing —
+        # a documents home carrying `overview.md` clears the code homes
+        # that a unit also lives in, which should never carry that file.
+        present_by_home: list[list[str]] = []
         for home in unit.paths:
             try:
-                present = [p.name for p in home.iterdir()]
+                present_by_home.append([p.name for p in home.iterdir()])
             except OSError:
                 # A home can vanish between the sweep and the read. An audit
                 # that raises on the thing it is auditing is worse than one
                 # that reports nothing about it.
                 continue
-            missing = []
-            for name in declared:
-                if (home / name).exists():
-                    continue
-                close = get_close_matches(name, present, n=1, cutoff=0.55)
-                missing.append(Missing(name=name, resembles=close[0] if close else None))
-            if missing:
-                drifted.append(Drift(entity=unit.name, path=home, missing=missing))
+
+        missing = []
+        for name in declared:
+            if any(name in present for present in present_by_home):
+                continue
+            # The file that resembles this one may live in a home that was
+            # not the first checked, so the hint has to search all of them.
+            close = None
+            for present in present_by_home:
+                match = get_close_matches(name, present, n=1, cutoff=0.55)
+                if match:
+                    close = match[0]
+                    break
+            missing.append(Missing(name=name, resembles=close))
+        if missing:
+            drifted.append(Drift(entity=unit.name, missing=missing))
 
     # The same scan and the same `candidates_for` the collision report below
     # uses — reused, not re-run, and cached per home name since several units

@@ -214,6 +214,65 @@ class TestSilentFailure:
         assert "plan" not in report.unmatched
 
 
+def test_a_file_present_in_one_home_is_not_drift_in_another(two_root_tree):
+    """`orglens` in `two_root_tree` is exactly the live bug: the docs home
+    carries `overview.md`, the code home never should. Reporting the code
+    home for a file that belongs in the docs home misleads about where the
+    fix belongs, so a unit with the file in *any* home must stay quiet.
+    """
+    report = check.run(two_root_tree)
+
+    assert not any(d.entity == "orglens" for d in report.drifted)
+
+
+def test_a_file_missing_from_every_home_is_reported_once_naming_the_unit(
+    tmp_path, grammar
+):
+    """Two distinctly-named homes, both real, both lacking `overview.md` —
+    unlike a same-named pair, both actually resolve into `unit.homes` rather
+    than the ladder picking one and losing the other.
+    """
+    docs_root = tmp_path / "docs-root"
+    code_root = tmp_path / "code-root"
+    docs_home = docs_root / "projects" / "gizmo-docs"
+    code_home = code_root / "gizmo"
+    docs_home.mkdir(parents=True)
+    code_home.mkdir(parents=True)
+    (docs_home / MARKER).write_text(
+        "unit: gizmo\nkind: project\nhomes:\n  - gizmo-docs\n  - gizmo\n"
+    )
+
+    report = check.run(Registry([docs_root, code_root], grammar))
+
+    rows = [d for d in report.drifted if d.entity == "gizmo"]
+    assert len(rows) == 1
+    assert [m.name for m in rows[0].missing] == ["overview.md"]
+
+
+def test_near_miss_hint_searches_every_home_not_only_the_first(tmp_path, grammar):
+    """The near-miss that resembles `research-question.md` lives in the
+    second home, not the declaring one checked first — the hint must not
+    stop looking after the first home comes up empty.
+    """
+    root_a = tmp_path / "root-a"
+    root_b = tmp_path / "root-b"
+    home_a = root_a / "research" / "llm-probing"
+    home_b = root_b / "llm-probing-code"
+    home_a.mkdir(parents=True)
+    home_b.mkdir(parents=True)
+    (home_a / MARKER).write_text(
+        "unit: llm-probing\nkind: research-program\n"
+        "homes:\n  - llm-probing\n  - llm-probing-code\n"
+    )
+    (home_b / "question.md").write_text("# Question\n")
+
+    report = check.run(Registry([root_a, root_b], grammar))
+
+    drift = next(d for d in report.drifted if d.entity == "llm-probing")
+    hints = {m.name: m.resembles for m in drift.missing}
+    assert hints["research-question.md"] == "question.md"
+
+
 def test_undeclared_candidates_are_reported(two_root_tree):
     report = check.run(two_root_tree)
     assert any(p.name == "reelmill" for p in report.undeclared)

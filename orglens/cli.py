@@ -369,9 +369,8 @@ def check_cmd():
     report = check_module.run(registry)
 
     for drift in report.drifted:
-        shown = _relative(drift.path, registry.roots)
         names = ", ".join(m.name for m in drift.missing)
-        click.echo(f"{str(shown):<42} missing {names}")
+        click.echo(f"{drift.entity:<42} missing {names}")
         for missing in drift.missing:
             if missing.resembles:
                 click.echo(
