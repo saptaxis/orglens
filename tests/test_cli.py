@@ -1,12 +1,18 @@
 """The commands, and what they refuse to know on their own."""
 
+import os
 import subprocess
+import time
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
-from orglens.cli import cli
+from orglens.activity import Activity
+from orglens.cli import _grouped, cli
 from orglens.declaration import MARKER
+from orglens.homes import Home
+from orglens.units import Unit
 
 
 @pytest.fixture
@@ -98,6 +104,60 @@ def deck_env(tmp_path, units_tree):
     return _roots_config(tmp_path, [units_tree], grammar_path=grammar)
 
 
+def _unit(name: str, kind: str) -> Unit:
+    """A unit with one home, named after itself — enough for `_grouped`,
+    which only ever looks at `.kind` and uses the unit itself as a key."""
+    home = Home(name=name, path=Path(f"/{name}"), how="marker")
+    return Unit(name=name, kind=kind, homes=(home,), part_of=None, declared_at=Path(f"/{name}"))
+
+
+class TestGroupedOrdering:
+    """`_grouped` is what makes `list` and `status` recent-first: units
+    within a kind ordered by `activity.recency`, and the kinds themselves
+    led by whichever holds the newest member. Built from plain `Activity`
+    objects — no git, no scad, no filesystem — because the ordering itself
+    doesn't care where the dates came from.
+    """
+
+    def test_the_latest_clock_wins_not_the_same_clock_for_every_unit(self):
+        """Unit `a` was edited recently but hasn't had a session in ages;
+        unit `b` is the reverse. Neither clock alone would put them in the
+        right order — only taking the latest of the two does."""
+        a = _unit("a", "project")
+        b = _unit("b", "project")
+        acts = {
+            a: Activity(modified=1_000_000_000, last_session=100),
+            b: Activity(modified=100, last_session=2_000_000_000),
+        }
+
+        groups = _grouped([a, b], acts)
+
+        [(_, members)] = groups
+        assert [u.name for u in members] == ["b", "a"]
+
+    def test_groups_are_led_by_their_newest_member(self):
+        project = _unit("proj", "project")
+        client = _unit("client", "client")
+        acts = {
+            project: Activity(modified=100),
+            client: Activity(modified=2_000_000_000),
+        }
+
+        groups = _grouped([project, client], acts)
+
+        assert [kind for kind, _ in groups] == ["client", "project"]
+
+    def test_a_unit_with_no_activity_still_appears_last_without_raising(self):
+        a = _unit("a", "project")
+        b = _unit("b", "project")  # never keyed into acts at all
+        acts = {a: Activity(modified=500)}
+
+        groups = _grouped([a, b], acts)
+
+        [(_, members)] = groups
+        assert [u.name for u in members] == ["a", "b"]
+
+
 class TestListCommand:
     def test_list_all(self, runner, cli_env):
         result = runner.invoke(cli, ["list"], env=cli_env)
@@ -180,6 +240,89 @@ class TestStatusCommand:
         result = runner.invoke(cli, ["status"], env=cli_env)
         assert result.exit_code == 0
         assert "Active" in result.output
+
+    def test_its_dates_are_labelled_by_clock(self, runner, cli_env):
+        """A bare '26d ago' never says whether that is a commit, an edit, or
+        a session — the fixture's units are never committed, only edited, so
+        the labelled clock that shows up must say 'edited'."""
+        result = runner.invoke(cli, ["status"], env=cli_env)
+
+        assert result.exit_code == 0
+        assert "edited" in result.output
+
+
+def _age(path: Path) -> None:
+    """Push every file under `path` back 30 days, marker included — so a
+    unit that should read as stale actually does, regardless of which file
+    inside it `_newest_mtime` happens to find newest."""
+    old = time.time() - 86400 * 30
+    for f in path.rglob("*"):
+        if f.is_file():
+            os.utime(f, (old, old))
+
+
+class TestRecentFirstOrdering:
+    """`list` and `status` used to sort alphabetically, which answers the
+    wrong question. These exercise the real commands end to end — sorting
+    by file mtime alone, since a scad session index is not under test here.
+    """
+
+    def test_list_orders_units_within_a_kind_by_recency(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        alpha = docs / "projects" / "alpha"
+        zeta = docs / "projects" / "zeta"
+        _declare(alpha, "alpha", "project")
+        _declare(zeta, "zeta", "project")
+        (alpha / "overview.md").write_text("# Overview\n")
+        (zeta / "overview.md").write_text("# Overview\n")
+        _age(alpha)  # zeta stays at "now" — edited more recently than alpha
+
+        result = runner.invoke(cli, ["list"], env=_roots_config(tmp_path, [docs]))
+
+        assert result.exit_code == 0
+        # "zeta" sorts after "alpha" alphabetically but was edited later.
+        assert result.output.index("zeta") < result.output.index("alpha")
+
+    def test_list_shows_when_a_unit_was_last_edited(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        unit = docs / "projects" / "solo"
+        _declare(unit, "solo", "project")
+        (unit / "overview.md").write_text("# Overview\n")
+
+        result = runner.invoke(cli, ["list"], env=_roots_config(tmp_path, [docs]))
+
+        assert result.exit_code == 0
+        assert "edited" in result.output
+
+    def test_list_orders_groups_by_their_newest_member(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        proj = docs / "projects" / "proj"
+        client = docs / "clients" / "client"
+        _declare(proj, "proj", "project")
+        _declare(client, "client", "client")
+        (proj / "overview.md").write_text("# Overview\n")
+        (client / "overview.md").write_text("# Overview\n")
+        _age(proj)  # client stays at "now" — its group should lead
+
+        result = runner.invoke(cli, ["list"], env=_roots_config(tmp_path, [docs]))
+
+        assert result.exit_code == 0
+        assert result.output.index("Clients:") < result.output.index("Projects:")
+
+    def test_status_also_orders_by_recency(self, runner, tmp_path):
+        docs = tmp_path / "docs"
+        alpha = docs / "projects" / "alpha"
+        zeta = docs / "projects" / "zeta"
+        _declare(alpha, "alpha", "project")
+        _declare(zeta, "zeta", "project")
+        (alpha / "overview.md").write_text("# Overview\n")
+        (zeta / "overview.md").write_text("# Overview\n")
+        _age(alpha)
+
+        result = runner.invoke(cli, ["status"], env=_roots_config(tmp_path, [docs]))
+
+        assert result.exit_code == 0
+        assert result.output.index("zeta") < result.output.index("alpha")
 
 
 class TestFindCommand:

@@ -75,6 +75,20 @@ class Activity:
         return self.blocked + len(self.needs)
 
 
+def recency(a: Activity) -> int:
+    """Latest wins, across two independent clocks.
+
+    A tree edited an hour ago and a session that ran last week are both "recent"
+    for different reasons, and either can be the one you meant. `list`,
+    `status` and the HTML view all order units by this, so it lives here once
+    rather than being re-decided by each caller.
+    """
+    if a.live:
+        return 1 << 62          # running now — nothing outranks it
+    spoke = (a.last_turn or {}).get("at") or a.last_session or 0
+    return max(a.modified or 0, spoke)
+
+
 def _git(args: list[str], cwd: Path) -> str:
     try:
         r = subprocess.run(
@@ -395,6 +409,65 @@ def _sessions(
         needs,
         notes,
     )
+
+
+def _session_clock(
+    paths: list[Path], index: Path, home_names: list[str]
+) -> tuple[int, int | None]:
+    """Count and last-active time — measured against the real scad index (not
+    a synthetic one) to matter here. A first cut also joined `turns` for the
+    exact last-said text, mirroring `_sessions`; on this machine's index
+    (74k turns, no index on `session_id` or `ts`) that one join cost 1.6s
+    across 16 units — 85% of `peek`'s entire time and enough on its own to
+    erase the git-subprocess saving this function exists for. `sessions.ended`
+    already answers "when did a session last touch this unit" without it.
+    """
+    if not index.exists():
+        return 0, None
+    try:
+        db = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return 0, None
+    try:
+        clause, params = _home_clause(paths, home_names or [])
+        count, last = db.execute(
+            f"select count(*), max(coalesce(ended, started)) from sessions "
+            f"where {clause}",
+            params,
+        ).fetchone()
+    except sqlite3.Error:
+        return 0, None
+    finally:
+        db.close()
+    return count or 0, (int(last) // 1000 if last else None)
+
+
+def peek(
+    paths: list[Path],
+    name: str,
+    index: Path = SCAD_INDEX,
+    home_names: list[str] | None = None,
+) -> Activity:
+    """Just enough to sort and date a unit — what `list` needs, not what
+    `status` shows in full.
+
+    Two costs stand between `list` and `read`'s full picture: the git
+    subprocess `read` runs per home for the last commit and the dirty count
+    (the plan/packet file walks are cheap by comparison), and — measured,
+    not assumed — the `turns` join `_sessions` uses for the exact last-said
+    text, which dwarfs it on a real index. Ordering and dating a unit needs
+    neither: the newest file mtime and `sessions.ended` are enough, so this
+    skips both rather than pay for what nothing here displays.
+    """
+    paths = [Path(p) for p in paths]
+    home_names = home_names or []
+    a = Activity()
+    if not paths:
+        return a
+    a.modified = max((_newest_mtime(p) or 0) for p in paths) or None
+    a.live = _live_for(paths, home_names, index)
+    a.sessions, a.last_session = _session_clock(paths, index, home_names)
+    return a
 
 
 def read(

@@ -185,3 +185,60 @@ class TestLivenessJoinsByCwd:
         )
 
         assert act.live_sessions == 1
+
+
+class TestPeek:
+    """`peek` is `list`'s cheap alternative to `read` — enough to sort and
+    date a unit without the per-home git subprocess calls `read` makes for
+    the last commit and the dirty count.
+    """
+
+    def test_it_reports_the_newest_file_mtime_without_touching_git(self, tmp_path):
+        home = tmp_path / "docs" / "widget"
+        home.mkdir(parents=True)
+        (home / "f.txt").write_text("x")
+
+        act = activity.peek([home], "widget", index=tmp_path / "absent.sqlite")
+
+        assert act.modified is not None
+        # Never ran a git subprocess, so there is nothing to report here —
+        # `status`'s facts, not `list`'s, are what would need it.
+        assert act.touched is None
+        assert act.dirty == 0
+
+    def test_it_reports_the_last_session_time(self, tmp_path):
+        import sqlite3
+
+        home = tmp_path / "code" / "widget"
+        home.mkdir(parents=True)
+        db_path = tmp_path / "index.sqlite"
+        db = sqlite3.connect(db_path)
+        db.execute(
+            "create table sessions (id text primary key, kind text not null, "
+            "agent text not null, machine text not null, cwd text, project text, "
+            "title text, name text, started integer, ended integer, "
+            "n_turns integer not null default 0, grade text not null default '', "
+            "source text not null default '', needs text, outcome text)"
+        )
+        db.execute("create table turns (session_id text, ts text, role text, text text)")
+        db.execute(
+            "insert into sessions (id, kind, agent, machine, cwd, started, ended) "
+            "values ('s1', 'main', 'claude', 'test', ?, 1000, 2000)",
+            (str(home),),
+        )
+        db.commit()
+        db.close()
+
+        act = activity.peek([home], "widget", index=db_path)
+
+        assert act.sessions == 1
+        assert act.last_session == 2
+
+    def test_no_index_and_no_files_is_ordinary_not_an_error(self, tmp_path):
+        home = tmp_path / "ghost"
+        home.mkdir()
+
+        act = activity.peek([home], "ghost", index=tmp_path / "absent.sqlite")
+
+        assert act.sessions == 0
+        assert act.last_session is None

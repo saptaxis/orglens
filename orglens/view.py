@@ -21,7 +21,7 @@ import re
 import time
 from pathlib import Path
 
-from orglens.activity import Activity
+from orglens.activity import Activity, recency
 
 CSS = """
 :root { color-scheme: light dark;
@@ -293,19 +293,6 @@ def _card(name: str, why: str | None, a: Activity) -> str:
     return "".join(out)
 
 
-def _recency(row: dict) -> int:
-    """Latest wins, across two independent clocks.
-
-    A tree edited an hour ago and a session that ran last week are both "recent"
-    for different reasons, and either can be the one you meant.
-    """
-    a = row["activity"]
-    if a.live:
-        return 1 << 62          # running now — nothing outranks it
-    spoke = (a.last_turn or {}).get("at") or a.last_session or 0
-    return max(a.modified or 0, spoke)
-
-
 def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
     """`groups` is [(label, [row, ...]), ...]; a row is what `cli.view` builds.
 
@@ -339,7 +326,7 @@ def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
         if not rows:
             continue
         body.append(f"<h2 class='grp'>{html.escape(label)}</h2>")
-        for row in sorted(rows, key=_recency, reverse=True):
+        for row in sorted(rows, key=lambda r: recency(r["activity"]), reverse=True):
             card = _card(row["name"], row["why"], row["activity"])
             body.append(
                 card.replace("<div class='card", "<details class='card", 1)

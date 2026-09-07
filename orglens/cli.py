@@ -65,6 +65,59 @@ def _heading(kind: str) -> str:
     return kind.replace("-", " ").capitalize() + "s"
 
 
+def _grouped(units: list, acts: dict) -> list[tuple[str, list]]:
+    """Units by kind, most-recent-first within each group, and the groups
+    themselves led by whichever holds the newest member.
+
+    The question `list` and `status` answer is "what was I last working on",
+    so alphabetical order is wrong at both levels: the kind that happens to
+    sort first has no reason to be the one with live work in it. `acts` maps
+    each unit to its `Activity` however it was obtained — `read` or the
+    cheaper `peek` — so one ordering serves both commands. A unit missing
+    from `acts` is not an error, just one with nothing to sort by.
+    """
+    by_kind: dict[str, list] = {}
+    for unit in units:
+        by_kind.setdefault(unit.kind, []).append(unit)
+    for members in by_kind.values():
+        members.sort(
+            key=lambda u: activity.recency(acts.get(u, activity.Activity())),
+            reverse=True,
+        )
+    ordered_kinds = sorted(
+        by_kind,
+        key=lambda k: activity.recency(acts.get(by_kind[k][0], activity.Activity())),
+        reverse=True,
+    )
+    return [(kind, by_kind[kind]) for kind in ordered_kinds]
+
+
+def _dated(act: activity.Activity) -> list[str]:
+    """Each clock that says something the others don't, labelled.
+
+    A bare `26d ago` never says which clock it is — commit, edit, or session
+    — and printing two labels for the same moment is noise, not information.
+    Mirrors the reasoning in `view.py`'s card: a clock within an hour of one
+    already shown adds nothing.
+    """
+    clocks = []
+    if act.touched:
+        clocks.append(("committed", act.touched))
+    if act.modified:
+        clocks.append(("edited", act.modified))
+    spoke = (act.last_turn or {}).get("at") or act.last_session
+    if spoke:
+        clocks.append(("session", spoke))
+    shown: list[tuple[str, int]] = []
+    out = []
+    for label, ts in clocks:
+        if any(abs(ts - t) <= 3600 for _, t in shown):
+            continue
+        shown.append((label, ts))
+        out.append(f"{label} {_ago(ts)} ago")
+    return out
+
+
 def _status_of(registry: Registry, unit):
     """The authored line for a unit, checked across every home in turn.
 
@@ -135,17 +188,23 @@ def list(kind_filter: str | None):
         click.echo("Nothing found.")
         return
 
-    by_kind: dict[str, list] = {}
-    for unit in units:
-        by_kind.setdefault(unit.kind, []).append(unit)
+    # `peek`, not `read`: the per-home git calls `read` makes for the last
+    # commit and the dirty count are the entire gap between `list` at 1.9s
+    # and `status` at 5.5s on the real tree, and sorting needs neither.
+    acts = {
+        unit: activity.peek(unit.paths, unit.name, home_names=[h.name for h in unit.homes])
+        for unit in units
+    }
 
-    for kind in sorted(by_kind):
+    for kind, members in _grouped(units, acts):
         click.echo(f"\n{_heading(kind)}:")
-        for unit in by_kind[kind]:
+        for unit in members:
             status = _status_of(registry, unit)
             shown = f"  ({status.text})" if status else ""
             within = f"  [{unit.part_of}]" if unit.part_of else ""
-            click.echo(f"  {unit.name}{shown}{within}")
+            dated = _dated(acts[unit])
+            when = f"  {' · '.join(dated)}" if dated else ""
+            click.echo(f"  {unit.name}{shown}{within}{when}")
 
 
 @cli.command()
@@ -154,18 +213,17 @@ def status():
     registry, _ = _load_registry()
     units = registry.units()
 
-    by_kind: dict[str, list] = {}
-    for unit in units:
-        by_kind.setdefault(unit.kind, []).append(unit)
+    acts = {
+        unit: activity.read(unit.paths, unit.name, home_names=[h.name for h in unit.homes])
+        for unit in units
+    }
 
     waiting = []
 
-    for kind in sorted(by_kind):
+    for kind, members in _grouped(units, acts):
         click.echo(f"\n{_heading(kind)}:")
-        for unit in by_kind[kind]:
-            act = activity.read(
-                unit.paths, unit.name, home_names=[h.name for h in unit.homes]
-            )
+        for unit in members:
+            act = acts[unit]
             facts = []
             # Counted from the grammar's own kinds, so a tree with different
             # documents reports on those instead of on nothing.
@@ -175,8 +233,7 @@ def status():
                     facts.append(
                         f"{len(held)} {artifact_kind}" + ("s" if len(held) > 1 else "")
                     )
-            if act.touched:
-                facts.append(f"{_ago(act.touched)} ago")
+            facts.extend(_dated(act))
             if act.sessions:
                 facts.append(f"{act.sessions} sessions")
             if act.packets:
