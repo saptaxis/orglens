@@ -1,5 +1,6 @@
 """The audit: what it reports, and the far longer list it deliberately does not."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,10 @@ def _declare(path: Path, unit: str, kind: str) -> None:
     (path / MARKER).write_text(
         f"home: {unit}\nunit: {unit}\nkind: {kind}\nhomes:\n  - {unit}\n"
     )
+
+
+def _run_git(*args: str, cwd: Path) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True)
 
 
 @pytest.fixture
@@ -250,20 +255,19 @@ def test_a_unique_unit_name_is_never_reported_as_duplicate(registry):
     assert report.duplicates == []
 
 
-def test_a_home_resolved_by_remote_tail_is_also_reported_as_weak(tmp_path, grammar):
+def test_a_unique_remote_tail_is_not_reported_as_weak(tmp_path, grammar):
     """The remote rung matches on the repository-name tail alone, discarding
-    the host and owner — an owner collision resolves silently and
-    confidently. `weak` used to flag only `how == 'name'`.
+    the host and owner — a real looseness, but only a live hazard when some
+    other scanned candidate shares that tail. On a tree where nothing else
+    has the same tail, there is no owner to collide with, so flagging it
+    unconditionally (as `weak` used to) reports a risk that is not present.
     """
-    import subprocess
-
     d = tmp_path / "renamed-locally"
     d.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=d, check=True)
-    subprocess.run(
-        ["git", "remote", "add", "origin",
-         "git@github.com:saptaxis/world-model-ladder.git"],
-        cwd=d, check=True,
+    _run_git("init", "-q", cwd=d)
+    _run_git(
+        "remote", "add", "origin",
+        "git@github.com:saptaxis/world-model-ladder.git", cwd=d,
     )
     (d / MARKER).write_text(
         "unit: world-model-ladder\nkind: project\n"
@@ -272,7 +276,35 @@ def test_a_home_resolved_by_remote_tail_is_also_reported_as_weak(tmp_path, gramm
 
     report = check.run(Registry([tmp_path], grammar))
 
-    assert ("world-model-ladder", "world-model-ladder", "remote") in report.weak
+    assert not any(row[2] == "remote" for row in report.weak)
+
+
+def test_a_remote_tail_shared_across_owners_is_reported_as_weak(tmp_path, grammar):
+    """Two repositories from different owners can share a repository-name
+    tail — the exact ambiguity the remote rung cannot see, since it discards
+    the owner. When one of them is a declared home, the collision is real
+    and `weak` must say so.
+    """
+    owner_a = tmp_path / "owner-a-checkout"
+    owner_a.mkdir()
+    _run_git("init", "-q", cwd=owner_a)
+    _run_git(
+        "remote", "add", "origin", "git@github.com:owner-a/thing.git", cwd=owner_a,
+    )
+    (owner_a / MARKER).write_text(
+        "unit: thing\nkind: project\nhomes:\n  - thing\n"
+    )
+
+    owner_b = tmp_path / "owner-b-checkout"
+    owner_b.mkdir()
+    _run_git("init", "-q", cwd=owner_b)
+    _run_git(
+        "remote", "add", "origin", "git@github.com:owner-b/thing.git", cwd=owner_b,
+    )
+
+    report = check.run(Registry([tmp_path], grammar))
+
+    assert ("thing", "thing", "remote") in report.weak
 
 
 def test_two_candidates_claiming_one_home_name_are_named(tmp_path, grammar):

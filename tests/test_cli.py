@@ -569,8 +569,44 @@ class TestCheckCommand:
         for a `remote`-rung home — it did not resolve by name, and renaming
         will not detach it — and it hides the real exposure: the remote rung
         matches only the repository-name tail, discarding the owner, so a
-        different owner's repo of the same name would resolve just as
-        confidently.
+        different owner's repo of the same name resolves just as
+        confidently. That exposure is only live when such a same-tail
+        repository actually exists among the scanned candidates, so this
+        gives it one — a second checkout under a different owner sharing
+        `world-model-ladder` as its repository-name tail.
+        """
+        d = tmp_path / "renamed-locally"
+        d.mkdir()
+        _git("init", "-q", cwd=d)
+        _git(
+            "remote", "add", "origin",
+            "git@github.com:saptaxis/world-model-ladder.git", cwd=d,
+        )
+        (d / MARKER).write_text(
+            "unit: world-model-ladder\nkind: project\n"
+            "homes:\n  - world-model-ladder\n"
+        )
+        rival = tmp_path / "other-owners-checkout"
+        rival.mkdir()
+        _git("init", "-q", cwd=rival)
+        _git(
+            "remote", "add", "origin",
+            "git@github.com:someone-else/world-model-ladder.git", cwd=rival,
+        )
+
+        result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [tmp_path]))
+
+        assert (
+            "world-model-ladder: home 'world-model-ladder' resolved by a git "
+            "remote's repository name only — an owner collision would resolve "
+            "silently" in result.output
+        )
+        assert "renaming it will detach" not in result.output
+
+    def test_a_unique_remote_tail_names_no_owner_collision(self, runner, tmp_path):
+        """The counterpart to the case above: with no other checkout sharing
+        the repository-name tail, there is no owner to collide with, so
+        `check` must stay quiet about it.
         """
         d = tmp_path / "renamed-locally"
         d.mkdir()
@@ -586,12 +622,7 @@ class TestCheckCommand:
 
         result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [tmp_path]))
 
-        assert (
-            "world-model-ladder: home 'world-model-ladder' resolved by a git "
-            "remote's repository name only — an owner collision would resolve "
-            "silently" in result.output
-        )
-        assert "renaming it will detach" not in result.output
+        assert "owner collision" not in result.output
 
     def test_duplicate_unit_names_are_reported_with_their_declaring_paths(
         self, runner, tmp_path

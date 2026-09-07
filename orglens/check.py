@@ -27,7 +27,7 @@ from difflib import get_close_matches
 from pathlib import Path
 
 from orglens import documents
-from orglens.homes import candidates_for
+from orglens.homes import Candidate, candidates_for
 from orglens.units import Registry
 
 
@@ -79,12 +79,17 @@ class Report:
     #: half declared.
     undeclared: list[Path] = field(default_factory=list)
     #: (unit, home, how) rows where identity came only from the directory
-    #: name or a git remote's repository-name tail. Both discard information
-    #: a marker would have kept — a rename detaches the first silently, an
-    #: owner collision resolves the second silently and confidently — which
-    #: is the one failure the ladder cannot prevent, only announce. `how` is
-    #: carried so the printer can say which of the two actually happened,
-    #: rather than always naming the first.
+    #: name, or from a git remote's repository-name tail while some other
+    #: scanned candidate shares that same tail. Both discard information a
+    #: marker would have kept, but they are not equally dangerous: a bare
+    #: name is fragile the moment that one directory is renamed, whether or
+    #: not anything collides today, so it is always reported. A remote tail
+    #: is only a hazard when an owner collision is actually live among the
+    #: candidates on disk — on a real tree every home resolves through the
+    #: remote rung, so reporting it unconditionally drowned the rows that
+    #: are an actual worklist in noise that fires whether or not the risk is
+    #: real. `how` is carried so the printer can say which of the two
+    #: actually happened, rather than always naming the first.
     weak: list[tuple[str, str, str]] = field(default_factory=list)
     #: Document kinds whose glob matches nothing anywhere. A mistyped glob
     #: finds no documents and raises nothing, so without this it fails
@@ -136,16 +141,34 @@ def run(registry: Registry) -> Report:
             if missing:
                 drifted.append(Drift(entity=unit.name, path=home, missing=missing))
 
-    # `name` discards everything but a directory's basename; `remote` discards
-    # the host and owner, keeping only the repository-name tail. Both can
-    # answer confidently for the wrong directory, which is exactly the
-    # failure `weak` exists to surface — the old filter caught only the
-    # first of the two.
+    # The same scan and the same `candidates_for` the collision report below
+    # uses — reused, not re-run, and cached per home name since several units
+    # can share one. A rung a home actually resolved through is guaranteed to
+    # be the rung `candidates_for` reports rivals at, since both walk the same
+    # `_rungs` over the same candidates.
+    scan = registry.scan()
+    rivals_by_home: dict[str, list[Candidate]] = {}
+
+    def rivals_for(home_name: str) -> list[Candidate]:
+        if home_name not in rivals_by_home:
+            rivals_by_home[home_name] = candidates_for(home_name, scan)
+        return rivals_by_home[home_name]
+
+    # `name` discards everything but a directory's basename, and is fragile
+    # regardless of what else is on disk today — renaming that one directory
+    # detaches it whether or not anything currently collides, so it is always
+    # weak. `remote` discards the host and owner, keeping only the
+    # repository-name tail, but that looseness is only a live hazard when
+    # some other scanned candidate actually shares the tail — on the real
+    # tree every home resolves through this rung, so flagging it
+    # unconditionally reported a risk that was present nowhere and drowned
+    # the rows that matter.
     weak = [
         (unit.name, home.name, home.how)
         for unit in units
         for home in unit.homes
-        if home.how in ("name", "remote")
+        if home.how == "name"
+        or (home.how == "remote" and len(rivals_for(home.name)) > 1)
     ]
 
     # `documents.find` matches a kind's container by name at any depth
@@ -167,7 +190,6 @@ def run(registry: Registry) -> Report:
         if len(paths) > 1
     ]
 
-    scan = registry.scan()
     seen: set[tuple[str, str]] = set()
     collisions = []
     for unit in units:
@@ -186,7 +208,7 @@ def run(registry: Registry) -> Report:
             if key in seen:
                 continue
             seen.add(key)
-            rivals = candidates_for(home.name, scan)
+            rivals = rivals_for(home.name)
             if len(rivals) > 1:
                 collisions.append(
                     Collision(
