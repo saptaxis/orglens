@@ -99,8 +99,9 @@ That routes to `~/.agents/skills` (the shared convention) and `~/.claude/skills`
 table is deliberate — a wrong skills path fails **silently**, with files present
 that never load.
 
-Four skills install: `orglens`, plus `interior-viz`, `interior-design-book`
-and `article` from the decks under `capabilities/`.
+Two skills install: `orglens`, plus `writing-workflow` from the decks under
+`capabilities/`. The private decks — and the skills that come with them — live
+in `orglens-extras` and are installed separately.
 
 The CLI installs a skill *copy*, not a symlink, so **re-run the command after
 editing a `SKILL.md`**. `references/grammar-reference.md` is generated — run
