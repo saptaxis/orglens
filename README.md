@@ -99,8 +99,9 @@ That routes to `~/.agents/skills` (the shared convention) and `~/.claude/skills`
 table is deliberate — a wrong skills path fails **silently**, with files present
 that never load.
 
-Two skills install: `orglens`, plus `writing-workflow` from the decks under
-`capabilities/`. Decks about work that cannot be published live in a second
+Two skills install: `orglens` and `orglens-adapt`. The `tutorial` deck under
+`capabilities/` ships roles rather than skills, so it installs nothing — it is
+run, not loaded. Decks about work that cannot be published live in a second
 repo, `orglens-extras`, installed by running the same command there — see
 [`capabilities/README.md`](capabilities/README.md).
 
@@ -110,11 +111,11 @@ editing a `SKILL.md`**. `references/grammar-reference.md` is generated — run
 before reinstalling, or the test suite will tell you it is stale.
 
 orglens was previously a Claude Code plugin. It is not any more: a plugin
-reaches exactly one agent, and these decks are built on the premise of dealing
-different passes to different model families. If a machine still carries the old
-registration, remove it before installing — plugin skills and directory skills
-**stack rather than override**, so the same skill arrives twice, namespaced and
-bare, with identical descriptions competing for one trigger.
+reaches exactly one agent, and a deck may deal different passes to different
+model families. If a machine still carries the old registration, remove it
+before installing — plugin skills and directory skills **stack rather than
+override**, so the same skill arrives twice, namespaced and bare, with
+identical descriptions competing for one trigger.
 
 ## Declaring a unit
 
@@ -252,9 +253,12 @@ launching on this machine, with `orglens start`, needs no config at all.
 Run the included demo to validate the full flow:
 
 ```bash
-./demo.sh          # interactive walkthrough (6 steps)
-./demo.sh 3        # run a single step
+DOCS_ROOT=~/path/to/your/docs ./demo.sh      # interactive walkthrough (6 steps)
+DOCS_ROOT=~/path/to/your/docs ./demo.sh 3    # run a single step
 ```
+
+`DOCS_ROOT` has no default on purpose: it is your documents tree, not a path
+the script can guess.
 
 Steps: install, configure, CLI commands, snapshot, skills, test suite.
 
@@ -272,7 +276,7 @@ orglens is part of a two-tool ecosystem:
 pip install pytest
 python -m pytest tests/ -v
 
-# Current: 540 tests
+# Current: 485 tests
 ```
 
 ## Status
