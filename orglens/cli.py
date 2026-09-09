@@ -26,6 +26,7 @@ from orglens.config import Config
 from orglens.declaration import MARKER
 from orglens.events import EVENTS_DIR, Event, append, attributions, this_machine
 from orglens.homes import Home
+from orglens.propose import Proposal, propose
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
 from orglens.units import Registry, Unit
@@ -309,6 +310,63 @@ def find(artifact_type: str, unit_name: str | None):
     for item in found:
         shown = _relative(item.path, registry.roots)
         click.echo(f"  {item.name:<45} [{item.unit}]  {shown}")
+
+
+def _write_declaration(proposal: Proposal, path: Path) -> None:
+    """Write the marker. Field order is the reading order, not alphabetical."""
+    lines = [f"unit: {proposal.unit}"]
+    if proposal.kind:
+        lines.append(f"kind: {proposal.kind}")
+    if proposal.part_of:
+        lines.append(f"part_of: {proposal.part_of}")
+    lines.append("homes:")
+    lines += [f"  - {h}" for h in proposal.homes]
+    (path / MARKER).write_text("\n".join(lines) + "\n")
+
+
+def _show(proposal: Proposal) -> None:
+    """Show the inference and what each part was inferred from.
+
+    A human confirming a guess needs to see the guess's reasoning, or they are
+    not confirming — they are trusting.
+    """
+    click.echo(f"  unit:    {proposal.unit}")
+    click.echo(f"  kind:    {proposal.kind or '(unknown)':<24}"
+               f"  {proposal.why.get('kind', '')}")
+    if proposal.part_of:
+        click.echo(f"  part_of: {proposal.part_of:<24}"
+                   f"  {proposal.why.get('part_of', '')}")
+    click.echo(f"  homes:   {proposal.why.get('homes', '')}")
+    for home in proposal.homes:
+        click.echo(f"    - {home}")
+
+
+@cli.command()
+@click.argument("path", type=click.Path(exists=True, file_okay=False))
+@click.option("--yes", is_flag=True, help="Write it without asking.")
+def declare(path: str, yes: bool):
+    """Declare an existing directory as a unit, from what it looks like.
+
+    Everything proposed comes from position, which is a good suggestion and a
+    bad fact — so it is shown with its reasoning and confirmed, never written
+    unattended.
+    """
+    registry, _ = _load_registry()
+    target = Path(path).expanduser().resolve()
+
+    if (target / MARKER).exists():
+        click.echo(f"{target} is already declared.", err=True)
+        sys.exit(1)
+
+    proposal = propose(target, registry)
+    _show(proposal)
+
+    if not yes and not click.confirm("write this?", default=True):
+        click.echo("nothing written.")
+        return
+
+    _write_declaration(proposal, target)
+    click.echo(f"declared {proposal.unit}")
 
 
 def _write_marker(target: Path, name: str, kind: str | None, part_of: str | None) -> None:
@@ -679,8 +737,20 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
     try:
         unit = registry.resolve(unit_name)
     except ValueError as exc:
-        click.echo(str(exc), err=True)
-        sys.exit(1)
+        match = next((c for c in registry.candidates() if c.name == unit_name), None)
+        if match is None:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+        # Starting work is when you actually know what the work is, so this is
+        # the cheapest moment to say so — rather than a chore left for later.
+        click.echo(f"{unit_name} is not declared. It looks like this:")
+        proposal = propose(match, registry)
+        _show(proposal)
+        if not click.confirm("declare it and start?", default=True):
+            return
+        _write_declaration(proposal, match)
+        registry = Registry(registry.roots, registry.grammar)   # re-sweep
+        unit = registry.resolve(unit_name)
 
     present = [h for h in unit.homes if h.path is not None]
     if not present:
