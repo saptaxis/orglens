@@ -45,17 +45,25 @@ def test_start_records_an_attribution(tmp_path, monkeypatch, two_root_tree_confi
 
 def test_start_in_a_unit_with_several_homes_requires_choosing(tmp_path, monkeypatch,
                                                               two_root_tree_config):
-    def fail_if_called(cwd, agent, prompt):
-        raise AssertionError("_launch must not be called when a home is ambiguous")
+    # `CliRunner.invoke` swallows an exception raised inside the command into
+    # `result.exception` rather than letting it reach pytest, so a stub that
+    # merely raises when called is inert — the test would stay green even if
+    # `start` regressed into calling `_launch` here. Recording the call and
+    # asserting on the record directly is what actually catches that.
+    called = []
 
-    monkeypatch.setattr("orglens.cli._launch", fail_if_called)
+    def record_call(cwd, agent, prompt):
+        called.append((cwd, agent, prompt))
+        return "should-not-be-reached"
+
+    monkeypatch.setattr("orglens.cli._launch", record_call)
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
 
     result = CliRunner().invoke(cli, ["start", "orglens"])
     # Two homes and no --home: the command says which are available rather
     # than picking one and being wrong quietly.
     assert "--home" in result.output
-    assert result.exception is None
+    assert called == []
 
 
 def test_dry_run_launches_nothing_and_records_nothing(tmp_path, monkeypatch,
