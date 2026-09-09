@@ -9,6 +9,8 @@ set -euo pipefail
 #   ./bootstrap --extras ~/code/orglens-extras   # include a private deck repo
 #   ./bootstrap --no-skills                  # install the tool, route no skills
 #   ./bootstrap --dry-run                    # print the commands, run nothing
+#   ./bootstrap --uninstall                  # remove the tool and its skills, keep data
+#   ./bootstrap --uninstall --yes            # ...without the confirmation prompt
 #
 # Assumes Python 3.11+. Idempotent: re-running it is how you pick up an edit.
 #
@@ -36,6 +38,8 @@ SHARE_DIR="${SHARE_DIR:-$HOME/.local/share}"
 EDITABLE=true
 SKIP_SKILLS=false
 DRY_RUN=false
+UNINSTALL=false
+ASSUME_YES=false
 EXTRAS=""
 
 while [ $# -gt 0 ]; do
@@ -43,6 +47,8 @@ while [ $# -gt 0 ]; do
         --pinned)     EDITABLE=false; shift ;;
         --no-skills)  SKIP_SKILLS=true; shift ;;
         --dry-run)    DRY_RUN=true; shift ;;
+        --uninstall)  UNINSTALL=true; shift ;;
+        --yes|-y)     ASSUME_YES=true; shift ;;
         --extras)     EXTRAS="${2:-}"; [ -n "$EXTRAS" ] || { echo "--extras needs a path" >&2; exit 1; }; shift 2 ;;
         -h|--help)    sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)            echo "unknown argument: $1" >&2; exit 1 ;;
@@ -91,6 +97,91 @@ route_skills() {
         ( cd "$repo" && npx skills add . -g -a '*' -y --full-depth )
     fi
 }
+
+# ── uninstall ──────────────────────────────────────────────────────────────
+#
+# `~/.agents/skills` is shared: skills from several repos, and ones installed
+# by hand, live side by side. `skills ls -g` reports where each one is
+# *installed*, never which repo put it there — so there is no provenance to
+# match on and this falls back to matching by name. That is why it shows the
+# list and asks first: a name collision would otherwise remove someone else's
+# skill silently.
+#
+# It never touches `~/.orglens` or `~/.config/orglens`. The event log there is
+# the one thing in this system that cannot be recomputed — an attribution
+# exists because a person said so, not because the filesystem could answer —
+# so removing it is a deliberate act, not a flag on an installer.
+
+skill_names_in() {
+    find "$1" -name SKILL.md -not -path '*/.git/*' -exec dirname {} \; 2>/dev/null \
+        | while read -r d; do basename "$d"; done | sort -u
+}
+
+plan_uninstall() {
+    # Prints the plan for one repo; sets PLAN_SKILLS for the caller.
+    local repo="$1" name="$2" venv="$SHARE_DIR/$2/venv"
+    local installed found=()
+    installed="$(cd "$HOME" && npx --yes skills ls -g 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' \
+        | awk '/^[a-zA-Z]/ {print $1}')"
+    while read -r sk; do
+        [ -n "$sk" ] || continue
+        printf '%s\n' "$installed" | grep -qx "$sk" && found+=("$sk")
+    done <<< "$(skill_names_in "$repo")"
+
+    echo "$name ($repo)"
+    if [ "$SKIP_SKILLS" = false ] && [ ${#found[@]} -gt 0 ]; then
+        echo "  skills (matched by name): ${found[*]}"
+    else
+        echo "  skills: none matched"
+    fi
+    [ -L "$LOCAL_BIN/$name" ] && echo "  unlink:  $LOCAL_BIN/$name"
+    [ -d "$venv" ]            && echo "  remove:  $venv"
+    PLAN_SKILLS="${found[*]:-}"
+    return 0
+}
+
+do_uninstall() {
+    local repo="$1" name="$2" skills="$3" venv="$SHARE_DIR/$2/venv"
+    if [ "$SKIP_SKILLS" = false ] && [ -n "$skills" ]; then
+        # shellcheck disable=SC2086
+        run npx --yes skills remove $skills -g
+    fi
+    [ -L "$LOCAL_BIN/$name" ] && run rm -f "$LOCAL_BIN/$name"
+    [ -d "$venv" ] && run rm -rf "$venv"
+    return 0
+}
+
+if [ "$UNINSTALL" = true ]; then
+    echo "orglens bootstrap — uninstall"
+    echo
+    plan_uninstall "$HERE" orglens;            ORGLENS_SKILLS="$PLAN_SKILLS"
+    EXTRAS_SKILLS=""
+    if [ -n "$EXTRAS" ] && [ -d "$EXTRAS" ]; then
+        echo
+        plan_uninstall "$EXTRAS" "$(basename "$EXTRAS")"; EXTRAS_SKILLS="$PLAN_SKILLS"
+    fi
+    echo
+    echo "kept, and not this script's to delete:"
+    echo "  ~/.orglens/events/      attributions — cannot be recomputed"
+    echo "  ~/.config/orglens/      your config"
+    echo
+
+    # One prompt for the whole operation. An uninstall that half-runs without
+    # asking is worse than one that refuses.
+    if [ "$DRY_RUN" = false ] && [ "$ASSUME_YES" = false ]; then
+        if [ ! -t 0 ]; then
+            echo "refusing: not a terminal. Re-run with --yes if you meant it." >&2
+            exit 1
+        fi
+        read -r -p "proceed? [y/N] " ans
+        case "$ans" in [yY]*) ;; *) echo "nothing done."; exit 0 ;; esac
+    fi
+
+    do_uninstall "$HERE" orglens "$ORGLENS_SKILLS"
+    [ -n "$EXTRAS" ] && [ -d "$EXTRAS" ] && do_uninstall "$EXTRAS" "$(basename "$EXTRAS")" "$EXTRAS_SKILLS"
+    echo "done."
+    exit 0
+fi
 
 echo "orglens bootstrap"
 echo

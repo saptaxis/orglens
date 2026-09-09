@@ -71,6 +71,17 @@ From the repo root — installs orglens into its own venv and routes the skills 
 
 A repo without a `pyproject.toml` is a deck repo: its skills are routed and nothing is pip-installed. scad installs itself from its own repo — the dependency runs one way, and `bootstrap` says so rather than reaching across.
 
+To undo it:
+
+```bash
+./bootstrap --uninstall                        # shows the plan, then asks
+./bootstrap --uninstall --extras ~/code/orglens-extras
+```
+
+It prints what it would remove and confirms once before doing any of it. `~/.agents/skills` is shared between repos and the skills tool records only where a skill is *installed*, never which repo put it there — so the match is by name, and you get to look at the list first.
+
+**It never deletes `~/.orglens/events/`.** An attribution exists because a person said so and cannot be recomputed, which makes it the one thing here that is not a cache. Removing it is a deliberate act, not a flag on an installer.
+
 ## Status
 
 Scaffold. Structure defined; **decks and operators harvested as they prove themselves on real problems — not designed up front.** The first domain deck was built before the pattern was named, and moved to `orglens-extras` when this repo went public — the anatomy it demonstrated is what stayed.
