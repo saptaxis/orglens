@@ -46,10 +46,16 @@ def test_the_shipped_definition_validates(workflow):
     assert validate_definition(workflow) == []
 
 
-def test_the_deck_shares_no_vocabulary_with_the_writing_deck(workflow):
+#: The writing deck's node names, recorded here rather than loaded. That deck
+#: moved to `orglens-extras`, and the claim below is about words, not files —
+#: a literal keeps the proof in this repo instead of making it depend on one
+#: the reader may not have. Update it if that deck's vocabulary changes.
+ANOTHER_DECKS_VOCABULARY = {"audit", "brief", "critique", "draft", "polish", "revise"}
+
+
+def test_the_deck_shares_no_vocabulary_with_another_deck(workflow):
     """The point of this deck. If these overlap it proves nothing."""
-    writing = load_workflow(DECK.parent / "writing" / "WORKFLOW.yaml")
-    assert set(workflow["nodes"]) & set(writing["nodes"]) == set()
+    assert set(workflow["nodes"]) & ANOTHER_DECKS_VOCABULARY == set()
 
 
 @pytest.mark.parametrize(
