@@ -93,11 +93,25 @@ def test_the_arrival_names_the_unit_and_all_its_homes(two_root_tree):
     text = _arrival(unit, chosen, two_root_tree)
 
     assert "orglens" in text
+
+    # Isolated to the homes-listing region ("  {name}  ->  {path}" lines
+    # under "Its homes are:") rather than searched for across the whole
+    # text. In this fixture the driver-document line further down names a
+    # path that happens to sit inside the second home's directory, so a
+    # whole-text search would pass even if the homes loop below printed only
+    # `chosen` — which is exactly the regression this test exists to catch.
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if "Its homes are:" in line)
+    end = start + 1
+    while end < len(lines) and lines[end].strip():
+        end += 1
+    homes_region = "\n".join(lines[start:end])
+
     # Every home, not only the one launched in — the point is that the session
     # learns the work is bigger than the directory it woke up in.
     for home in unit.homes:
         if home.path is not None:
-            assert str(home.path) in text
+            assert str(home.path) in homes_region
 
 
 def test_the_arrival_points_at_the_driver_document_when_there_is_one(two_root_tree):
