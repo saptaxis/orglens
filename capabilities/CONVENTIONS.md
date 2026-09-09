@@ -22,7 +22,7 @@ A **deck** is a self-contained, themed bundle you can move in or out of the bank
 1. `mkdir decks/<name>/`, write `DECK.md`.
 2. Drop cards under `operators/` and/or `skills/`; packs under `packs/` if it needs them.
 3. Keep domain state (binaries, large outputs) gitignored — version the skills and config, not the artifacts.
-4. `bootstrap` discovers the new deck and symlinks its cards to the harness locations. No central registry to edit.
+4. `./bootstrap` routes the new deck's cards to the harness locations, by walking the repo for `SKILL.md` files. No central registry to edit.
 
 ## Method deck vs domain deck
 
@@ -33,4 +33,4 @@ A **deck** is a self-contained, themed bundle you can move in or out of the bank
 | Taste lives in | packs (bias/voice) | the skill prompts + state model |
 | Example | `method` | `interior-design` |
 
-Both share this anatomy, the orglens grammar, and the bootstrap. That shared pattern — not any single deck's content — is orgdeck's durable asset.
+Both share this anatomy, the orglens grammar, and the bootstrap. That shared pattern — not any single deck's content — is the durable asset.

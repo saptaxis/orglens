@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# orglens bootstrap — set a machine up for orglens and its decks.
+#
+# Usage:
+#   ./bootstrap                              # editable install, plus this repo's skills
+#   ./bootstrap --pinned                     # non-editable, for a clean machine
+#   ./bootstrap --extras ~/code/orglens-extras   # include a private deck repo
+#   ./bootstrap --no-skills                  # install the tool, route no skills
+#   ./bootstrap --dry-run                    # print the commands, run nothing
+#
+# Assumes Python 3.11+. Idempotent: re-running it is how you pick up an edit.
+#
+# What it deliberately does NOT do:
+#
+#   Route skills itself. `npx skills add` owns the path table, because a wrong
+#   skills path fails silently — files present that never load. This script
+#   calls it once per repo and gets out of the way.
+#
+#   Install scad. scad ships its own `install.sh`, and the dependency runs one
+#   way: orglens consumes scad, never the reverse. If scad is missing this says
+#   so and carries on.
+#
+#   Distribute config templates. An earlier version of this file promised to
+#   symlink `configs/*` into `~/.scad`, `~/.config/orglens` and `~/.claude`.
+#   Those directories only ever held a `.gitkeep`.
+#
+# A repo without a `pyproject.toml` is a deck repo: its skills are routed and
+# nothing is pip-installed. That is how `orglens-extras` works today, and it
+# keeps working unchanged the day it grows a package.
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_BIN="${LOCAL_BIN:-$HOME/.local/bin}"
+SHARE_DIR="${SHARE_DIR:-$HOME/.local/share}"
+EDITABLE=true
+SKIP_SKILLS=false
+DRY_RUN=false
+EXTRAS=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --pinned)     EDITABLE=false; shift ;;
+        --no-skills)  SKIP_SKILLS=true; shift ;;
+        --dry-run)    DRY_RUN=true; shift ;;
+        --extras)     EXTRAS="${2:-}"; [ -n "$EXTRAS" ] || { echo "--extras needs a path" >&2; exit 1; }; shift 2 ;;
+        -h|--help)    sed -n '3,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)            echo "unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
+
+run() {
+    if [ "$DRY_RUN" = true ]; then printf '  would run: %s\n' "$*"; else "$@"; fi
+}
+
+install_package() {
+    # A tool repo gets its own venv, matching how scad installs itself, so the
+    # two never share a dependency resolution.
+    local repo="$1" name="$2" venv="$SHARE_DIR/$2/venv"
+    if [ ! -f "$repo/pyproject.toml" ]; then
+        echo "  $name: no pyproject.toml — deck repo, nothing to install"
+        return
+    fi
+    echo "  $name: installing into $venv$([ "$EDITABLE" = true ] && echo ' (editable)')"
+    [ -d "$venv" ] || run python3 -m venv "$venv"
+    if [ "$EDITABLE" = true ]; then
+        run "$venv/bin/pip" install -q -e "$repo"
+    else
+        run "$venv/bin/pip" install -q "$repo"
+    fi
+    run mkdir -p "$LOCAL_BIN"
+    local entry
+    for entry in "$venv"/bin/"$name"; do
+        [ -e "$entry" ] || continue
+        run ln -sfn "$entry" "$LOCAL_BIN/$name"
+        echo "  $name: linked $LOCAL_BIN/$name"
+    done
+}
+
+route_skills() {
+    local repo="$1" name="$2"
+    if [ "$SKIP_SKILLS" = true ]; then return; fi
+    if ! find "$repo" -name SKILL.md -not -path '*/.git/*' -print -quit | grep -q .; then
+        echo "  $name: no SKILL.md anywhere — nothing to route"
+        return
+    fi
+    echo "  $name: routing skills"
+    if [ "$DRY_RUN" = true ]; then
+        printf '  would run: (cd %s && npx skills add . -g -a "*" -y --full-depth)\n' "$repo"
+    else
+        ( cd "$repo" && npx skills add . -g -a '*' -y --full-depth )
+    fi
+}
+
+echo "orglens bootstrap"
+echo
+
+echo "orglens ($HERE)"
+install_package "$HERE" orglens
+route_skills "$HERE" orglens
+
+if [ -n "$EXTRAS" ]; then
+    echo
+    if [ -d "$EXTRAS" ]; then
+        name="$(basename "$EXTRAS")"
+        echo "$name ($EXTRAS)"
+        install_package "$EXTRAS" "$name"
+        route_skills "$EXTRAS" "$name"
+    else
+        echo "extras: $EXTRAS does not exist — skipped" >&2
+    fi
+fi
+
+echo
+if command -v scad >/dev/null 2>&1; then
+    echo "scad: present ($(command -v scad))"
+else
+    echo "scad: not installed. orglens works without it; \`orglens start\` and"
+    echo "      \`orglens config\` need it. Install it from its own repo:"
+    echo "      https://github.com/saptaxis/scoped-agent-dispatch"
+fi
+
+echo
+echo "done. \`orglens where\` will tell you which roots it can see."
