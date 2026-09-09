@@ -12,8 +12,8 @@ declaration does.
 
 from __future__ import annotations
 
+import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -717,24 +717,29 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         os.system(f"open '{path}'")
 
 
-SESSION_LINE = re.compile(r"\[scad\]\s+session:\s+(\S+)")
-
-
 def _session_id_from(output: str) -> str | None:
-    """The id scad printed, or None.
+    """The id scad's own launch record names, or None.
 
-    Read from what the launch said rather than by finding the newest file in
-    `~/.scad/launches/`. The id is the one thing orglens needs from scad, and
-    taking it from the output makes the join exact — a newest-file scan would
-    be a guess, and this system does not guess about attribution.
+    `--json` makes scad's own words the read: with the flag, its record's
+    `session_id` field is a contract it publishes, not prose we scrape a
+    line out of. The one thing orglens needs from scad is this id, and
+    reading it from the record makes the join exact — a newest-file scan of
+    `~/.scad/launches/` would be a guess, and this system does not guess
+    about attribution. A malformed or id-less record degrades to None here
+    rather than raising, same as every other derived source.
     """
-    found = SESSION_LINE.search(output)
-    return found.group(1) if found else None
+    try:
+        record = json.loads(output)
+    except ValueError:
+        return None
+    if not isinstance(record, dict):
+        return None
+    return record.get("session_id") or None
 
 
 def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
     """Start a session through scad and return the id it minted. Never raises."""
-    argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd)]
+    argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd), "--json"]
     if prompt:
         argv += ["--prompt", prompt]
     try:
@@ -744,7 +749,14 @@ def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
     click.echo(done.stdout, nl=False)
     if done.stderr:
         click.echo(done.stderr, nl=False, err=True)
-    return _session_id_from(done.stdout)
+    # A launch that yields no id exits non-zero — failure is signalled, not
+    # inferred from an absent field.
+    if done.returncode != 0:
+        return None
+    try:
+        return _session_id_from(done.stdout)
+    except ValueError:
+        return None
 
 
 def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:

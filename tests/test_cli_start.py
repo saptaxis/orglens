@@ -4,27 +4,34 @@ follow from it. See orglens/cli.py's `start` for the design sentence.
 
 from __future__ import annotations
 
+import json
+
 from click.testing import CliRunner
 
 from orglens import activity, events
 from orglens.cli import cli, _session_id_from
 
 
-def test_the_session_id_is_read_from_scads_own_output():
-    # scad prints `[scad] session: <id>` and writes a durable record. Reading
-    # the id it printed is exact; finding the newest launch file would be a
-    # guess.
-    out = (
-        "[scad] launching claude in scad-cl-1605\n"
-        "[scad] session: 55d76105-719a-4ee7-96f5-6a93de9c9cc1  pane scad-cl-1605:0.0\n"
-        "[scad] resume: cd /somewhere && claude --resume 55d76105-719a-4ee7-96f5-6a93de9c9cc1\n"
-    )
+def test_the_session_id_is_read_from_scads_own_record():
+    # `--json` makes scad emit its launch record as one JSON object. The id
+    # is a contract that record publishes, not prose to scrape a line out of.
+    out = json.dumps({
+        "agent": "claude",
+        "session_id": "55d76105-719a-4ee7-96f5-6a93de9c9cc1",
+        "cwd": "/somewhere",
+        "tmux": "scad-cl-1605:0.0",
+        "started": "2026-09-09T10:43:13Z",
+        "resume": "cd /somewhere && claude --resume 55d76105-719a-4ee7-96f5-6a93de9c9cc1",
+        "provenance": "minted",
+    })
     assert _session_id_from(out) == "55d76105-719a-4ee7-96f5-6a93de9c9cc1"
 
 
-def test_no_session_line_is_none_not_a_crash():
-    assert _session_id_from("[scad] something went sideways\n") is None
+def test_no_usable_id_is_none_not_a_crash():
+    assert _session_id_from("not json at all") is None
     assert _session_id_from("") is None
+    assert _session_id_from(json.dumps({"agent": "claude"})) is None
+    assert _session_id_from(json.dumps({"session_id": ""})) is None
 
 
 def test_start_records_an_attribution(tmp_path, monkeypatch, two_root_tree_config):
