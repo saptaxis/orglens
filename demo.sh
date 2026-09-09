@@ -2,11 +2,21 @@
 set -euo pipefail
 
 # orglens demo — walks through the full flow: install, config, CLI, snapshot, skills
-# Usage: ./demo.sh [--step N] [--docs-root PATH]
+# Usage: DOCS_ROOT=/path/to/docs ./demo.sh [step-number]
 
-DOCS_ROOT="${DOCS_ROOT:-/workspace/traitful-docs/docs}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEP="${1:-all}"
-VENV="${ORGLENS_VENV:-/workspace/orglens/.venv}"
+VENV="${ORGLENS_VENV:-$HERE/.venv}"
+
+# No default is possible here: this is your documents tree, not a path this
+# script can guess. It used to default to a container path from the machine
+# it was written on, which meant the demo silently found nothing anywhere else.
+DOCS_ROOT="${DOCS_ROOT:-}"
+if [ -z "$DOCS_ROOT" ]; then
+    echo "Set DOCS_ROOT to your documents tree, e.g.:" >&2
+    echo "    DOCS_ROOT=~/Documents/notes ./demo.sh" >&2
+    exit 1
+fi
 
 print_header() {
     echo ""

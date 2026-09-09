@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "orglens"
 version = "0.1.0"
-description = "Organizational lens for AI agents — topology, grammar, state"
+description = "Organizational lens for AI agents — units of work, and the sessions that belong to them"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
