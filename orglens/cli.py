@@ -746,7 +746,10 @@ def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.SubprocessError):
         return None
-    click.echo(done.stdout, nl=False)
+    # `--json` moved scad's human-facing output to stderr and made stdout the
+    # launch record alone, so echoing stdout here would print a JSON blob at
+    # the person running `orglens start` — the words they should see arrive
+    # on stderr now. Do not restore an echo of `done.stdout`.
     if done.stderr:
         click.echo(done.stderr, nl=False, err=True)
     # A launch that yields no id exits non-zero — failure is signalled, not

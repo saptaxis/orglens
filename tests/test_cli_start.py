@@ -5,11 +5,12 @@ follow from it. See orglens/cli.py's `start` for the design sentence.
 from __future__ import annotations
 
 import json
+import subprocess
 
 from click.testing import CliRunner
 
 from orglens import activity, events
-from orglens.cli import cli, _session_id_from
+from orglens.cli import cli, _launch, _session_id_from
 
 
 def test_the_session_id_is_read_from_scads_own_record():
@@ -32,6 +33,57 @@ def test_no_usable_id_is_none_not_a_crash():
     assert _session_id_from("") is None
     assert _session_id_from(json.dumps({"agent": "claude"})) is None
     assert _session_id_from(json.dumps({"session_id": ""})) is None
+
+
+def _fake_run(returncode, stdout, stderr=""):
+    def run(argv, capture_output, text, timeout):
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr=stderr)
+    return run
+
+
+def test_launch_returns_the_session_id_scad_minted(tmp_path, monkeypatch):
+    record = json.dumps({"session_id": "sess-launched", "agent": "claude"})
+    monkeypatch.setattr("orglens.cli.subprocess.run", _fake_run(0, record))
+
+    assert _launch(tmp_path, "claude", None) == "sess-launched"
+
+
+def test_a_nonzero_returncode_is_no_session_even_with_a_parseable_record(tmp_path,
+                                                                         monkeypatch):
+    # scad can exit non-zero while still printing a record shaped correctly
+    # enough to parse — the returncode, not the record's shape, is what says
+    # whether the launch succeeded. Delete the `returncode != 0` guard and
+    # this goes green on a session that never actually started.
+    record = json.dumps({"session_id": "sess-should-not-count", "agent": "claude"})
+    monkeypatch.setattr("orglens.cli.subprocess.run", _fake_run(1, record))
+
+    assert _launch(tmp_path, "claude", None) is None
+
+
+def test_stderr_reaches_the_caller_and_stdout_is_not_echoed(tmp_path, monkeypatch, capsys):
+    # Under `--json`, stdout is the machine record and stderr carries scad's
+    # human-facing words. Echoing stdout here would print the JSON blob at
+    # whoever ran `orglens start`; the fix is that only stderr is forwarded.
+    record = json.dumps({"session_id": "sess-quiet", "agent": "claude"})
+    human_line = "[scad] launched claude in scad-cl-1813:0.0"
+    monkeypatch.setattr("orglens.cli.subprocess.run",
+                        _fake_run(0, record, stderr=human_line))
+
+    _launch(tmp_path, "claude", None)
+
+    captured = capsys.readouterr()
+    assert "sess-quiet" not in captured.out
+    assert captured.out == ""
+    assert human_line in captured.err
+
+
+def test_a_subprocess_that_cannot_start_yields_no_session_not_a_crash(tmp_path,
+                                                                      monkeypatch):
+    def run(argv, capture_output, text, timeout):
+        raise OSError("scad not found")
+    monkeypatch.setattr("orglens.cli.subprocess.run", run)
+
+    assert _launch(tmp_path, "claude", None) is None
 
 
 def test_start_records_an_attribution(tmp_path, monkeypatch, two_root_tree_config):
