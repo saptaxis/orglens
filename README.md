@@ -270,7 +270,7 @@ orglens is part of a two-tool ecosystem:
 pip install pytest
 python -m pytest tests/ -v
 
-# Current: 462 tests
+# Current: 538 tests
 ```
 
 ## Status

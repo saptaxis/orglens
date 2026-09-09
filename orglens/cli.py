@@ -319,8 +319,16 @@ def find(artifact_type: str, unit_name: str | None):
 
 
 def _write_declaration(proposal: Proposal, path: Path) -> None:
-    """Write the marker. Field order is the reading order, not alphabetical."""
-    lines = [f"unit: {proposal.unit}"]
+    """Write the marker. Field order is the reading order, not alphabetical.
+
+    `home:` names this exact directory — `propose._home_name` already worked
+    out what it is, and writing that fact down promotes it to the `marker`
+    rung of `homes.resolve_home`'s ladder. Without it, the ladder re-derives
+    a name from scratch and can land this directory on the same name as a
+    same-named sibling code home, collapsing both proposed homes onto one
+    directory and losing the other.
+    """
+    lines = [f"home: {proposal.homes[0]}", f"unit: {proposal.unit}"]
     if proposal.kind:
         lines.append(f"kind: {proposal.kind}")
     if proposal.part_of:
@@ -831,7 +839,7 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         click.echo(f"{unit.name} has several homes — choose one with --home:")
         for h in present:
             click.echo(f"  {h.name:<40} {h.path}")
-        return
+        sys.exit(1)
 
     if dry_run:
         click.echo(f"would launch {agent} in {chosen.path} for {unit.name}")

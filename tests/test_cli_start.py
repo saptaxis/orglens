@@ -64,6 +64,7 @@ def test_start_in_a_unit_with_several_homes_requires_choosing(tmp_path, monkeypa
     # than picking one and being wrong quietly.
     assert "--home" in result.output
     assert called == []
+    assert result.exit_code == 1
 
 
 def test_dry_run_launches_nothing_and_records_nothing(tmp_path, monkeypatch,
