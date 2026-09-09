@@ -12,7 +12,9 @@ a loop-back edge, a terminal condition, and moving the cursor by hand.
 ## Set up
 
 ```bash
-export DECK=~/Dropbox/code/orglens/capabilities/decks/tutorial
+# Run this from the root of your orglens clone — $DECK must be absolute,
+# because step 0 moves you to /tmp.
+export DECK="$PWD/capabilities/decks/tutorial"
 export WF=$DECK/WORKFLOW.yaml
 
 mkdir -p /tmp/triage/bug-417 && cd /tmp/triage
