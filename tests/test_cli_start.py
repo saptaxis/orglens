@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from click.testing import CliRunner
 
-from orglens import events
+from orglens import activity, events
 from orglens.cli import cli, _session_id_from
 
 
@@ -134,3 +134,75 @@ def test_an_explicit_prompt_replaces_the_arrival(tmp_path, monkeypatch,
     CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens",
                              "--prompt", "just do the thing"])
     assert seen["prompt"] == "just do the thing"
+
+
+def test_list_passes_attributions_to_peek(tmp_path, monkeypatch, two_root_tree_config):
+    # An assertion made by `start` must reach `list`'s ordering, or recording
+    # it bought nothing. Spying on `activity.peek` sidesteps the real
+    # `~/.scad/index.sqlite` entirely and catches a missed call site directly,
+    # rather than via a count that could pass for the wrong reason.
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+    events.append(
+        events.Event("attributed", "orglens", "sess-abc", 100, "test"),
+        root=tmp_path / "events",
+    )
+
+    calls = []
+
+    def fake_peek(paths, name, index=None, home_names=None, attributed=None):
+        calls.append(attributed)
+        return activity.Activity()
+
+    monkeypatch.setattr("orglens.activity.peek", fake_peek)
+
+    result = CliRunner().invoke(cli, ["list"])
+    assert result.exit_code == 0
+    assert calls, "activity.peek was never called"
+    assert calls[0] == {"sess-abc": "orglens"}
+
+
+def test_status_passes_attributions_to_read(tmp_path, monkeypatch, two_root_tree_config):
+    # Same claim as `list`'s test, for `status`'s reader instead.
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+    events.append(
+        events.Event("attributed", "orglens", "sess-abc", 100, "test"),
+        root=tmp_path / "events",
+    )
+
+    calls = []
+
+    def fake_read(paths, name, index=None, home_names=None, attributed=None):
+        calls.append(attributed)
+        return activity.Activity()
+
+    monkeypatch.setattr("orglens.activity.read", fake_read)
+
+    result = CliRunner().invoke(cli, ["status"])
+    assert result.exit_code == 0
+    assert calls, "activity.read was never called"
+    assert calls[0] == {"sess-abc": "orglens"}
+
+
+def test_view_passes_attributions_to_read(tmp_path, monkeypatch, two_root_tree_config):
+    # Same claim again, for `view`'s reader. `--out` and `--no-open` keep this
+    # hermetic: nothing is written outside `tmp_path`, and nothing tries to
+    # shell out to `open`.
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+    events.append(
+        events.Event("attributed", "orglens", "sess-abc", 100, "test"),
+        root=tmp_path / "events",
+    )
+
+    calls = []
+
+    def fake_read(paths, name, index=None, home_names=None, attributed=None):
+        calls.append(attributed)
+        return activity.Activity()
+
+    monkeypatch.setattr("orglens.activity.read", fake_read)
+
+    out = tmp_path / "view.html"
+    result = CliRunner().invoke(cli, ["view", "--out", str(out), "--no-open"])
+    assert result.exit_code == 0
+    assert calls, "activity.read was never called"
+    assert calls[0] == {"sess-abc": "orglens"}

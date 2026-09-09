@@ -24,7 +24,7 @@ import click
 from orglens import activity, check as check_module, documents, reference, view
 from orglens.config import Config
 from orglens.declaration import MARKER
-from orglens.events import EVENTS_DIR, Event, append, this_machine
+from orglens.events import EVENTS_DIR, Event, append, attributions, this_machine
 from orglens.homes import Home
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
@@ -199,11 +199,17 @@ def list(kind_filter: str | None):
         click.echo("Nothing found.")
         return
 
+    # Read once, not once per unit: `attributions` walks every shard, and a
+    # loop over thirty units would re-read the whole log thirty times for the
+    # same answer.
+    attributed = attributions(root=EVENTS_DIR)
+
     # `peek`, not `read`: the per-home git calls `read` makes for the last
     # commit and the dirty count are the entire gap between `list` at 1.9s
     # and `status` at 5.5s on the real tree, and sorting needs neither.
     acts = {
-        unit: activity.peek(unit.paths, unit.name, home_names=[h.name for h in unit.homes])
+        unit: activity.peek(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
+                             attributed=attributed)
         for unit in units
     }
 
@@ -224,8 +230,14 @@ def status():
     registry, _ = _load_registry()
     units = registry.units()
 
+    # Read once, not once per unit: `attributions` walks every shard, and a
+    # loop over thirty units would re-read the whole log thirty times for the
+    # same answer.
+    attributed = attributions(root=EVENTS_DIR)
+
     acts = {
-        unit: activity.read(unit.paths, unit.name, home_names=[h.name for h in unit.homes])
+        unit: activity.read(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
+                             attributed=attributed)
         for unit in units
     }
 
@@ -539,6 +551,11 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
     ]
 
+    # Read once, not once per unit: `attributions` walks every shard, and a
+    # loop over thirty units would re-read the whole log thirty times for the
+    # same answer.
+    attributed = attributions(root=EVENTS_DIR)
+
     groups = []
     for kind in sorted(by_kind):
         rows = []
@@ -552,6 +569,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
                     "activity": activity.read(
                         unit.paths, unit.name,
                         home_names=[h.name for h in unit.homes],
+                        attributed=attributed,
                     ),
                     "artifacts": [
                         (heading, documents.find(registry, artifact_kind, unit))
