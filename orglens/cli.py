@@ -13,6 +13,8 @@ declaration does.
 from __future__ import annotations
 
 import os
+import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -22,6 +24,7 @@ import click
 from orglens import activity, check as check_module, documents, reference, view
 from orglens.config import Config
 from orglens.declaration import MARKER
+from orglens.events import EVENTS_DIR, Event, append, this_machine
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
 from orglens.units import Registry
@@ -567,3 +570,95 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
     click.echo(f"wrote {path}")
     if do_open:
         os.system(f"open '{path}'")
+
+
+SESSION_LINE = re.compile(r"\[scad\]\s+session:\s+(\S+)")
+
+
+def _session_id_from(output: str) -> str | None:
+    """The id scad printed, or None.
+
+    Read from what the launch said rather than by finding the newest file in
+    `~/.scad/launches/`. The id is the one thing orglens needs from scad, and
+    taking it from the output makes the join exact — a newest-file scan would
+    be a guess, and this system does not guess about attribution.
+    """
+    found = SESSION_LINE.search(output)
+    return found.group(1) if found else None
+
+
+def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
+    """Start a session through scad and return the id it minted. Never raises."""
+    argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd)]
+    if prompt:
+        argv += ["--prompt", prompt]
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    click.echo(done.stdout, nl=False)
+    if done.stderr:
+        click.echo(done.stderr, nl=False, err=True)
+    return _session_id_from(done.stdout)
+
+
+@cli.command()
+@click.argument("unit_name")
+@click.option("--home", default=None, help="Which home to work in.")
+@click.option("--agent", default="claude",
+              type=click.Choice(["claude", "codex", "kimi"]),
+              help="Which agent family to launch.")
+@click.option("--prompt", default=None, help="The session's first turn.")
+@click.option("--dry-run", is_flag=True, help="Say what would happen; launch nothing.")
+def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
+          dry_run: bool):
+    """Start a session for a unit, attributed before its first turn.
+
+    The unit is what you asked for and the working directory is a consequence,
+    which inverts the problem rather than solving it: nothing has to work out
+    afterwards which unit a session was for. Sessions started any other way are
+    still attributed by containment where that is unambiguous, and sit
+    unattributed where it is not.
+    """
+    registry, _ = _load_registry()
+    try:
+        unit = registry.resolve(unit_name)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+    present = [h for h in unit.homes if h.path is not None]
+    if not present:
+        click.echo(f"{unit.name} has no home on this machine.", err=True)
+        sys.exit(1)
+
+    if home is not None:
+        chosen = next((h for h in present if h.name == home), None)
+        if chosen is None:
+            click.echo(f"Unknown home '{home}'. {unit.name} has: "
+                       + ", ".join(h.name for h in present), err=True)
+            sys.exit(1)
+    elif len(present) == 1:
+        chosen = present[0]
+    else:
+        # Which home to work in is a choice about the task, not about the
+        # unit, so it is not orglens's to make. Naming them is the answer.
+        click.echo(f"{unit.name} has several homes — choose one with --home:")
+        for h in present:
+            click.echo(f"  {h.name:<40} {h.path}")
+        return
+
+    if dry_run:
+        click.echo(f"would launch {agent} in {chosen.path} for {unit.name}")
+        return
+
+    session = _launch(chosen.path, agent, prompt)
+    if session is None:
+        click.echo("scad returned no session id — the session is not attributed. "
+                   "Attribute it later, or start it again through orglens.")
+        return
+
+    append(Event(kind="attributed", unit=unit.name, session=session,
+                 at=int(time.time()), machine=this_machine()),
+           root=EVENTS_DIR)
+    click.echo(f"attributed session {session} to {unit.name}")

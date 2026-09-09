@@ -107,3 +107,18 @@ def two_root_tree(tmp_path, grammar):
     (docs / "projects" / "reelmill").mkdir(parents=True)
 
     return Registry([docs, code], grammar)
+
+
+@pytest.fixture
+def two_root_tree_config(tmp_path, two_root_tree, monkeypatch):
+    """Point the CLI at the two-root fixture tree.
+
+    `two_root_tree` builds a Registry directly; the CLI cannot be handed one,
+    so this writes the config that produces the same roots and exports it.
+    """
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "roots:\n" + "".join(f"  - {r}\n" for r in two_root_tree.roots)
+    )
+    monkeypatch.setenv("ORGLENS_CONFIG", str(config))
+    return two_root_tree
