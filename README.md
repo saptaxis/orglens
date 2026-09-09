@@ -77,10 +77,13 @@ write it.
 | `orglens status` | Where every unit stands, across all of its homes |
 | `orglens find KIND [UNIT]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own |
 | `orglens new PATH [--kind KIND] [--part-of UNIT]` | Create a unit: a directory, and the declaration that names it |
+| `orglens declare PATH [--yes]` | Declare an existing directory as a unit, proposed from what it looks like |
 | `orglens check` | Report where the tree has drifted. Reports only — never gates |
 | `orglens snapshot [--stdout]` | Generate a topology snapshot (markdown) |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
 | `orglens view` | Render where everything stands as a page, and open it |
+| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--dry-run]` | Start a session for a unit, attributed before its first turn |
+| `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 
 ## Skills
 
@@ -198,6 +201,50 @@ moving the line into whichever document you actually maintain works. It is
 always reported with its age — an authored sentence can go stale, and a dated
 quote is honest where a bare claim is not.
 
+## How Sessions Get Attributed
+
+"Sessions join by where they ran," above, answers for work done *inside* a
+home and cannot answer for work done *above* one. At the root of a documents
+repository with sixteen homes sitting below it, containment has nothing to
+choose between; on the real tree, 108 sessions belong to no unit for exactly
+that reason.
+
+`orglens start UNIT` inverts the order rather than trying to guess it better
+afterward: it records the unit *before* the session's first turn, so the
+working directory becomes a consequence of that choice, not the evidence for
+it. It picks one of the unit's homes — asking, with `--home`, when more than
+one resolves — shells out to `scad session launch`, reads back the id scad
+printed, and appends one `attributed` event to `~/.orglens/events/`. The
+session also arrives already knowing what it is: unless you pass `--prompt`,
+its first turn names the unit, lists every home, and points at wherever the
+unit's status is authored, because on this machine every home is already
+reachable — what a session lacks at the start is not access but knowledge.
+
+Nothing here is guessed. A session is attributed because someone said so at
+the moment it started, or because containment gives exactly one answer once
+it's running. Sessions started any other way keep being attributed by
+containment where that is unambiguous, and sit **unattributed** where it is
+not — unattributed is a valid resting state, not a failure to fix.
+
+`orglens start` folds in declaration: name a unit that has not been declared
+yet, and it proposes one from what the directory looks like — kind from
+where it sits, `part_of` from what contains it, a home from a same-named
+repository — shows the reasoning behind each guess, and asks, because
+starting work is the moment you actually know what the work is. `orglens
+declare PATH` runs the same proposal on its own, for naming a directory
+without starting anything in it.
+
+`orglens config UNIT` has a second job the rest of this tree deliberately
+avoids: it writes a file. Every other command here only *reads* scad's
+records — `~/.scad/index.sqlite`, `~/.scad/launches/` — because scad owns
+what happened and orglens only points at it. `config` is the one exception,
+and it is narrow: it renders a unit's homes into the `repos:` block of the
+config a container launcher reads, because that block *is* a unit's homes
+with paths attached, and maintaining both by hand is the duplication this
+model exists to delete. Homes absent from this machine are left out — a
+container cannot mount what is not here. This is the container lane only;
+launching on this machine, with `orglens start`, needs no config at all.
+
 ## Demo
 
 Run the included demo to validate the full flow:
@@ -228,14 +275,18 @@ python -m pytest tests/ -v
 
 ## Status
 
-- **v1.2** (current): Units of work — a unit declares its homes and can span
-  several repositories; documents belong by containment; sessions join by where
-  they ran. Replaces discovery by folder position
+- **v1.3** (current): Attribution moves to the moment a session starts.
+  `orglens start` records the unit before the first turn and launches through
+  scad; `orglens declare` proposes a unit from what a directory looks like;
+  `orglens config` renders a unit's homes into the config a container reads.
+  Containment still decides where it can, and reports unattributed where it
+  cannot
+- **v1.2**: Units of work — a unit declares its homes and can span several
+  repositories; documents belong by containment; sessions join by where they
+  ran. Replaces discovery by folder position
 - **v1.1**: Grammar, state aggregation, snapshot, CLI, skills shipped through the
   shared agent-skills convention, demo script
-- **planned**: generating a scad workspace config from a unit's homes, so the
-  same list is not maintained twice; an event log for attributing the sessions
-  containment cannot decide; org-mode backend for structured state tracking
+- **planned**: org-mode backend for structured state tracking
 
 ## License
 
