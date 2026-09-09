@@ -26,7 +26,7 @@ from orglens.config import Config
 from orglens.declaration import MARKER
 from orglens.events import EVENTS_DIR, Event, append, attributions, this_machine
 from orglens.homes import Home
-from orglens.propose import Proposal, propose
+from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
@@ -319,23 +319,15 @@ def find(artifact_type: str, unit_name: str | None):
 
 
 def _write_declaration(proposal: Proposal, path: Path) -> None:
-    """Write the marker. Field order is the reading order, not alphabetical.
-
-    `home:` names this exact directory — `propose._home_name` already worked
-    out what it is, and writing that fact down promotes it to the `marker`
-    rung of `homes.resolve_home`'s ladder. Without it, the ladder re-derives
-    a name from scratch and can land this directory on the same name as a
-    same-named sibling code home, collapsing both proposed homes onto one
-    directory and losing the other.
-    """
-    lines = [f"home: {proposal.homes[0]}", f"unit: {proposal.unit}"]
-    if proposal.kind:
-        lines.append(f"kind: {proposal.kind}")
-    if proposal.part_of:
-        lines.append(f"part_of: {proposal.part_of}")
-    lines.append("homes:")
-    lines += [f"  - {h}" for h in proposal.homes]
-    (path / MARKER).write_text("\n".join(lines) + "\n")
+    """A confirmed proposal, written as a marker."""
+    _write_marker(
+        path,
+        home=proposal.homes[0],
+        unit=proposal.unit,
+        kind=proposal.kind,
+        part_of=proposal.part_of,
+        homes=proposal.homes,
+    )
 
 
 def _show(proposal: Proposal) -> None:
@@ -383,14 +375,33 @@ def declare(path: str, yes: bool):
     click.echo(f"declared {proposal.unit}")
 
 
-def _write_marker(target: Path, name: str, kind: str | None, part_of: str | None) -> None:
-    lines = [f"home: {name}", f"unit: {name}"]
+def _write_marker(
+    target: Path,
+    *,
+    home: str,
+    unit: str,
+    kind: str | None,
+    part_of: str | None,
+    homes: tuple[str, ...],
+) -> None:
+    """Write the marker. Field order is the reading order, not alphabetical.
+
+    `home:` names this exact directory, and writing that fact down promotes it
+    to the `marker` rung of `homes.resolve_home`'s ladder. Without it the
+    ladder re-derives a name from scratch, and can land this directory on the
+    same name as a same-named sibling home — collapsing two homes onto one
+    directory and losing the other.
+
+    One writer for both `new` and `declare`, because they write the same file
+    format and had drifted into two shapes.
+    """
+    lines = [f"home: {home}", f"unit: {unit}"]
     if kind:
         lines.append(f"kind: {kind}")
     if part_of:
         lines.append(f"part_of: {part_of}")
     lines.append("homes:")
-    lines.append(f"  - {name}")
+    lines += [f"  - {h}" for h in homes]
     (target / MARKER).write_text("\n".join(lines) + "\n")
 
 
@@ -398,12 +409,19 @@ def _write_marker(target: Path, name: str, kind: str | None, part_of: str | None
 @click.argument("path")
 @click.option("--kind", default=None, help="Label for this unit")
 @click.option("--part-of", default=None, help="The unit this is part of")
-def new(path: str, kind: str | None, part_of: str | None):
+@click.option("--home", "extra_homes", multiple=True,
+              help="Another home this unit lives in. Repeatable.")
+def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str, ...]):
     """Create a unit: a directory, and the declaration that names it.
 
     Position no longer places anything — the path given is exactly where the
-    directory lands. Its one home takes the directory's own name; more homes
-    are a `.orglens.yml` edit away.
+    directory lands.
+
+    The directory names itself the way `declare` would — repository-relative,
+    so a unit inside a checkout is `<repo>/<path within it>`. Pass `--home`
+    for each further place the work lives; a unit findable from both its code
+    and its documents is the shape the model is for, and it should not need a
+    hand-edit afterwards.
     """
     registry, config = _load_registry()
     target = Path(path).expanduser()
@@ -413,7 +431,12 @@ def new(path: str, kind: str | None, part_of: str | None):
         sys.exit(1)
 
     target.mkdir(parents=True)
-    _write_marker(target, target.name, kind, part_of)
+    # Derived after the directory exists: the name depends on the repository
+    # it landed in, which is a fact about the filesystem, not the argument.
+    mine = home_name(target.resolve(), registry)
+    homes = (mine,) + tuple(h for h in extra_homes if h != mine)
+    _write_marker(target, home=mine, unit=target.name, kind=kind,
+                  part_of=part_of, homes=homes)
 
     click.echo(f"Created {kind or 'unit'}: {target}")
     if not _under_a_root(target, registry.roots):

@@ -39,7 +39,7 @@ def _kind_for(path: Path, grammar: Grammar) -> tuple[str, str]:
     return "", "nothing in the grammar matches this position — say which kind"
 
 
-def _home_name(path: Path, registry: Registry) -> str:
+def home_name(path: Path, registry: Registry) -> str:
     """This directory as a home name: the repository it is in, plus the rest.
 
     An already-declared home name for this exact directory wins — that is a
@@ -73,7 +73,7 @@ def propose(path: Path, registry: Registry) -> Proposal:
     if part_of:
         why["part_of"] = f"it sits inside {part_of}'s home"
 
-    homes = [_home_name(path, registry)]
+    homes = [home_name(path, registry)]
     why["homes"] = "the folder itself"
 
     # A repository named after this folder is almost always its code home.

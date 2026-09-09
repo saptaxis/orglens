@@ -76,7 +76,7 @@ write it.
 | `orglens list [--type KIND]` | List all units, grouped by declared kind |
 | `orglens status` | Where every unit stands, across all of its homes |
 | `orglens find KIND [UNIT]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own |
-| `orglens new PATH [--kind KIND] [--part-of UNIT]` | Create a unit: a directory, and the declaration that names it |
+| `orglens new PATH [--kind KIND] [--part-of UNIT] [--home NAME]` | Create a unit: a directory, and the declaration that names it. `--home` is repeatable |
 | `orglens declare PATH [--yes]` | Declare an existing directory as a unit, proposed from what it looks like |
 | `orglens check` | Report where the tree has drifted. Reports only — never gates |
 | `orglens snapshot [--stdout]` | Generate a topology snapshot (markdown) |
@@ -276,7 +276,7 @@ orglens is part of a two-tool ecosystem:
 pip install pytest
 python -m pytest tests/ -v
 
-# Current: 485 tests
+# Current: 488 tests
 ```
 
 ## Status

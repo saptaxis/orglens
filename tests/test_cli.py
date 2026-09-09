@@ -10,6 +10,8 @@ from click.testing import CliRunner
 
 from orglens.activity import Activity
 from orglens.cli import _grouped, cli
+import yaml
+
 from orglens.declaration import MARKER
 from orglens.homes import Home
 from orglens.units import Unit
@@ -380,6 +382,59 @@ class TestNewCommand:
 
         result = runner.invoke(cli, ["where", "test-tool"], env=cli_env)
         assert "unit:   test-tool  (project)" in result.output
+
+    def test_a_unit_can_be_born_with_more_than_one_home(
+        self, runner, cli_env, units_tree
+    ):
+        """The shape the model is for: findable from code or from documents.
+
+        Before `--home`, `new` could only emit a single home named after its
+        own directory, so every multi-home unit began life in the wrong shape
+        and needed a hand-edit. Every hand-written declaration in the real
+        tree carries two.
+        """
+        (units_tree / ".git").mkdir(exist_ok=True)
+        target = units_tree / "projects" / "freight-retrieval"
+        result = runner.invoke(
+            cli,
+            ["new", str(target), "--kind", "project", "--home", "freight-retrieval"],
+            env=cli_env,
+        )
+
+        assert result.exit_code == 0
+        written = yaml.safe_load((target / MARKER).read_text())
+        assert written["homes"] == ["docs/projects/freight-retrieval", "freight-retrieval"]
+
+    def test_the_declaring_home_is_named_the_way_declare_would_name_it(
+        self, runner, cli_env, units_tree
+    ):
+        """`home:` is not decoration — it pins this directory to the `marker`
+        rung, the strongest, so a sibling sharing its leaf name cannot shadow
+        it. That only holds if the name is the repository-relative one, which
+        is what `propose.home_name` computes and what `declare` writes.
+        """
+        (units_tree / ".git").mkdir(exist_ok=True)
+        target = units_tree / "projects" / "freight-retrieval"
+        runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+
+        written = yaml.safe_load((target / MARKER).read_text())
+        assert written["home"] == "docs/projects/freight-retrieval"
+        assert written["home"] == written["homes"][0]
+
+    def test_a_home_already_the_declaring_one_is_not_listed_twice(
+        self, runner, cli_env, units_tree
+    ):
+        """Outside a repository the directory names itself, so passing that
+        same name to `--home` would otherwise duplicate it."""
+        target = units_tree / "projects" / "freight-retrieval"
+        runner.invoke(
+            cli,
+            ["new", str(target), "--kind", "project", "--home", "freight-retrieval"],
+            env=cli_env,
+        )
+
+        written = yaml.safe_load((target / MARKER).read_text())
+        assert written["homes"] == ["freight-retrieval"]
 
     def test_part_of_is_recorded(self, runner, cli_env, units_tree):
         target = units_tree / "research" / "physics-priors" / "expt-2-world-model"
