@@ -29,8 +29,9 @@ ENGINE = ROOT / "orglens"
 #: The vocabulary face. `activity.py` and `view.py` are exempt: they derive what
 #: is true rather than declaring what may exist, and they were built after the
 #: drift they would otherwise be blamed for. `workflow/` has its own check.
-FACE = ("cli.py", "check.py", "config.py", "grammar.py", "reference.py",
-        "snapshot.py", "state.py", "topology.py")
+FACE = ("cli.py", "check.py", "config.py", "declaration.py", "documents.py",
+        "grammar.py", "homes.py", "reference.py", "snapshot.py", "state.py",
+        "units.py")
 
 
 def default_grammar() -> Grammar:

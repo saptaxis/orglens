@@ -12,7 +12,7 @@
 
 **The dependency arrow points one way: `orgdeck` → the public tools, never the reverse.** scad and orglens never know orgdeck exists; orgdeck is invoked *through* them and stays independently discardable. Nothing personal ever leaks into the public repos.
 
-orgdeck is an **orglens-governed content tree** — the same relationship [`traitful-docs`](../../traitful-code/traitful-docs) has with orglens. orglens (public engine) reads orgdeck's private grammar (`.orglens.yml`) and content. The lens stays public; what it looks into is private.
+orgdeck is an **orglens-governed content tree** — the same relationship [`traitful-docs`](../../traitful-code/traitful-docs) has with orglens. orglens (public engine) reads orgdeck's private grammar (`.orglens-grammar.yml`) and content. The lens stays public; what it looks into is private. A **grammar** describes an entire tree; a **declaration** (`.orglens.yml`) describes one unit within it.
 
 ## The model: bank → deck → card
 
@@ -39,7 +39,7 @@ Parameterized by **bias-packs** (breadth-framer's anti-default lenses, per domai
 ```
 orgdeck/
   bootstrap              # install everything on a new macOS/Linux machine
-  .orglens.yml           # grammar: deck, operator, pack, agent as artifact types
+  .orglens-grammar.yml   # grammar: deck, operator, pack, agent as artifact types
   CONVENTIONS.md         # what a deck is — the anatomy to copy when adding one
   configs/               # ecosystem-wide (not per-deck)
     scad/                *.yml project configs

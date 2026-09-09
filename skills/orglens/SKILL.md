@@ -50,21 +50,23 @@ orglens list                          # everything in the tree
 orglens list --type project           # filtered by kind
 orglens status                        # where everything stands
 orglens find plan                     # documents of a kind
-orglens find plan <entity>            # scoped to an entity and its children
+orglens find plan <unit>              # scoped to just that unit — a nested
+                                       # unit's own home is excluded, not included
 ```
 
 **Creation:**
 
 ```bash
-orglens new project <name>
-orglens new experiment <full-name> --parent <entity>
+orglens new <path> --kind project
+orglens new <path> --kind experiment --part-of <unit>
 ```
 
-`new` creates entities only, and the name is given in full — nothing is
-numbered for you. **Write documents yourself**, following the naming
-description in the reference. Nothing parses a filename, so a name that
-departs from the convention is still found; the convention is for humans
-reading a directory listing.
+`new` creates a unit: a directory, and the declaration that names it. The
+path given is exactly where it lands — nothing is numbered for you.
+**Write documents yourself**, following the naming description in the
+reference. Nothing parses a filename, so a name that departs from the
+convention is still found; the convention is for humans reading a directory
+listing.
 
 **Audit:**
 

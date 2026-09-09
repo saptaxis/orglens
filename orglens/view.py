@@ -21,7 +21,7 @@ import re
 import time
 from pathlib import Path
 
-from orglens.activity import Activity
+from orglens.activity import Activity, recency
 
 CSS = """
 :root { color-scheme: light dark;
@@ -123,23 +123,33 @@ def _facts(a: Activity) -> str:
     return " · ".join(bits)
 
 
-def doc_url(path: Path, docs_root: Path, base: str) -> str:
+def doc_url(path: Path, roots: Path | list[Path], base: str) -> str:
     """The served URL for a path in the tree.
 
     mkdocs with `directory_urls` — the default — publishes `a/b.md` at `/a/b/`
     and `a/index.md` at `/a/`. The `docs/` prefix is the serving root and does
     not appear in the URL.
+
+    A unit can span more than one root, so every root is tried in turn and
+    the first that contains the path wins — a document under the second root
+    must not silently fall back to a `file://` link just because only the
+    first was checked. Both sides are resolved before comparing. A bare
+    `Path` is still accepted, for the one-root case.
     """
-    try:
-        rel = Path(path).resolve().relative_to(Path(docs_root).resolve())
-    except ValueError:
-        return "file://" + str(path)
-    if rel.suffix == ".md":
-        rel = rel.with_suffix("")
-        if rel.name == "index":
-            rel = rel.parent
-    tail = "" if str(rel) == "." else f"{rel}/"
-    return f"{base}/{tail}"
+    candidates = [roots] if isinstance(roots, Path) else list(roots)
+    resolved = Path(path).resolve()
+    for root in candidates:
+        try:
+            rel = resolved.relative_to(Path(root).resolve())
+        except ValueError:
+            continue
+        if rel.suffix == ".md":
+            rel = rel.with_suffix("")
+            if rel.name == "index":
+                rel = rel.parent
+        tail = "" if str(rel) == "." else f"{rel}/"
+        return f"{base}/{tail}"
+    return "file://" + str(path)
 
 
 _DATE = re.compile(r"([A-Z][a-z]{2})(\d{2})(\d{4})")
@@ -153,7 +163,7 @@ def _filedate(name: str) -> str:
 
 def _link(path, label: str, ctx: dict) -> str:
     """Click opens the served doc; the copy affordance yields the real path."""
-    url = doc_url(path, ctx["docs_root"], ctx["base_url"])
+    url = doc_url(path, ctx["docs_roots"], ctx["base_url"])
     fs = html.escape(str(path))
     return (
         f"<a href='{html.escape(url)}' title='{fs}'>{html.escape(label)}</a>"
@@ -283,19 +293,6 @@ def _card(name: str, why: str | None, a: Activity) -> str:
     return "".join(out)
 
 
-def _recency(row: dict) -> int:
-    """Latest wins, across two independent clocks.
-
-    A tree edited an hour ago and a session that ran last week are both "recent"
-    for different reasons, and either can be the one you meant.
-    """
-    a = row["activity"]
-    if a.live:
-        return 1 << 62          # running now — nothing outranks it
-    spoke = (a.last_turn or {}).get("at") or a.last_session or 0
-    return max(a.modified or 0, spoke)
-
-
 def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
     """`groups` is [(label, [row, ...]), ...]; a row is what `cli.view` builds.
 
@@ -329,7 +326,7 @@ def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
         if not rows:
             continue
         body.append(f"<h2 class='grp'>{html.escape(label)}</h2>")
-        for row in sorted(rows, key=_recency, reverse=True):
+        for row in sorted(rows, key=lambda r: recency(r["activity"]), reverse=True):
             card = _card(row["name"], row["why"], row["activity"])
             body.append(
                 card.replace("<div class='card", "<details class='card", 1)
