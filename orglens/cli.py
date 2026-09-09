@@ -27,10 +27,16 @@ from orglens.declaration import MARKER
 from orglens.events import EVENTS_DIR, Event, append, attributions, this_machine
 from orglens.homes import Home
 from orglens.propose import Proposal, propose
+from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
 from orglens.units import Registry, Unit
 from orglens.workflow.cli import workflow as workflow_group
+
+#: Where a rendered config lands unless `--out` says otherwise. A module-level
+#: constant, not inlined, so a test can monkeypatch it rather than write to
+#: the real `~/.scad`.
+SCAD_CONFIGS_DIR = Path.home() / ".scad" / "configs"
 
 
 def _load_config() -> Config:
@@ -577,6 +583,60 @@ def reference_cmd(out: str | None):
         click.echo(f"Wrote {path}")
         return
     click.echo(text)
+
+
+def _repo_keys(unit: Unit) -> list[str]:
+    """The repository names `render` would produce, in first-seen order —
+    used only to validate `--workdir` before writing, never by `render`
+    itself, which stays pure.
+    """
+    keys: list[str] = []
+    for home in unit.homes:
+        if home.path is None:
+            continue
+        key = home.name.split("/")[0]
+        if key not in keys:
+            keys.append(key)
+    return keys
+
+
+@cli.command(name="config")
+@click.argument("unit_name")
+@click.option("--workdir", default=None, help="Which repository is the workdir.")
+@click.option("--out", default=None, help="Write here instead of ~/.scad/configs/<unit>.yml")
+def config_cmd(unit_name: str, workdir: str | None, out: str | None):
+    """Render a unit's homes into the scad config for a container.
+
+    The one thing orglens writes under `~/.scad`: a config file scad reads,
+    never its index or its launch records. Every other command in this tree
+    only reads scad's records — this is the deliberate exception, made once,
+    here.
+    """
+    registry, _ = _load_registry()
+    try:
+        unit = registry.resolve(unit_name)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+    repos = _repo_keys(unit)
+    if workdir is not None and workdir not in repos:
+        click.echo(
+            f"Unknown repository '{workdir}'. {unit.name} has: "
+            + ", ".join(repos),
+            err=True,
+        )
+        sys.exit(1)
+
+    text = render_scadconfig(unit, workdir=workdir)
+
+    if out:
+        path = Path(out).expanduser()
+    else:
+        path = SCAD_CONFIGS_DIR / f"{unit.name}.yml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    click.echo(str(path))
 
 
 def _refresh_snapshot(registry: Registry, config: Config):

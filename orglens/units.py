@@ -29,6 +29,9 @@ class Unit:
     #: The directory whose marker declared it. One per unit; `check` says so
     #: when that stops being true.
     declared_at: Path
+    #: scad's own words for a container, passed through verbatim by
+    #: `scadconfig.render`. `None` when the declaration carries none.
+    runtime: dict | None = None
 
     @property
     def paths(self) -> list[Path]:
@@ -104,6 +107,7 @@ class Registry:
                     homes=self._homes_of(marker),
                     part_of=marker.part_of,
                     declared_at=candidate.path,
+                    runtime=marker.runtime,
                 )
             )
         self._units = sorted(found, key=lambda u: u.name)
@@ -146,6 +150,7 @@ class Registry:
             homes=self._homes_of(marker),
             part_of=marker.part_of,
             declared_at=directory,
+            runtime=marker.runtime,
         )
 
     def resolve(self, name: str) -> Unit:
