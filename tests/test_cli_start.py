@@ -55,6 +55,7 @@ def test_start_in_a_unit_with_several_homes_requires_choosing(tmp_path, monkeypa
     # Two homes and no --home: the command says which are available rather
     # than picking one and being wrong quietly.
     assert "--home" in result.output
+    assert result.exception is None
 
 
 def test_dry_run_launches_nothing_and_records_nothing(tmp_path, monkeypatch,
@@ -74,3 +75,54 @@ def test_a_launch_that_yields_no_id_still_exits_zero_and_says_so(tmp_path, monke
     assert result.exit_code == 0
     assert "not attributed" in result.output.lower()
     assert events.attributions(root=tmp_path / "events") == {}
+
+
+def test_the_arrival_names_the_unit_and_all_its_homes(two_root_tree):
+    from orglens.cli import _arrival
+
+    unit = two_root_tree.resolve("orglens")
+    chosen = next(h for h in unit.homes if h.path is not None)
+    text = _arrival(unit, chosen, two_root_tree)
+
+    assert "orglens" in text
+    # Every home, not only the one launched in — the point is that the session
+    # learns the work is bigger than the directory it woke up in.
+    for home in unit.homes:
+        if home.path is not None:
+            assert str(home.path) in text
+
+
+def test_the_arrival_points_at_the_driver_document_when_there_is_one(two_root_tree):
+    from orglens.cli import _arrival
+
+    unit = two_root_tree.resolve("orglens")
+    chosen = next(h for h in unit.homes if h.path is not None)
+    assert "overview.md" in _arrival(unit, chosen, two_root_tree)
+
+
+def test_the_arrival_survives_a_unit_with_nothing_in_it(tmp_path, grammar):
+    from orglens.cli import _arrival
+    from orglens.declaration import MARKER
+    from orglens.units import Registry
+
+    bare = tmp_path / "docs" / "projects" / "bare"
+    bare.mkdir(parents=True)
+    (bare / MARKER).write_text("unit: bare\nkind: project\nhomes:\n  - x\n")
+    (tmp_path / "x").mkdir()
+    registry = Registry([tmp_path / "docs", tmp_path], grammar)
+
+    unit = registry.resolve("bare")
+    chosen = next(h for h in unit.homes if h.path is not None)
+    text = _arrival(unit, chosen, registry)
+    assert "bare" in text          # no overview, no status, still says something
+
+
+def test_an_explicit_prompt_replaces_the_arrival(tmp_path, monkeypatch,
+                                                 two_root_tree_config):
+    seen = {}
+    monkeypatch.setattr("orglens.cli._launch",
+                        lambda cwd, agent, prompt: seen.update(prompt=prompt) or "s1")
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+    CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens",
+                             "--prompt", "just do the thing"])
+    assert seen["prompt"] == "just do the thing"

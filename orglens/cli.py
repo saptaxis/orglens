@@ -25,9 +25,10 @@ from orglens import activity, check as check_module, documents, reference, view
 from orglens.config import Config
 from orglens.declaration import MARKER
 from orglens.events import EVENTS_DIR, Event, append, this_machine
+from orglens.homes import Home
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
-from orglens.units import Registry
+from orglens.units import Registry, Unit
 from orglens.workflow.cli import workflow as workflow_group
 
 
@@ -602,6 +603,42 @@ def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
     return _session_id_from(done.stdout)
 
 
+def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
+    """What the session is told before its first turn.
+
+    On this machine every home is already reachable, so this is not about
+    access — it is about knowledge. A session that woke up in one directory
+    has no way to learn the work spans three, or that its overview lives in a
+    different repository entirely. Told once, up front, it does.
+
+    Deliberately short. This is a first turn, not a briefing: it names the
+    unit, its homes, and where to read more, and then gets out of the way.
+    """
+    lines = [f"You are working on the unit `{unit.name}` ({unit.kind})."]
+    if unit.part_of:
+        lines.append(f"It is part of `{unit.part_of}`.")
+
+    lines.append("")
+    lines.append(f"You are standing in `{chosen.path}`. Its homes are:")
+    for home in unit.homes:
+        where = home.path if home.path is not None else "not on this machine"
+        here = "  <- you are here" if home.path == chosen.path else ""
+        lines.append(f"  {home.name}  ->  {where}{here}")
+
+    driver = registry.grammar.driver
+    for path in unit.paths:
+        if (path / driver).exists():
+            lines.append("")
+            lines.append(f"Read `{path / driver}` first — it says where this stands.")
+            break
+
+    status = _status_of(registry, unit)
+    if status:
+        lines.append(f'Its last written status: "{status.text}"')
+
+    return "\n".join(lines)
+
+
 @cli.command()
 @click.argument("unit_name")
 @click.option("--home", default=None, help="Which home to work in.")
@@ -652,7 +689,7 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         click.echo(f"would launch {agent} in {chosen.path} for {unit.name}")
         return
 
-    session = _launch(chosen.path, agent, prompt)
+    session = _launch(chosen.path, agent, prompt or _arrival(unit, chosen, registry))
     if session is None:
         click.echo("scad returned no session id — the session is not attributed. "
                    "Attribute it later, or start it again through orglens.")
