@@ -52,7 +52,7 @@ orgdeck/
       packs/             bias/  voice/
       skills/            /inception, /remember, ...
       agents/            harness-format named agents
-    interior-design/     # domain deck (to port from a-private-deck-repo)
+    <domain deck>/       # private ones live in orglens-extras, not here
       DECK.md
     <next deck>/         # the bank grows here
 ```
@@ -69,4 +69,16 @@ One command, cross-platform (macOS + Linux) — installs the public tools and sy
 
 ## Status
 
-Scaffold. Structure defined; **decks and operators harvested as they prove themselves on real problems — not designed up front.** First domain deck (`interior-design`) ports in from `a-private-deck-repo`, which already demonstrates the deck anatomy. Full reasoning in `traitful-docs/docs/projects/traitful-workflow-ecosystem/` (capture + orchestration logs).
+Scaffold. Structure defined; **decks and operators harvested as they prove themselves on real problems — not designed up front.** The first domain deck was built before the pattern was named, and moved to `orglens-extras` when this repo went public — the anatomy it demonstrated is what stayed.
+
+## Private decks
+
+Decks about work that cannot be published live in a second repo, `orglens-extras`, with the same `capabilities/decks/` shape. Which repo a deck sits in *is* the public/private line — there is no list here, no flag in the engine, and nothing for orglens to read: the engine has no reference to `capabilities/` at all.
+
+Installing a second deck repo needs no extra machinery, because skills install by walking a repo:
+
+```bash
+cd ../orglens-extras && npx skills add . -g -a '*' -y --full-depth
+```
+
+Same command, different repo. Whether you run it is the whole of the choice.

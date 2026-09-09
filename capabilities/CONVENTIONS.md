@@ -1,6 +1,6 @@
 # Deck conventions — the anatomy to copy
 
-A **deck** is a self-contained, themed bundle you can move in or out of the bank freely. This is the pattern to follow when adding one. It was reverse-engineered from `a-private-deck-repo` (the `interior-viz` + `design-book` skills), the first working deck built before the pattern was named.
+A **deck** is a self-contained, themed bundle you can move in or out of the bank freely. This is the pattern to follow when adding one. It was reverse-engineered from a single working deck — a domain deck of two composed skills — built before the pattern was named. That is worth stating plainly: the anatomy below has one origin, so treat it as a shape that has worked once, not a law.
 
 ## What every deck has
 

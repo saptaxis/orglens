@@ -100,8 +100,9 @@ table is deliberate — a wrong skills path fails **silently**, with files prese
 that never load.
 
 Two skills install: `orglens`, plus `writing-workflow` from the decks under
-`capabilities/`. The private decks — and the skills that come with them — live
-in `orglens-extras` and are installed separately.
+`capabilities/`. Decks about work that cannot be published live in a second
+repo, `orglens-extras`, installed by running the same command there — see
+[`capabilities/README.md`](capabilities/README.md).
 
 The CLI installs a skill *copy*, not a symlink, so **re-run the command after
 editing a `SKILL.md`**. `references/grammar-reference.md` is generated — run
