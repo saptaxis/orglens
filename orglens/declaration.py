@@ -28,6 +28,11 @@ class Marker:
     kind: str | None = None
     part_of: str | None = None
     homes: tuple[str, ...] = ()
+    #: scad's own words for a container — `python:`, `claude:`, and the
+    #: like — passed through verbatim. orglens has no vocabulary for a
+    #: runtime; inventing one for a single consumer would be a translation
+    #: layer nobody asked for.
+    runtime: dict | None = None
 
     @property
     def declares(self) -> bool:
@@ -62,4 +67,5 @@ def read_marker(directory: Path) -> Marker | None:
         kind=data.get("kind"),
         part_of=data.get("part_of"),
         homes=homes,
+        runtime=data.get("runtime"),
     )

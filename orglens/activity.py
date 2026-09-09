@@ -215,17 +215,30 @@ def _live_entries(index: Path) -> list[dict]:
     return out
 
 
-def _live_for(paths: list[Path], home_names: list[str], index: Path) -> list[dict]:
-    """Live sessions whose cwd is under one of this unit's homes.
+def _live_for(
+    paths: list[Path],
+    home_names: list[str],
+    index: Path,
+    mine: list[str] | None = None,
+) -> list[dict]:
+    """Live sessions whose cwd is under one of this unit's homes, plus any
+    explicitly attributed to it regardless of cwd.
 
     Matches by cwd, the same evidence `_sessions` joins on — not scad's
     `project` column, which is the exact coincidence this branch exists to
     delete. A live session running in a unit's docs home used to be filed
     under the docs repository's own project name and never show as running
     against the unit at all.
+
+    An attributed session counts even when its cwd is empty or above every
+    home — the containment guard cannot be allowed to exclude an explicit
+    assertion, the whole reason attribution exists. Each entry appears once:
+    `_live_entries` is one row per running process, so containment and
+    attribution matching the same entry just both pass, not double-add it.
     """
     resolved = [str(Path(p).resolve()) for p in paths]
     containers = [f"/workspace/{name.split('/')[0]}" for name in home_names]
+    mine_ids = set(mine or [])
 
     def under(cwd: str, prefixes: list[str]) -> bool:
         return any(cwd == p or cwd.startswith(p + "/") for p in prefixes)
@@ -233,8 +246,11 @@ def _live_for(paths: list[Path], home_names: list[str], index: Path) -> list[dic
     return [
         entry
         for entry in _live_entries(index)
-        if entry.get("cwd")
-        and (under(entry["cwd"], resolved) or under(entry["cwd"], containers))
+        if entry.get("session") in mine_ids
+        or (
+            entry.get("cwd")
+            and (under(entry["cwd"], resolved) or under(entry["cwd"], containers))
+        )
     ]
 
 
@@ -268,8 +284,11 @@ _OPEN = {"awaiting-user", "awaiting-question", "in-flight"}
 _EMPTY: tuple = (0, None, 0, None, [], [], [], [])
 
 
-def _home_clause(paths: list[Path], names: list[str]) -> tuple[str, list[str]]:
-    """SQL matching sessions that ran in, or under, any of these homes.
+def _home_clause(
+    paths: list[Path], names: list[str], sessions: list[str] | None = None
+) -> tuple[str, list[str]]:
+    """SQL matching sessions that ran in, or under, any of these homes — plus
+    any explicitly attributed to this unit.
 
     The join used to be `where project = <entity name>`, which worked only
     while a repository happened to be named after the work. neuronal-degeneracy
@@ -284,6 +303,15 @@ def _home_clause(paths: list[Path], names: list[str]) -> tuple[str, list[str]]:
     Container paths are matched by name because a dispatched session's cwd is
     `/workspace/<repo>`, which no host path can match — 37 sessions, 35 of
     them orglens's own. That is scad's mounting convention, not a guess.
+
+    Containment answers for work done *inside* a home. It cannot answer for
+    work done *above* one: measured 2026-09-09, 108 sessions have a cwd of the
+    documents repository root, which sits above every unit's home. Those are
+    attributed by assertion or not at all.
+
+    Parenthesised as one group because callers append `and ...` to it, and
+    `AND` binds tighter than `OR` — an unparenthesised chain silently let
+    excluded rows back in.
     """
     clauses: list[str] = []
     params: list[str] = []
@@ -295,13 +323,20 @@ def _home_clause(paths: list[Path], names: list[str]) -> tuple[str, list[str]]:
         repo = name.split("/")[0]
         clauses.append("(cwd = ? or cwd like ?)")
         params += [f"/workspace/{repo}", f"/workspace/{repo}/%"]
+    for session in sessions or []:
+        clauses.append("id = ?")
+        params.append(session)
     if not clauses:
         return "0", []
     return "(" + " or ".join(clauses) + ")", params
 
 
 def _sessions(
-    paths: list[Path], name: str, index: Path, home_names: list[str] | None = None
+    paths: list[Path],
+    name: str,
+    index: Path,
+    home_names: list[str] | None = None,
+    mine: list[str] | None = None,
 ) -> tuple:
     """Sessions scad attributed to this unit, and their open questions."""
     if not index.exists():
@@ -311,7 +346,7 @@ def _sessions(
     except sqlite3.Error:
         return _EMPTY
     try:
-        clause, params = _home_clause(paths, home_names or [])
+        clause, params = _home_clause(paths, home_names or [], mine)
         count, last, turns = db.execute(
             "select count(*), max(coalesce(ended, started)), "
             f"sum(coalesce(n_turns, 0)) from sessions where {clause}",
@@ -412,7 +447,10 @@ def _sessions(
 
 
 def _session_clock(
-    paths: list[Path], index: Path, home_names: list[str]
+    paths: list[Path],
+    index: Path,
+    home_names: list[str],
+    mine: list[str] | None = None,
 ) -> tuple[int, int | None]:
     """Count and last-active time — measured against the real scad index (not
     a synthetic one) to matter here. A first cut also joined `turns` for the
@@ -429,7 +467,7 @@ def _session_clock(
     except sqlite3.Error:
         return 0, None
     try:
-        clause, params = _home_clause(paths, home_names or [])
+        clause, params = _home_clause(paths, home_names or [], mine)
         count, last = db.execute(
             f"select count(*), max(coalesce(ended, started)) from sessions "
             f"where {clause}",
@@ -447,6 +485,7 @@ def peek(
     name: str,
     index: Path = SCAD_INDEX,
     home_names: list[str] | None = None,
+    attributed: dict[str, str] | None = None,
 ) -> Activity:
     """Just enough to sort and date a unit — what `list` needs, not what
     `status` shows in full.
@@ -458,15 +497,20 @@ def peek(
     text, which dwarfs it on a real index. Ordering and dating a unit needs
     neither: the newest file mtime and `sessions.ended` are enough, so this
     skips both rather than pay for what nothing here displays.
+
+    `attributed` must reach the same session count `read` reports, or `list`
+    and `status` disagree about the same unit — an explicitly attributed
+    session outside every home would show up in one and not the other.
     """
     paths = [Path(p) for p in paths]
     home_names = home_names or []
+    mine = [s for s, u in (attributed or {}).items() if u == name]
     a = Activity()
     if not paths:
         return a
     a.modified = max((_newest_mtime(p) or 0) for p in paths) or None
-    a.live = _live_for(paths, home_names, index)
-    a.sessions, a.last_session = _session_clock(paths, index, home_names)
+    a.live = _live_for(paths, home_names, index, mine)
+    a.sessions, a.last_session = _session_clock(paths, index, home_names, mine)
     return a
 
 
@@ -475,10 +519,12 @@ def read(
     name: str,
     index: Path = SCAD_INDEX,
     home_names: list[str] | None = None,
+    attributed: dict[str, str] | None = None,
 ) -> Activity:
     """Everything derivable about one unit. Never raises."""
     paths = [Path(p) for p in paths]
     home_names = home_names or []
+    mine = [s for s, u in (attributed or {}).items() if u == name]
     activity = Activity()
     if not paths:
         return activity
@@ -495,7 +541,7 @@ def read(
     activity.dirty = sum(_dirty(r or p, p) for p, r in roots)
     activity.modified = max((_newest_mtime(p) or 0) for p in paths) or None
 
-    activity.live = _live_for(paths, home_names, index)
+    activity.live = _live_for(paths, home_names, index, mine)
     plans = [p for path in paths if (p := _latest_plan(path)) is not None]
     activity.plan = max(plans) if plans else None
     packets = [_packets(p) for p in paths]
@@ -510,5 +556,5 @@ def read(
         activity.agents,
         activity.needs,
         activity.notes,
-    ) = _sessions(paths, name, index, home_names)
+    ) = _sessions(paths, name, index, home_names, mine)
     return activity

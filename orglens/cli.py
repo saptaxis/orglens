@@ -12,7 +12,9 @@ declaration does.
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -22,10 +24,19 @@ import click
 from orglens import activity, check as check_module, documents, reference, view
 from orglens.config import Config
 from orglens.declaration import MARKER
+from orglens.events import EVENTS_DIR, Event, append, attributions, this_machine
+from orglens.homes import Home
+from orglens.propose import Proposal, propose
+from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
-from orglens.units import Registry
+from orglens.units import Registry, Unit
 from orglens.workflow.cli import workflow as workflow_group
+
+#: Where a rendered config lands unless `--out` says otherwise. A module-level
+#: constant, not inlined, so a test can monkeypatch it rather than write to
+#: the real `~/.scad`.
+SCAD_CONFIGS_DIR = Path.home() / ".scad" / "configs"
 
 
 def _load_config() -> Config:
@@ -195,11 +206,17 @@ def list(kind_filter: str | None):
         click.echo("Nothing found.")
         return
 
+    # Read once, not once per unit: `attributions` walks every shard, and a
+    # loop over thirty units would re-read the whole log thirty times for the
+    # same answer.
+    attributed = attributions(root=EVENTS_DIR)
+
     # `peek`, not `read`: the per-home git calls `read` makes for the last
     # commit and the dirty count are the entire gap between `list` at 1.9s
     # and `status` at 5.5s on the real tree, and sorting needs neither.
     acts = {
-        unit: activity.peek(unit.paths, unit.name, home_names=[h.name for h in unit.homes])
+        unit: activity.peek(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
+                             attributed=attributed)
         for unit in units
     }
 
@@ -220,8 +237,14 @@ def status():
     registry, _ = _load_registry()
     units = registry.units()
 
+    # Read once, not once per unit: `attributions` walks every shard, and a
+    # loop over thirty units would re-read the whole log thirty times for the
+    # same answer.
+    attributed = attributions(root=EVENTS_DIR)
+
     acts = {
-        unit: activity.read(unit.paths, unit.name, home_names=[h.name for h in unit.homes])
+        unit: activity.read(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
+                             attributed=attributed)
         for unit in units
     }
 
@@ -293,6 +316,71 @@ def find(artifact_type: str, unit_name: str | None):
     for item in found:
         shown = _relative(item.path, registry.roots)
         click.echo(f"  {item.name:<45} [{item.unit}]  {shown}")
+
+
+def _write_declaration(proposal: Proposal, path: Path) -> None:
+    """Write the marker. Field order is the reading order, not alphabetical.
+
+    `home:` names this exact directory — `propose._home_name` already worked
+    out what it is, and writing that fact down promotes it to the `marker`
+    rung of `homes.resolve_home`'s ladder. Without it, the ladder re-derives
+    a name from scratch and can land this directory on the same name as a
+    same-named sibling code home, collapsing both proposed homes onto one
+    directory and losing the other.
+    """
+    lines = [f"home: {proposal.homes[0]}", f"unit: {proposal.unit}"]
+    if proposal.kind:
+        lines.append(f"kind: {proposal.kind}")
+    if proposal.part_of:
+        lines.append(f"part_of: {proposal.part_of}")
+    lines.append("homes:")
+    lines += [f"  - {h}" for h in proposal.homes]
+    (path / MARKER).write_text("\n".join(lines) + "\n")
+
+
+def _show(proposal: Proposal) -> None:
+    """Show the inference and what each part was inferred from.
+
+    A human confirming a guess needs to see the guess's reasoning, or they are
+    not confirming — they are trusting.
+    """
+    click.echo(f"  unit:    {proposal.unit}")
+    click.echo(f"  kind:    {proposal.kind or '(unknown)':<24}"
+               f"  {proposal.why.get('kind', '')}")
+    if proposal.part_of:
+        click.echo(f"  part_of: {proposal.part_of:<24}"
+                   f"  {proposal.why.get('part_of', '')}")
+    click.echo(f"  homes:   {proposal.why.get('homes', '')}")
+    for home in proposal.homes:
+        click.echo(f"    - {home}")
+
+
+@cli.command()
+@click.argument("path", type=click.Path(exists=True, file_okay=False))
+@click.option("--yes", is_flag=True, help="Write it without asking.")
+def declare(path: str, yes: bool):
+    """Declare an existing directory as a unit, from what it looks like.
+
+    Everything proposed comes from position, which is a good suggestion and a
+    bad fact — so it is shown with its reasoning and confirmed, never written
+    unattended.
+    """
+    registry, _ = _load_registry()
+    target = Path(path).expanduser().resolve()
+
+    if (target / MARKER).exists():
+        click.echo(f"{target} is already declared.", err=True)
+        sys.exit(1)
+
+    proposal = propose(target, registry)
+    _show(proposal)
+
+    if not yes and not click.confirm("write this?", default=True):
+        click.echo("nothing written.")
+        return
+
+    _write_declaration(proposal, target)
+    click.echo(f"declared {proposal.unit}")
 
 
 def _write_marker(target: Path, name: str, kind: str | None, part_of: str | None) -> None:
@@ -505,6 +593,60 @@ def reference_cmd(out: str | None):
     click.echo(text)
 
 
+def _repo_keys(unit: Unit) -> list[str]:
+    """The repository names `render` would produce, in first-seen order —
+    used only to validate `--workdir` before writing, never by `render`
+    itself, which stays pure.
+    """
+    keys: list[str] = []
+    for home in unit.homes:
+        if home.path is None:
+            continue
+        key = home.name.split("/")[0]
+        if key not in keys:
+            keys.append(key)
+    return keys
+
+
+@cli.command(name="config")
+@click.argument("unit_name")
+@click.option("--workdir", default=None, help="Which repository is the workdir.")
+@click.option("--out", default=None, help="Write here instead of ~/.scad/configs/<unit>.yml")
+def config_cmd(unit_name: str, workdir: str | None, out: str | None):
+    """Render a unit's homes into the scad config for a container.
+
+    The one thing orglens writes under `~/.scad`: a config file scad reads,
+    never its index or its launch records. Every other command in this tree
+    only reads scad's records — this is the deliberate exception, made once,
+    here.
+    """
+    registry, _ = _load_registry()
+    try:
+        unit = registry.resolve(unit_name)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+    repos = _repo_keys(unit)
+    if workdir is not None and workdir not in repos:
+        click.echo(
+            f"Unknown repository '{workdir}'. {unit.name} has: "
+            + ", ".join(repos),
+            err=True,
+        )
+        sys.exit(1)
+
+    text = render_scadconfig(unit, workdir=workdir)
+
+    if out:
+        path = Path(out).expanduser()
+    else:
+        path = SCAD_CONFIGS_DIR / f"{unit.name}.yml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    click.echo(str(path))
+
+
 def _refresh_snapshot(registry: Registry, config: Config):
     """Silently refresh the snapshot after write operations."""
     try:
@@ -535,6 +677,11 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
     ]
 
+    # Read once, not once per unit: `attributions` walks every shard, and a
+    # loop over thirty units would re-read the whole log thirty times for the
+    # same answer.
+    attributed = attributions(root=EVENTS_DIR)
+
     groups = []
     for kind in sorted(by_kind):
         rows = []
@@ -548,6 +695,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
                     "activity": activity.read(
                         unit.paths, unit.name,
                         home_names=[h.name for h in unit.homes],
+                        attributed=attributed,
                     ),
                     "artifacts": [
                         (heading, documents.find(registry, artifact_kind, unit))
@@ -567,3 +715,158 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
     click.echo(f"wrote {path}")
     if do_open:
         os.system(f"open '{path}'")
+
+
+def _session_id_from(output: str) -> str | None:
+    """The id scad's own launch record names, or None.
+
+    `--json` makes scad's own words the read: with the flag, its record's
+    `session_id` field is a contract it publishes, not prose we scrape a
+    line out of. The one thing orglens needs from scad is this id, and
+    reading it from the record makes the join exact — a newest-file scan of
+    `~/.scad/launches/` would be a guess, and this system does not guess
+    about attribution. A malformed or id-less record degrades to None here
+    rather than raising, same as every other derived source.
+    """
+    try:
+        record = json.loads(output)
+    except ValueError:
+        return None
+    if not isinstance(record, dict):
+        return None
+    return record.get("session_id") or None
+
+
+def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
+    """Start a session through scad and return the id it minted. Never raises."""
+    argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd), "--json"]
+    if prompt:
+        argv += ["--prompt", prompt]
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # `--json` moved scad's human-facing output to stderr and made stdout the
+    # launch record alone, so echoing stdout here would print a JSON blob at
+    # the person running `orglens start` — the words they should see arrive
+    # on stderr now. Do not restore an echo of `done.stdout`.
+    if done.stderr:
+        click.echo(done.stderr, nl=False, err=True)
+    # A launch that yields no id exits non-zero — failure is signalled, not
+    # inferred from an absent field.
+    if done.returncode != 0:
+        return None
+    try:
+        return _session_id_from(done.stdout)
+    except ValueError:
+        return None
+
+
+def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
+    """What the session is told before its first turn.
+
+    On this machine every home is already reachable, so this is not about
+    access — it is about knowledge. A session that woke up in one directory
+    has no way to learn the work spans three, or that its overview lives in a
+    different repository entirely. Told once, up front, it does.
+
+    Deliberately short. This is a first turn, not a briefing: it names the
+    unit, its homes, and where to read more, and then gets out of the way.
+    """
+    lines = [f"You are working on the unit `{unit.name}` ({unit.kind})."]
+    if unit.part_of:
+        lines.append(f"It is part of `{unit.part_of}`.")
+
+    lines.append("")
+    lines.append(f"You are standing in `{chosen.path}`. Its homes are:")
+    for home in unit.homes:
+        where = home.path if home.path is not None else "not on this machine"
+        here = "  <- you are here" if home.path == chosen.path else ""
+        lines.append(f"  {home.name}  ->  {where}{here}")
+
+    driver = registry.grammar.driver
+    for path in unit.paths:
+        if (path / driver).exists():
+            lines.append("")
+            lines.append(f"Read `{path / driver}` first — it says where this stands.")
+            break
+
+    status = _status_of(registry, unit)
+    if status:
+        lines.append(f'Its last written status: "{status.text}"')
+
+    return "\n".join(lines)
+
+
+@cli.command()
+@click.argument("unit_name")
+@click.option("--home", default=None, help="Which home to work in.")
+@click.option("--agent", default="claude",
+              type=click.Choice(["claude", "codex", "kimi"]),
+              help="Which agent family to launch.")
+@click.option("--prompt", default=None, help="The session's first turn.")
+@click.option("--dry-run", is_flag=True, help="Say what would happen; launch nothing.")
+def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
+          dry_run: bool):
+    """Start a session for a unit, attributed before its first turn.
+
+    The unit is what you asked for and the working directory is a consequence,
+    which inverts the problem rather than solving it: nothing has to work out
+    afterwards which unit a session was for. Sessions started any other way are
+    still attributed by containment where that is unambiguous, and sit
+    unattributed where it is not.
+    """
+    registry, _ = _load_registry()
+    try:
+        unit = registry.resolve(unit_name)
+    except ValueError as exc:
+        match = next((c for c in registry.candidates() if c.name == unit_name), None)
+        if match is None:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+        # Starting work is when you actually know what the work is, so this is
+        # the cheapest moment to say so — rather than a chore left for later.
+        click.echo(f"{unit_name} is not declared. It looks like this:")
+        proposal = propose(match, registry)
+        _show(proposal)
+        if not click.confirm("declare it and start?", default=True):
+            return
+        _write_declaration(proposal, match)
+        registry = Registry(registry.roots, registry.grammar)   # re-sweep
+        unit = registry.resolve(unit_name)
+
+    present = [h for h in unit.homes if h.path is not None]
+    if not present:
+        click.echo(f"{unit.name} has no home on this machine.", err=True)
+        sys.exit(1)
+
+    if home is not None:
+        chosen = next((h for h in present if h.name == home), None)
+        if chosen is None:
+            click.echo(f"Unknown home '{home}'. {unit.name} has: "
+                       + ", ".join(h.name for h in present), err=True)
+            sys.exit(1)
+    elif len(present) == 1:
+        chosen = present[0]
+    else:
+        # Which home to work in is a choice about the task, not about the
+        # unit, so it is not orglens's to make. Naming them is the answer.
+        click.echo(f"{unit.name} has several homes — choose one with --home:")
+        for h in present:
+            click.echo(f"  {h.name:<40} {h.path}")
+        sys.exit(1)
+
+    if dry_run:
+        click.echo(f"would launch {agent} in {chosen.path} for {unit.name}")
+        return
+
+    session = _launch(chosen.path, agent, prompt or _arrival(unit, chosen, registry))
+    if session is None:
+        click.echo("scad returned no session id — the session is not attributed. "
+                   "Attribute it later, or start it again through orglens.")
+        return
+
+    append(Event(kind="attributed", unit=unit.name, session=session,
+                 at=int(time.time()), machine=this_machine()),
+           root=EVENTS_DIR)
+    click.echo(f"attributed session {session} to {unit.name}")

@@ -20,3 +20,6 @@ work/
 
 # kimi session state
 .kimi-code/
+
+# reviewer worktrees materialise a nested checkout here
+.claude/

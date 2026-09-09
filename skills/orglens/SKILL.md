@@ -59,6 +59,8 @@ orglens find plan <unit>              # scoped to just that unit — a nested
 ```bash
 orglens new <path> --kind project
 orglens new <path> --kind experiment --part-of <unit>
+orglens declare <path>                # name an existing directory as a unit
+orglens declare <path> --yes          # write it without asking
 ```
 
 `new` creates a unit: a directory, and the declaration that names it. The
@@ -67,6 +69,44 @@ path given is exactly where it lands — nothing is numbered for you.
 reference. Nothing parses a filename, so a name that departs from the
 convention is still found; the convention is for humans reading a directory
 listing.
+
+`declare` is for a directory that already exists and looks like a unit but
+never said so. It proposes `kind`, `part_of` and a home from what the
+directory looks like, shows the reasoning behind each guess, and asks —
+position is a good suggestion and a bad fact, so only a person turns one into
+the other.
+
+**Attribution:**
+
+```bash
+orglens start <unit>                  # attributed before the session's first turn
+orglens start <unit> --home <name>    # choose a home when several resolve
+orglens start <unit> --dry-run        # name the home and launch nothing
+```
+
+Reach for `start` whenever a session is about to begin on a named unit,
+instead of launching directly and hoping containment sorts it out later.
+Containment answers for work done *inside* a home; it has no answer for work
+done *above* one, which is most of what happens at a documents repository
+root with many homes underneath it. `start` records the unit first, launches
+through scad, and appends one `attributed` event — so the session is joined
+to its unit by record, not by guessing from where it landed. If the unit
+named is not declared yet, `start` offers to declare it inline, the same way
+`declare` does on its own.
+
+**Container:**
+
+```bash
+orglens config <unit>                 # render homes into the config scad reads
+orglens config <unit> --workdir <repo>
+```
+
+The config a container launcher reads needs a `repos:` block naming the same
+homes a unit already declares; `config` renders one instead of it being kept
+by hand twice. This is the single place anything here writes a file scad
+reads — every other command in this tree only reads scad's own records.
+Relevant to the container lane only: launching on this machine with `start`
+needs no config at all.
 
 **Audit:**
 

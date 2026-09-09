@@ -5,7 +5,8 @@ from pathlib import Path
 from orglens.declaration import MARKER
 from orglens.grammar import Grammar
 from orglens.config import Config
-from orglens.units import Registry
+from orglens.homes import Home
+from orglens.units import Registry, Unit
 
 
 @pytest.fixture
@@ -107,3 +108,129 @@ def two_root_tree(tmp_path, grammar):
     (docs / "projects" / "reelmill").mkdir(parents=True)
 
     return Registry([docs, code], grammar)
+
+
+@pytest.fixture
+def two_root_tree_config(tmp_path, two_root_tree, monkeypatch):
+    """Point the CLI at the two-root fixture tree.
+
+    `two_root_tree` builds a Registry directly; the CLI cannot be handed one,
+    so this writes the config that produces the same roots and exports it.
+    """
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "roots:\n" + "".join(f"  - {r}\n" for r in two_root_tree.roots)
+    )
+    monkeypatch.setenv("ORGLENS_CONFIG", str(config))
+    return two_root_tree
+
+
+# ── scadconfig fixtures ─────────────────────────────────────────────────
+#
+# `render` is pure and never touches disk, so these build `Unit` objects
+# directly rather than going through a declaration and a `Registry` sweep.
+
+
+@pytest.fixture
+def unit_with_two_homes(tmp_path):
+    """A unit spanning two repositories, both present on this machine."""
+    return Unit(
+        name="orglens",
+        kind="project",
+        homes=(
+            Home(name="orglens", path=tmp_path / "orglens", how="marker"),
+            Home(name="traitful-docs", path=tmp_path / "traitful-docs", how="marker"),
+        ),
+        part_of=None,
+        declared_at=tmp_path / "orglens",
+    )
+
+
+@pytest.fixture
+def unit_with_an_absent_home(tmp_path):
+    """A unit with one home present and one not cloned on this machine."""
+    return Unit(
+        name="orglens",
+        kind="project",
+        homes=(
+            Home(name="orglens", path=tmp_path / "orglens", how="marker"),
+            Home(name="not-cloned-here", path=None, how="absent"),
+        ),
+        part_of=None,
+        declared_at=tmp_path / "orglens",
+    )
+
+
+@pytest.fixture
+def unit_with_runtime(tmp_path):
+    """A unit whose declaration carries a `runtime:` block, passed through
+    verbatim rather than modelled — scad's words, not orglens's.
+    """
+    return Unit(
+        name="orglens",
+        kind="project",
+        homes=(Home(name="orglens", path=tmp_path / "orglens", how="marker"),),
+        part_of=None,
+        declared_at=tmp_path / "orglens",
+        runtime={"python": {"version": "3.11", "pyproject": True}},
+    )
+
+
+@pytest.fixture
+def unit_with_a_subpath_home(tmp_path):
+    """Two homes naming the same repository — one at its root, one inside a
+    subpath. Keying by the repository segment alone collides; the first
+    home's path must win, not be silently overwritten by the second.
+    """
+    return Unit(
+        name="orglens",
+        kind="project",
+        homes=(
+            Home(name="traitful-docs", path=tmp_path / "traitful-docs", how="marker"),
+            Home(
+                name="traitful-docs/docs/projects/x",
+                path=tmp_path / "traitful-docs" / "docs" / "projects" / "x",
+                how="declaring",
+            ),
+        ),
+        part_of=None,
+        declared_at=tmp_path / "traitful-docs",
+    )
+
+
+@pytest.fixture
+def unit_whose_only_home_is_a_subpath(tmp_path):
+    """A unit whose sole home names a subpath inside a repository, not the
+    repository itself. `--workdir` (and the default choice) name a
+    *repository*, not a home — so marking the workdir by comparing against
+    `home.name` directly would compare a subpath home name like
+    `traitful-docs/docs/projects/x` against `traitful-docs` and never match.
+    """
+    return Unit(
+        name="orglens",
+        kind="project",
+        homes=(
+            Home(
+                name="traitful-docs/docs/projects/x",
+                path=tmp_path / "traitful-docs" / "docs" / "projects" / "x",
+                how="declaring",
+            ),
+        ),
+        part_of=None,
+        declared_at=tmp_path / "traitful-docs" / "docs" / "projects" / "x",
+    )
+
+
+@pytest.fixture
+def unit_with_clobbering_runtime(tmp_path):
+    """A `runtime:` block that tries to overwrite the generated `name` and
+    `repos` keys. Generated keys must win.
+    """
+    return Unit(
+        name="orglens",
+        kind="project",
+        homes=(Home(name="orglens", path=tmp_path / "orglens", how="marker"),),
+        part_of=None,
+        declared_at=tmp_path / "orglens",
+        runtime={"name": "hijacked", "repos": {"evil": {"path": "/nope"}}},
+    )
