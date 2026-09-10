@@ -6,6 +6,20 @@ A piece of work lives in several places at once: a folder of documents, a code r
 
 Two design principles. **Never re-derive what you can read**, so a snapshot is materialized and an agent starts knowing the shape of things. And **report, never gate**: a missing declaration makes something show up as undeclared, never invisible. The last time completeness decided existence, four real bodies of work vanished for months.
 
+## What changed
+
+orglens used to read meaning from where a folder sat. It no longer does, and
+most of what follows is a consequence of that one change.
+
+| Was assumed | Now |
+|---|---|
+| A folder's position said what it was | A unit declares itself, and can move without becoming something else |
+| Nesting implied grouping | `part_of:` states it |
+| A home was a path | A home is a name, resolved to a path on this machine |
+| A session belonged to wherever it ran | The unit is recorded when the session starts; containment answers only where it is unambiguous |
+| The grammar decided what existed | Declarations do. The grammar proposes candidates |
+| Roots bounded what existed | Roots are only where it looks |
+
 ## Install
 
 Requires Python 3.11+.
@@ -33,7 +47,7 @@ EOF
 
 `roots` are the directories orglens sweeps to find declarations. Usually your documents tree plus wherever your repositories are checked out — a unit's homes can span them. The older single-tree spelling, `docs_root: ~/path/to/your/docs`, still works and means one root.
 
-Roots are an optimisation, not a boundary. A unit outside every root is not invisible; it is simply un-met, and the first time you work in it, it registers itself.
+A unit outside every root is not invisible; it is simply un-met, and the first time you work in it, it registers itself.
 
 You can also set `grammar: /path/to/custom.yaml` in the config to use a custom grammar instead of the bundled default.
 
@@ -177,17 +191,15 @@ change: `deck: capabilities/*` is a working example, exercised by
 
 ## How Discovery Works
 
-1. **A unit exists because it declares itself**, not because of where its folder
-   sits. Discovery sweeps the roots for `.orglens.yml` markers. Position carries
-   no meaning any more — a unit can move without becoming something else
-2. **Grouping is stated, never derived from nesting.** A unit says `part_of:
-   <other unit>`. A folder inside another folder is not its child unless it says
-   so, which is what lets work be regrouped with nothing renamed
+1. **A unit exists because it declares itself.** Discovery sweeps the roots for
+   `.orglens.yml` markers, wherever they sit
+2. **Grouping is stated.** A unit says `part_of: <other unit>`, which is what
+   lets work be regrouped with nothing renamed
 3. The old positional patterns survive **demoted**, as a candidate detector: a
    directory matching `projects/*` with no declaration is reported as *undeclared
    work*, never hidden. That report is the migration worklist
-4. **A home is named, not located.** A declaration says `world-model-ladder`, and
-   the name resolves to a path here by a ladder — an explicit marker, then the
+4. **A home is named.** A declaration says `world-model-ladder`, and the name
+   resolves to a path here by a ladder — an explicit marker, then the
    git remote, then the directory name — with the rung that answered reported. So
    the same unit works on another machine, and inside a container, where its
    repositories sit at different paths
@@ -214,14 +226,14 @@ that reason.
 
 `orglens start UNIT` inverts the order rather than trying to guess it better
 afterward: it records the unit *before* the session's first turn, so the
-working directory becomes a consequence of that choice, not the evidence for
-it. It picks one of the unit's homes — asking, with `--home`, when more than
+working directory becomes a consequence of that choice rather than the
+evidence for it. It picks one of the unit's homes — asking, with `--home`, when more than
 one resolves — shells out to `scad session launch`, reads back the id scad
 printed, and appends one `attributed` event to `~/.orglens/events/`. The
 session also arrives already knowing what it is: unless you pass `--prompt`,
 its first turn names the unit, lists every home, and points at wherever the
 unit's status is authored, because on this machine every home is already
-reachable — what a session lacks at the start is not access but knowledge.
+reachable, so what a session lacks at the start is knowledge.
 
 Nothing here is guessed. A session is attributed because someone said so at
 the moment it started, or because containment gives exactly one answer once
