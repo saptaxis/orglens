@@ -13,9 +13,9 @@ A **deck** is a self-contained, themed bundle you can move in or out of the bank
 
 ## Three rules the anatomy enforces
 
-1. **Layered, not monolithic.** A deck may compose a base producer with higher-order operators on top — `interior-viz` *generates*, `design-book` *decides between and publishes*. Compose; don't write one skill that does everything.
-2. **Spec, not log.** State declares intent; existence is the "done" marker (interior-viz's `plan.yaml` + `versions/vNN.png`). No status flags to keep in sync.
-3. **Engines through peer skills, never re-implemented.** A card reaches Codex/Claude/pi through the invocation layer (a `codex` skill's profile, scad, the companion) — it does not reinvent the agent loop. This is scad's companion layer-1: normalize argv/inputs/sandbox/resume in, structured result out.
+1. **Cards compose.** A deck may stack higher-order operators on a base producer: one card generates, another decides between what it produced and publishes the result. Write two cards that compose rather than one that does everything.
+2. **State declares intent; existence is the record.** A plan file says what should be there, and the files that exist say what is done. No status flags to keep in sync.
+3. **Cards reach engines through peer skills.** A card gets to Codex, Claude or pi through the invocation layer — a `codex` skill's profile, scad, the companion — which normalizes argv, inputs, sandbox and resume in, and hands back a structured result. The agent loop is somebody else's, already written.
 
 ## Adding a deck
 
@@ -31,6 +31,7 @@ A **deck** is a self-contained, themed bundle you can move in or out of the bank
 | Scope | cross-domain (any problem) | one recurring task |
 | Cards | mostly stateless operators | skills with domain state |
 | Taste lives in | packs (bias/voice) | the skill prompts + state model |
-| Example | `method` | `interior-design` |
 
-Both share this anatomy, the orglens grammar, and the bootstrap. That shared pattern — not any single deck's content — is the durable asset.
+This repo ships `tutorial`, which is neither: it exists to be run once and to show that the engine carries no vocabulary of its own. Working decks of both kinds live in `orglens-extras`.
+
+Both kinds share this anatomy, the orglens grammar, and the bootstrap. That shared pattern is the durable asset, rather than any single deck's content.
