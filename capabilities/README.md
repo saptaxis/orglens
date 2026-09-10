@@ -1,7 +1,7 @@
 # capabilities — the deck bank
 
-The method layer of the scad + orglens ecosystem: a bank of **decks**, each a
-self-contained bundle of operators and skills for one purpose.
+A bank of **decks**, each a self-contained bundle of operators and skills for
+one purpose.
 
 | Tool | Owns |
 |---|---|
@@ -55,7 +55,7 @@ orglens/
       <next deck>/         # the bank grows here
 ```
 
-`tutorial` is the only deck this repo ships, and it earns the slot: it is a bug-triage loop that shares no vocabulary with any writing deck, which is what makes it evidence that the engine knows no nouns. Decks about work that cannot be published live in `orglens-extras`.
+`tutorial` is the only deck this repo ships. It is a bug-triage loop and shares no vocabulary with any writing deck, so it tests that the engine carries none of its own. Decks about work that cannot be published live in `orglens-extras`.
 
 Canonical prompts live here once. `bootstrap` routes each deck's cards out with `npx skills add`, which walks a repo and owns the harness path table — a wrong skills path fails silently, so the tool decides it rather than a list here. Cards install as **copies**, not symlinks, so re-run `bootstrap` after editing one.
 
@@ -96,4 +96,4 @@ Installing a second deck repo needs no extra machinery, because skills install b
 ./bootstrap --extras ~/code/orglens-extras
 ```
 
-which is the same `npx skills add . -g -a '*' -y --full-depth`, run once per repo. Whether you pass `--extras` is the whole of the choice — there is nothing to configure and nothing that remembers your answer.
+which is the same `npx skills add . -g -a '*' -y --full-depth`, run once per repo. There is nothing to configure and nothing that remembers the answer.
