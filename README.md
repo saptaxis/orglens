@@ -4,21 +4,26 @@ Organizational lens for AI agents — units of work, and where they live.
 
 A piece of work lives in several places at once: a folder of documents, a code repository somewhere else, agent sessions that ran in both. orglens makes the **unit of work** the thing, and lets it point at the places it lives. A unit declares itself in a small marker file naming its **homes**; everything else — its documents, its sessions, where it stands — is derived from those.
 
-Two design principles. **Never re-derive what you can read**, so a snapshot is materialized and an agent starts knowing the shape of things. And **report, never gate**: a missing declaration makes something show up as undeclared, never invisible. The last time completeness decided existence, four real bodies of work vanished for months.
+## What it assumes
 
-## What changed
-
-orglens used to read meaning from where a folder sat. It no longer does, and
-most of what follows is a consequence of that one change.
-
-| Was assumed | Now |
-|---|---|
-| A folder's position said what it was | A unit declares itself, and can move without becoming something else |
-| Nesting implied grouping | `part_of:` states it |
-| A home was a path | A home is a name, resolved to a path on this machine |
-| A session belonged to wherever it ran | The unit is recorded when the session starts; containment answers only where it is unambiguous |
-| The grammar decided what existed | Declarations do. The grammar proposes candidates |
-| Roots bounded what existed | Roots are only where it looks |
+- **A unit declares itself.** A `.orglens.yml` says what this is. Where the
+  folder sits means nothing, so work can move without becoming something else.
+- **Grouping is stated.** `part_of:` is the only way one unit belongs to
+  another. A folder inside a folder is not its child.
+- **A home is a name.** It resolves to a path on this machine — by marker, then
+  git remote, then directory name — so one declaration works on your laptop,
+  another machine, and inside a container where the repositories sit elsewhere.
+- **Nothing is guessed.** A session belongs to a unit because someone said so
+  when it started, or because containment gives exactly one answer. Where
+  neither holds it stays unattributed, which is a resting state.
+- **Declarations decide what exists.** The grammar's patterns only propose
+  candidates worth asking about, and roots are where it looks rather than what
+  exists.
+- **Report, never gate.** A missing declaration makes something show up as
+  undeclared. The last time completeness decided existence, four real bodies of
+  work vanished for months.
+- **Never re-derive what you can read.** The snapshot is materialised, so an
+  agent starts knowing the shape of things instead of sweeping for it.
 
 ## Install
 
