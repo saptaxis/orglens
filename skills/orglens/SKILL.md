@@ -1,26 +1,48 @@
 ---
 name: orglens
 description: >
-  This skill should be used when the user starts a session that involves
-  organizational docs, asks "what projects exist", "where do plans go",
-  "create a new plan/spec/log", "what's the status of X", "which sessions
-  belong to X", "resume the last session on X", or needs to understand the
-  organizational topology. Also triggers when the user mentions orglens,
-  units, homes, a packet or a workflow, or organizational structure.
+  Use when a session touches the documents tree or a unit of work: "what
+  projects exist", "where does this plan go", "what is the status of X",
+  "create a plan/spec/log for X", "which sessions belong to X", "resume the
+  last session on X", "start a session on X", "run the next node", "what is
+  waiting on me". Also on the words orglens, unit, home, packet, workflow,
+  snapshot. Not for a code-only session inside one repository, and not
+  inside a container mid-implementation.
 ---
 
 # Organizational Context
+
+Announce: "Using orglens to <what>."
 
 Load organizational topology awareness at session start. What the tree may
 contain is declared in one place — the grammar — and rendered into
 `references/grammar-reference.md`. Nothing is restated here, because a second
 copy is a copy that drifts.
 
+<HARD-GATE>
+Never `ls`, `find`, `glob` or `tree` the documents tree to discover units,
+homes, plans, specs or logs. `orglens list`, `orglens find` and the snapshot
+already answer that, and a scan answers it wrongly: it sees folders, not
+declarations, and a folder is not a unit until a marker says so. Read what the
+tool derives. A document's *contents* you read directly, once you know its
+path.
+</HARD-GATE>
+
+## When not to use this
+
+- A session that only edits code inside one repository and never asks where
+  the work is filed.
+- A container running one node of a workflow: the packet and the program are
+  already in hand, and the sweep may not see the roots.
+- Writing prose. That is the writing capability's job; this skill only says
+  where the file goes.
+
 ## Load Topology
 
 Run at the start of every session to understand what exists:
 
 ```bash
+orglens snapshot --check || orglens snapshot
 orglens snapshot --stdout
 ```
 
@@ -162,8 +184,54 @@ orglens snapshot --check              # stale or fresh; exit 1 when stale
 orglens reference --out <path>        # regenerate the vocabulary reference
 ```
 
+## Flows
+
+Commands compose into a few sequences that come up every week.
+
+**Start work on a unit.**
+
+```bash
+orglens where <unit>                  # its homes, and which are clean
+orglens status | grep <unit>          # what it holds and when it was touched
+orglens start <unit> --home <name>    # attributed before the first turn
+```
+
+**Write a plan.** The grammar reference says where plans live and how they are
+named; nothing numbers or creates the file for you.
+
+```bash
+orglens find plan <unit>              # what exists, and the highest number
+# write plans/NN-topic-MonDDYYYY.md by hand, following the reference
+orglens snapshot                      # so the next session sees it
+```
+
+**Check what needs attention.**
+
+```bash
+orglens view                          # everything waiting, oldest first
+orglens sessions --none               # sessions nobody claimed
+orglens check                         # drift, weak homes, shared homes
+```
+
+**Run one node of a workflow.** The packet is a directory; the workflow is its
+capability's `WORKFLOW.yaml`.
+
+```bash
+orglens workflow next <packet>        # node, program, file to write, note
+# perform the program; write the one file
+orglens workflow done <packet> --node <n> --agent <who>
+orglens workflow next <packet>        # waiting? then a human runs `note`
+```
+
+**Pick up where a unit was left.**
+
+```bash
+orglens sessions <unit>               # newest first; open ones say resumable
+orglens resume <unit>                 # the newest open one, through scad
+```
+
 ## Design Principle
 
 **Never re-derive what you can read.** Read the snapshot for organizational
-context. Do not scan directories manually. If the snapshot is stale, run
-`orglens snapshot` to refresh it.
+context. Do not scan directories manually. `orglens snapshot --check` says
+when it is stale; `orglens snapshot` refreshes it.
