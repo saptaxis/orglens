@@ -22,7 +22,7 @@ def no_real_machine_state(tmp_path, monkeypatch):
     it, which a later `monkeypatch.setattr` still does.
     """
     monkeypatch.setattr("orglens.activity.SCAD_INDEX", tmp_path / "no-index.sqlite")
-    monkeypatch.setattr("orglens.activity.LIVE_REGISTRY", tmp_path / "no-live")
+    monkeypatch.setattr("orglens.sessions.LIVE_REGISTRY", tmp_path / "no-live")
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "no-events")
 
 

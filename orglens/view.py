@@ -196,8 +196,7 @@ def _detail(row: dict, ctx: dict) -> str:
         for s in a.live:
             out.append(
                 f"<li class='live'>&#x25CF; {html.escape(str(s['name'] or s['session'] or '')[:60])}"
-                f"<span class='when'> · pid {s['pid']} · {html.escape(str(s['kind'] or ''))}"
-                f" · {html.escape(str(s['cwd'] or '')[-46:])}</span></li>"
+                f"<span class='when'> · {html.escape(str(s['cwd'] or '')[-46:])}</span></li>"
             )
         out.append("</ol>")
 

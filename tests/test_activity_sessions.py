@@ -1,7 +1,16 @@
+"""What `activity.read` derives from the sessions it is handed.
+
+Which sessions a unit has is decided in `sessions.py` and tested there.
+`read` takes that list and answers the rest: counts, the last thing said,
+open questions, the recent few, what is running. Nothing here matches a
+cwd; a session is the unit's because it was passed in.
+"""
+
 import sqlite3
 from pathlib import Path
 
 from orglens import activity
+from orglens.sessions import Session
 
 
 def _schema(db):
@@ -12,9 +21,6 @@ def _schema(db):
         "n_turns integer not null default 0, grade text not null default '', "
         "source text not null default '', needs text, outcome text)"
     )
-    # _sessions joins these; absent, the join raises and the whole query is
-    # swallowed by `_sessions`'s bare except, silently zeroing out a correct
-    # count. Empty is enough where a test doesn't exercise turns or notes.
     db.execute("create table turns (session_id text, ts text, role text, text text)")
     db.execute(
         "create table notes (session_id text, topic text, title text, ts text, "
@@ -22,177 +28,126 @@ def _schema(db):
     )
 
 
-def _index(tmp_path, rows):
+def _index(tmp_path, rows: list[dict]) -> Path:
     db_path = tmp_path / "index.sqlite"
     db = sqlite3.connect(db_path)
     _schema(db)
     for row in rows:
-        db.execute(
-            "insert into sessions (id, kind, agent, machine, cwd, project, n_turns) "
-            "values (?, 'main', 'claude', 'test', ?, ?, 1)",
-            row,
-        )
+        turns = row.pop("turns", [])
+        base = {"kind": "main", "agent": "claude", "machine": "test", "n_turns": 1}
+        base.update(row)
+        cols = ", ".join(base)
+        db.execute(f"insert into sessions ({cols}) values ({', '.join('?' * len(base))})",
+                   tuple(base.values()))
+        for ts, role, text in turns:
+            db.execute("insert into turns (session_id, ts, role, text) values (?, ?, ?, ?)",
+                       (base["id"], ts, role, text))
     db.commit()
     db.close()
     return db_path
 
 
-def _session_row(db, id, cwd, project, kind="main", needs=None, title=None):
-    db.execute(
-        "insert into sessions (id, kind, agent, machine, cwd, project, title, "
-        "n_turns, needs) values (?, ?, 'claude', 'test', ?, ?, ?, 0, ?)",
-        (id, kind, cwd, project, title, needs),
-    )
+def _s(id, *, agent="claude", turns=1, started=None, ended=None, label=None,
+       outcome=None, live=False, cwd="/x", units=("u",), how="containment"):
+    return Session(id=id, agent=agent, cwd=cwd, started=started, ended=ended,
+                   turns=turns, label=label, outcome=outcome, live=live,
+                   units=frozenset(units), how=how)
 
 
-def _turn_row(db, session_id, ts, role, text):
-    db.execute(
-        "insert into turns (session_id, ts, role, text) values (?, ?, ?, ?)",
-        (session_id, ts, role, text),
-    )
-
-
-def test_sessions_from_two_homes_join_into_one_unit(tmp_path):
-    code = tmp_path / "code" / "neuronal-degeneracy"
-    docs = tmp_path / "docs" / "research" / "neuronal-degeneracy"
-    code.mkdir(parents=True)
-    docs.mkdir(parents=True)
-    index = _index(tmp_path, [
-        ("s1", str(code), "neuronal-degeneracy"),
-        ("s2", str(docs), "traitful-docs"),      # filed under the repo today
-        ("s3", str(docs / "specs"), "traitful-docs"),
-    ])
-    act = activity.read([code, docs], "neuronal-degeneracy", index=index)
+def test_the_count_is_the_sessions_given(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    act = activity.read([home], "u", index=tmp_path / "absent.sqlite",
+                        sessions=[_s("a"), _s("b"), _s("c")])
     assert act.sessions == 3
 
 
-def test_a_session_elsewhere_does_not_join(tmp_path):
-    home = tmp_path / "code" / "orglens"
-    other = tmp_path / "code" / "something-else"
-    home.mkdir(parents=True)
-    other.mkdir(parents=True)
-    index = _index(tmp_path, [
-        ("s1", str(home), "orglens"),
-        ("s2", str(other), "something-else"),
-    ])
-    act = activity.read([home], "orglens", index=index)
-    assert act.sessions == 1
-
-
-def test_no_index_is_ordinary_not_an_error(tmp_path):
-    home = tmp_path / "x"
+def test_no_sessions_given_means_none(tmp_path):
+    home = tmp_path / "home"
     home.mkdir()
-    act = activity.read([home], "x", index=tmp_path / "absent.sqlite")
-    assert act.sessions == 0
+    assert activity.read([home], "u", index=tmp_path / "absent.sqlite").sessions == 0
 
 
-def test_a_home_reached_through_a_symlink_still_matches(tmp_path):
-    # ~/Dropbox is a symlink to ~/Library/CloudStorage/Dropbox and sessions
-    # record the resolved form. A home in symlink form must still match, or a
-    # unit silently reports zero sessions.
-    real = tmp_path / "real" / "orglens"
-    real.mkdir(parents=True)
-    link = tmp_path / "link"
-    link.symlink_to(tmp_path / "real")
-    index = _index(tmp_path, [("s1", str(real), "orglens")])
-    act = activity.read([link / "orglens"], "orglens", index=index)
-    assert act.sessions == 1
-
-
-def test_a_container_session_matches_its_home_by_name(tmp_path):
-    # scad mounts a repository named X at /workspace/X. 35 of orglens's own
-    # 79 sessions are container-side and match no host path.
-    home = tmp_path / "code" / "orglens"
-    home.mkdir(parents=True)
-    index = _index(tmp_path, [
-        ("s1", str(home), "orglens"),
-        ("s2", "/workspace/orglens", "orglens"),
-        ("s3", "/workspace/something-else", "something-else"),
+def test_turns_agents_and_last_time_come_from_the_list(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    act = activity.read([home], "u", index=tmp_path / "absent.sqlite", sessions=[
+        _s("a", agent="codex", turns=5, ended=2000_000),
+        _s("b", agent="claude", turns=7, started=9000_000),
     ])
-    act = activity.read([home], "orglens", index=index, home_names=["orglens"])
-    assert act.sessions == 2
+    assert act.turns == 12
+    assert act.agents == ["claude", "codex"]
+    assert act.last_session == 9000       # scad stores milliseconds
 
 
-# `_home_clause` joins per-home terms with `or`. Any query that appends its
-# own `and ...` after that clause is vulnerable to SQL's precedence: `and`
-# binds tighter than `or`, so `H1 or H2 and COND` parses as `H1 or (H2 and
-# COND)` — a row matching the *first* home clause passes the whole `where`
-# regardless of COND, while only rows matching later homes actually have to
-# satisfy it. Two homes are enough to trigger this; it does not need three.
+def test_recent_is_the_newest_eight_with_open_marked(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    given = [_s(f"s{i}", ended=i * 1000, label=f"n{i}",
+                outcome="awaiting-user" if i == 3 else "done") for i in range(10)]
+    act = activity.read([home], "u", index=tmp_path / "absent.sqlite", sessions=given)
+    assert [r["name"] for r in act.recent] == [f"n{i}" for i in range(9, 1, -1)]
+    assert [r["open"] for r in act.recent] == [False] * 6 + [True, False]
+    assert act.recent[0] == {
+        "id": "s9", "at": 9, "agent": "claude", "outcome": "done", "name": "n9",
+        "turns": 1, "open": False, "how": "containment",
+    }
+    assert act.open_sessions == 1
 
 
-def test_a_null_turn_from_the_first_home_cannot_outrank_a_real_one(tmp_path):
-    home_a = tmp_path / "code" / "unit-a"
-    home_b = tmp_path / "code" / "unit-b"
-    home_a.mkdir(parents=True)
-    home_b.mkdir(parents=True)
-    db_path = tmp_path / "index.sqlite"
-    db = sqlite3.connect(db_path)
-    _schema(db)
-    _session_row(db, "s1", str(home_a), "unit-a")
-    _session_row(db, "s2", str(home_b), "unit-b")
-    # s1's only turn carries no text — the query's own condition means to
-    # exclude it, no matter how it sorts.
-    _turn_row(db, "s1", "2024-01-05T00:00:00", "assistant", None)
-    # s2's turn is real but earlier. It must still win, because s1's does
-    # not qualify at all.
-    _turn_row(db, "s2", "2024-01-01T00:00:00", "user", "the actual content")
-    db.commit()
-    db.close()
+def test_live_is_the_running_ones_from_the_list(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    act = activity.read([home], "u", index=tmp_path / "absent.sqlite", sessions=[
+        _s("a", live=True, label="working", cwd="/here"),
+        _s("b", live=False),
+    ])
+    assert act.live == [{"session": "a", "name": "working", "cwd": "/here"}]
+    assert act.live_sessions == 1
 
-    act = activity.read([home_a, home_b], "unit-a", index=db_path)
+
+def test_last_turn_is_looked_up_by_the_ids_given(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    index = _index(tmp_path, [
+        {"id": "mine", "turns": [("2024-01-01T00:00:00", "user", "the actual content")]},
+        {"id": "other", "turns": [("2024-06-01T00:00:00", "user", "someone else's")]},
+    ])
+    act = activity.read([home], "u", index=index, sessions=[_s("mine")])
     assert act.last_turn == {
-        "at": activity._epoch("2024-01-01T00:00:00"),
-        "role": "user",
+        "at": activity._epoch("2024-01-01T00:00:00"), "role": "user",
         "text": "the actual content",
     }
 
 
-def test_a_session_with_no_open_question_cannot_pollute_needs(tmp_path):
-    home_a = tmp_path / "code" / "unit-a"
-    home_b = tmp_path / "code" / "unit-b"
-    home_a.mkdir(parents=True)
-    home_b.mkdir(parents=True)
-    db_path = tmp_path / "index.sqlite"
-    db = sqlite3.connect(db_path)
-    _schema(db)
-    # s1 (the first home) has no open question at all — `needs` is null.
-    # It must never appear in the needs list.
-    _session_row(db, "s1", str(home_a), "unit-a", needs=None)
-    # s2 (the second home) has a real open question.
-    _session_row(db, "s2", str(home_b), "unit-b", needs="what should X do?")
-    db.commit()
-    db.close()
+def test_a_turn_with_no_text_cannot_outrank_a_real_one(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    index = _index(tmp_path, [
+        {"id": "a", "turns": [("2024-01-05T00:00:00", "assistant", None)]},
+        {"id": "b", "turns": [("2024-01-01T00:00:00", "user", "the actual content")]},
+    ])
+    act = activity.read([home], "u", index=index, sessions=[_s("a"), _s("b")])
+    assert act.last_turn["text"] == "the actual content"
 
-    act = activity.read([home_a, home_b], "unit-a", index=db_path)
+
+def test_needs_are_looked_up_by_the_ids_given(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    index = _index(tmp_path, [
+        {"id": "a", "needs": None},
+        {"id": "b", "needs": "what should X do?"},
+        {"id": "c", "needs": "not this unit's"},
+    ])
+    act = activity.read([home], "u", index=index, sessions=[_s("a"), _s("b")])
     assert act.needs == [{"question": "what should X do?", "at": None}]
 
 
-def test_a_subagent_from_the_first_home_cannot_pollute_recent(tmp_path):
-    home_a = tmp_path / "code" / "unit-a"
-    home_b = tmp_path / "code" / "unit-b"
-    home_a.mkdir(parents=True)
-    home_b.mkdir(parents=True)
-    db_path = tmp_path / "index.sqlite"
-    db = sqlite3.connect(db_path)
-    _schema(db)
-    # s1 (the first home) is a subagent, not a main session — `recent`
-    # deliberately wants only kind = 'main'.
-    _session_row(db, "s1", str(home_a), "unit-a", kind="workflow-agent",
-                 title="from-home-a-leaked")
-    _session_row(db, "s2", str(home_b), "unit-b", kind="main",
-                 title="from-home-b-real")
-    db.commit()
-    db.close()
-
-    act = activity.read([home_a, home_b], "unit-a", index=db_path)
-    assert act.recent == [
-        {
-            "at": None,
-            "agent": "claude",
-            "outcome": None,
-            "name": "from-home-b-real",
-            "turns": 0,
-            "open": False,
-        }
-    ]
+def test_peek_reaches_the_same_count_and_time_as_read(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    given = [_s("a", ended=2000_000), _s("b", live=True)]
+    read = activity.read([home], "u", index=tmp_path / "absent.sqlite", sessions=given)
+    peek = activity.peek([home], "u", index=tmp_path / "absent.sqlite", sessions=given)
+    assert (peek.sessions, peek.last_session, peek.live_sessions) == (
+        read.sessions, read.last_session, read.live_sessions)

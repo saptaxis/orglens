@@ -95,98 +95,6 @@ def test_blocked_packets_are_summed_across_homes(tmp_path):
     assert act.blocked == 2
 
 
-class TestLivenessJoinsByCwd:
-    """A live session is joined to a unit by where its process is actually
-    running, the same evidence `_sessions` uses — not by scad's `project`
-    column, which is exactly the coincidence this branch exists to delete.
-    """
-
-    def _registry(self, tmp_path, sessions):
-        registry = tmp_path / "sessions"
-        registry.mkdir()
-        for i, (session_id, cwd) in enumerate(sessions):
-            (registry / f"proc-{i}.json").write_text(
-                json.dumps({"pid": __import__("os").getpid(), "sessionId": session_id, "cwd": cwd})
-            )
-        return registry
-
-    def test_a_live_session_in_the_units_home_is_seen(self, tmp_path, monkeypatch):
-        home = tmp_path / "code" / "orglens"
-        home.mkdir(parents=True)
-        registry = self._registry(tmp_path, [("s1", str(home))])
-        monkeypatch.setattr(activity, "LIVE_REGISTRY", registry)
-        activity._live_entries.cache_clear()
-
-        act = activity.read([home], "orglens", index=tmp_path / "absent.sqlite")
-
-        assert act.live_sessions == 1
-
-    def test_a_live_session_filed_under_a_different_project_by_scad_is_still_seen(
-        self, tmp_path, monkeypatch
-    ):
-        """The reproduction: a live session running in a unit's docs home,
-        which scad's index files under the docs repository's own project
-        name (`traitful-docs`, say) rather than the unit's name. Joining on
-        `project` misses it entirely; joining on cwd does not.
-        """
-        docs_home = tmp_path / "traitful-docs" / "docs" / "projects" / "widget"
-        docs_home.mkdir(parents=True)
-        index = tmp_path / "index.sqlite"
-        import sqlite3
-
-        db = sqlite3.connect(index)
-        db.execute(
-            "create table sessions (id text primary key, kind text not null, "
-            "agent text not null, machine text not null, cwd text, project text, "
-            "title text, name text, started integer, ended integer, "
-            "n_turns integer not null default 0, grade text not null default '', "
-            "source text not null default '', needs text, outcome text)"
-        )
-        db.execute(
-            "insert into sessions (id, kind, agent, machine, cwd, project, n_turns) "
-            "values ('s1', 'main', 'claude', 'test', ?, 'traitful-docs', 0)",
-            (str(docs_home),),
-        )
-        db.commit()
-        db.close()
-
-        registry = self._registry(tmp_path, [("s1", str(docs_home))])
-        monkeypatch.setattr(activity, "LIVE_REGISTRY", registry)
-        activity._live_entries.cache_clear()
-
-        act = activity.read([docs_home], "widget", index=index)
-
-        assert act.live_sessions == 1
-
-    def test_a_live_session_elsewhere_is_not_seen(self, tmp_path, monkeypatch):
-        home = tmp_path / "code" / "orglens"
-        other = tmp_path / "code" / "something-else"
-        home.mkdir(parents=True)
-        other.mkdir(parents=True)
-        registry = self._registry(tmp_path, [("s1", str(other))])
-        monkeypatch.setattr(activity, "LIVE_REGISTRY", registry)
-        activity._live_entries.cache_clear()
-
-        act = activity.read([home], "orglens", index=tmp_path / "absent.sqlite")
-
-        assert act.live_sessions == 0
-
-    def test_a_live_session_matches_a_container_cwd_by_home_name(
-        self, tmp_path, monkeypatch
-    ):
-        home = tmp_path / "code" / "orglens"
-        home.mkdir(parents=True)
-        registry = self._registry(tmp_path, [("s1", "/workspace/orglens")])
-        monkeypatch.setattr(activity, "LIVE_REGISTRY", registry)
-        activity._live_entries.cache_clear()
-
-        act = activity.read(
-            [home], "orglens", index=tmp_path / "absent.sqlite", home_names=["orglens"]
-        )
-
-        assert act.live_sessions == 1
-
-
 class TestPeek:
     """`peek` is `list`'s cheap alternative to `read` — enough to sort and
     date a unit without the per-home git subprocess calls `read` makes for
@@ -207,29 +115,15 @@ class TestPeek:
         assert act.dirty == 0
 
     def test_it_reports_the_last_session_time(self, tmp_path):
-        import sqlite3
+        from orglens.sessions import Session
 
         home = tmp_path / "code" / "widget"
         home.mkdir(parents=True)
-        db_path = tmp_path / "index.sqlite"
-        db = sqlite3.connect(db_path)
-        db.execute(
-            "create table sessions (id text primary key, kind text not null, "
-            "agent text not null, machine text not null, cwd text, project text, "
-            "title text, name text, started integer, ended integer, "
-            "n_turns integer not null default 0, grade text not null default '', "
-            "source text not null default '', needs text, outcome text)"
-        )
-        db.execute("create table turns (session_id text, ts text, role text, text text)")
-        db.execute(
-            "insert into sessions (id, kind, agent, machine, cwd, started, ended) "
-            "values ('s1', 'main', 'claude', 'test', ?, 1000, 2000)",
-            (str(home),),
-        )
-        db.commit()
-        db.close()
+        s1 = Session(id="s1", agent="claude", cwd=str(home), started=1000, ended=2000,
+                     turns=1, label=None, outcome=None, live=False,
+                     units=frozenset({"widget"}), how="containment")
 
-        act = activity.peek([home], "widget", index=db_path)
+        act = activity.peek([home], "widget", index=tmp_path / "absent.sqlite", sessions=[s1])
 
         assert act.sessions == 1
         assert act.last_session == 2

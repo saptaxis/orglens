@@ -21,10 +21,10 @@ from pathlib import Path
 
 import click
 
-from orglens import activity, check as check_module, documents, reference, view
+from orglens import activity, check as check_module, documents, reference, sessions, view
 from orglens.config import Config
 from orglens.declaration import MARKER
-from orglens.events import EVENTS_DIR, Event, append, attributions, this_machine
+from orglens.events import EVENTS_DIR, Event, append, this_machine
 from orglens.homes import Home, repo_of
 from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
@@ -136,6 +136,18 @@ def _dated(act: activity.Activity) -> list[str]:
     return out
 
 
+
+def _sessions_by_unit(registry: Registry) -> dict[str, list]:
+    """Every unit's sessions, from one pass over the index and the event log.
+
+    One pass, not one per unit: `attributions` walks every shard and the
+    index is one query, so a loop over thirty units would do the same work
+    thirty times for the same answer.
+    """
+    every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
+    return {unit.name: sessions.for_unit(every, unit.name) for unit in registry.units()}
+
+
 def _status_of(registry: Registry, unit):
     """The authored line for a unit, checked across every home in turn.
 
@@ -206,17 +218,13 @@ def list(kind_filter: str | None):
         click.echo("Nothing found.")
         return
 
-    # Read once, not once per unit: `attributions` walks every shard, and a
-    # loop over thirty units would re-read the whole log thirty times for the
-    # same answer.
-    attributed = attributions(root=EVENTS_DIR)
+    by_unit = _sessions_by_unit(registry)
 
     # `peek`, not `read`: the per-home git calls `read` makes for the last
     # commit and the dirty count are the entire gap between `list` at 1.9s
     # and `status` at 5.5s on the real tree, and sorting needs neither.
     acts = {
-        unit: activity.peek(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
-                             attributed=attributed)
+        unit: activity.peek(unit.paths, unit.name, sessions=by_unit[unit.name])
         for unit in units
     }
 
@@ -237,14 +245,9 @@ def status():
     registry, _ = _load_registry()
     units = registry.units()
 
-    # Read once, not once per unit: `attributions` walks every shard, and a
-    # loop over thirty units would re-read the whole log thirty times for the
-    # same answer.
-    attributed = attributions(root=EVENTS_DIR)
-
+    by_unit = _sessions_by_unit(registry)
     acts = {
-        unit: activity.read(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
-                             attributed=attributed)
+        unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name])
         for unit in units
     }
 
@@ -707,10 +710,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
     ]
 
-    # Read once, not once per unit: `attributions` walks every shard, and a
-    # loop over thirty units would re-read the whole log thirty times for the
-    # same answer.
-    attributed = attributions(root=EVENTS_DIR)
+    by_unit = _sessions_by_unit(registry)
 
     groups = []
     for kind in sorted(by_kind):
@@ -723,9 +723,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
                     "path": unit.declared_at,
                     "why": status.text if status else None,
                     "activity": activity.read(
-                        unit.paths, unit.name,
-                        home_names=[h.name for h in unit.homes],
-                        attributed=attributed,
+                        unit.paths, unit.name, sessions=by_unit[unit.name],
                     ),
                     "artifacts": [
                         (heading, documents.find(registry, artifact_kind, unit))

@@ -43,3 +43,14 @@ def test_a_live_row_still_leads_regardless_of_timestamps():
     page = render([("Projects", rows)], CTX)
 
     assert page.index("ancient-but-live") < page.index("recent-but-idle")
+
+
+def test_a_live_session_renders_on_the_card():
+    from orglens import view
+    from orglens.activity import Activity
+    a = Activity(live=[{"session": "abc", "name": "working on it", "cwd": "/x/y"}])
+    row = {"name": "unit", "path": Path("/tmp/unit"), "why": None, "activity": a,
+           "artifacts": [], "dirs": [], "docs": []}
+    html = view._detail(row, {"docs_roots": [], "base_url": ""})
+    assert "Running now (1)" in html
+    assert "working on it" in html
