@@ -41,6 +41,16 @@ class Home:
     how: str  # marker | remote | name | absent | declaring
 
 
+def repo_of(name: str) -> str:
+    """The repository segment of a home name.
+
+    A home is named `<repo>` or `<repo>/<path within it>`. Everything that
+    keys by repository — a scad mount, a container cwd, the remote and
+    directory-name rungs below — wants the first segment and nothing else.
+    """
+    return name.partition("/")[0]
+
+
 def normalise_remote(url: str) -> str | None:
     """The owner/repo tail of a git remote, host and alias discarded."""
     if not url:
@@ -122,7 +132,8 @@ def _rungs(name: str, candidates: list[Candidate]):
     `candidates_for`, which wants every pair at that same rung — the
     difference between "the answer" and "everyone who could have answered".
     """
-    repo, _, subpath = name.partition("/")
+    repo = repo_of(name)
+    subpath = name.partition("/")[2]
 
     def spoken_for(c: Candidate) -> bool:
         # A directory carrying a marker has already answered what home it is.

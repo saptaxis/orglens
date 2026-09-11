@@ -33,6 +33,8 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
+from orglens.homes import repo_of
+
 SCAD_INDEX = Path.home() / ".scad" / "index.sqlite"
 
 #: Claude writes one file per running process here. It is the only source that
@@ -237,7 +239,7 @@ def _live_for(
     attribution matching the same entry just both pass, not double-add it.
     """
     resolved = [str(Path(p).resolve()) for p in paths]
-    containers = [f"/workspace/{name.split('/')[0]}" for name in home_names]
+    containers = [f"/workspace/{repo_of(name)}" for name in home_names]
     mine_ids = set(mine or [])
 
     def under(cwd: str, prefixes: list[str]) -> bool:
@@ -320,7 +322,7 @@ def _home_clause(
         clauses.append("(cwd = ? or cwd like ?)")
         params += [resolved, resolved + "/%"]
     for name in names:
-        repo = name.split("/")[0]
+        repo = repo_of(name)
         clauses.append("(cwd = ? or cwd like ?)")
         params += [f"/workspace/{repo}", f"/workspace/{repo}/%"]
     for session in sessions or []:

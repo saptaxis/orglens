@@ -25,7 +25,7 @@ from orglens import activity, check as check_module, documents, reference, view
 from orglens.config import Config
 from orglens.declaration import MARKER
 from orglens.events import EVENTS_DIR, Event, append, attributions, this_machine
-from orglens.homes import Home
+from orglens.homes import Home, repo_of
 from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot
@@ -632,7 +632,7 @@ def _repo_keys(unit: Unit) -> list[str]:
     for home in unit.homes:
         if home.path is None:
             continue
-        key = home.name.split("/")[0]
+        key = repo_of(home.name)
         if key not in keys:
             keys.append(key)
     return keys

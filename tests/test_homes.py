@@ -6,6 +6,7 @@ from orglens.homes import (
     Candidate,
     candidates_for,
     normalise_remote,
+    repo_of,
     resolve_home,
     scan_roots,
 )
@@ -193,3 +194,10 @@ def test_overlapping_roots_report_each_directory_once(tmp_path):
     candidates = scan_roots([docs, prog])
     paths = [c.path for c in candidates]
     assert len(paths) == len(set(paths))
+
+
+def test_repo_of_is_the_first_segment_of_a_home_name():
+    # `traitful-docs/docs/projects/orglens` is a subpath inside the
+    # `traitful-docs` repository; a bare name is its own repository.
+    assert repo_of("traitful-docs/docs/projects/orglens") == "traitful-docs"
+    assert repo_of("orglens") == "orglens"
