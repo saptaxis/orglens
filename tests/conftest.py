@@ -9,6 +9,19 @@ from orglens.homes import Home
 from orglens.units import Registry, Unit
 
 
+@pytest.fixture(autouse=True)
+def no_real_machine_state(tmp_path, monkeypatch):
+    """Keep `~/.scad/index.sqlite` and `~/.orglens/events` out of every test.
+
+    Both are read by commands that take no path argument, so without this a
+    test's session count depends on which machine runs it. A test that wants
+    an index or an event log builds one under `tmp_path` and points these at
+    it, which a later `monkeypatch.setattr` still does.
+    """
+    monkeypatch.setattr("orglens.activity.SCAD_INDEX", tmp_path / "no-index.sqlite")
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "no-events")
+
+
 @pytest.fixture
 def grammar():
     grammar_path = Path(__file__).parent.parent / "orglens" / "grammars" / "default.yaml"
