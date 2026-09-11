@@ -76,7 +76,7 @@ replaces the bundled grammar.
 | `orglens new PATH [--kind KIND] [--part-of UNIT] [--home NAME]` | Create a unit: a directory, and the declaration that names it. `--home` is repeatable |
 | `orglens declare PATH [--yes]` | Declare an existing directory as a unit, proposed from what it looks like |
 | `orglens check` | Report where the tree has drifted. Reports only — never gates |
-| `orglens snapshot [--stdout]` | Generate a topology snapshot (markdown) |
+| `orglens snapshot [--stdout] [--check]` | Generate a topology snapshot (markdown); `--check` says whether the written one is older than any declaration or driver document, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
 | `orglens view` | Render where everything stands as a page, and open it |
 | `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--dry-run]` | Start a session for a unit, attributed before its first turn |

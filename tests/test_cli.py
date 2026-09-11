@@ -917,6 +917,28 @@ class TestSnapshotCommand:
         assert result.exit_code == 0
         assert "Topology Snapshot" in result.output
 
+    def test_check_says_stale_when_there_is_no_snapshot(self, runner, cli_env):
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 1
+        assert "stale" in result.output
+
+    def test_check_says_fresh_after_writing(self, runner, cli_env):
+        runner.invoke(cli, ["snapshot"], env=cli_env)
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 0, result.output
+        assert "fresh" in result.output
+
+    def test_check_says_stale_when_a_declaration_is_newer(self, runner, cli_env, units_tree):
+        import os, time
+        runner.invoke(cli, ["snapshot"], env=cli_env)
+        marker = next(units_tree.rglob(MARKER))
+        later = time.time() + 5
+        os.utime(marker, (later, later))
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 1
+        assert "stale" in result.output
+        assert marker.name in result.output
+
 
 class TestAgainstTheSharedTwoRootFixture:
     """The fixture other modules already use for the marker-spans-two-roots

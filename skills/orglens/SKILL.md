@@ -158,6 +158,7 @@ exits 0. Run it when tidying, not before working.
 ```bash
 orglens snapshot                      # write to cache file
 orglens snapshot --stdout             # print to stdout
+orglens snapshot --check              # stale or fresh; exit 1 when stale
 orglens reference --out <path>        # regenerate the vocabulary reference
 ```
 

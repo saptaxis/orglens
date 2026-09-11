@@ -601,16 +601,51 @@ def check_cmd():
 
 @cli.command()
 @click.option("--stdout", is_flag=True, help="Print instead of writing")
-def snapshot(stdout: bool):
+@click.option("--check", is_flag=True,
+              help="Say whether the written snapshot is older than the tree; exit 1 if so.")
+def snapshot(stdout: bool, check: bool):
     """Generate a snapshot of what is in the tree."""
     registry, config = _load_registry()
 
+    if check:
+        sys.exit(_snapshot_check(registry, config))
     if stdout:
         click.echo(generate_snapshot(registry, config))
         return
     output = config.snapshot_path
     generate_snapshot(registry, config, output_path=output)
     click.echo(f"Snapshot written to {output}")
+
+
+def _snapshot_check(registry: Registry, config: Config) -> int:
+    """Whether the snapshot predates any declaration or driver document.
+
+    Those are what the snapshot renders; a document deeper in a unit
+    changes nothing it shows. A missing snapshot is stale, not an error.
+    """
+    output = config.snapshot_path
+    if not output.exists():
+        click.echo(f"stale: no snapshot at {output}")
+        return 1
+    written = output.stat().st_mtime
+    newest: tuple[float, Path] | None = None
+    for unit in registry.units():
+        candidates = [unit.declared_at / MARKER]
+        candidates += [p / d for p in unit.paths
+                       for d in registry.grammar.documents_for(unit.kind)]
+        for path in candidates:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if newest is None or mtime > newest[0]:
+                newest = (mtime, path)
+    if newest is not None and newest[0] > written:
+        shown = _relative(newest[1], registry.roots)
+        click.echo(f"stale: {shown} changed after the snapshot was written")
+        return 1
+    click.echo(f"fresh: {output}")
+    return 0
 
 
 @cli.command(name="reference")

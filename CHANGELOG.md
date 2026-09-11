@@ -44,6 +44,8 @@ bound under the old names.
   10.6s: git is asked once per repository instead of three times per home,
   a checkout's remote is read from `.git/config`, and each home is walked
   once for every document kind.
+- `orglens snapshot --check` says whether the written snapshot is older than
+  any declaration or driver document, and exits 1 if it is.
 - Everything orglens keeps on a machine is under `~/.orglens/`: `config.yaml`,
   `cache/snapshot.md`, `events/`. Move `~/.config/orglens/config.yaml` there;
   nothing reads the old path.
