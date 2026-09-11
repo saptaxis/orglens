@@ -22,9 +22,10 @@ other command works without it.
 - **A home is a name.** It resolves to a path on this machine — by marker, then
   git remote, then directory name — so one declaration works on your laptop,
   another machine, and inside a container where the repositories sit elsewhere.
-- **Nothing is guessed.** A session belongs to a unit because someone said so
-  when it started, or because containment gives exactly one answer. Where
-  neither holds it stays unattributed, which is a resting state.
+- **Nothing is guessed.** A session belongs to a unit because someone said so,
+  or because it ran inside one of the unit's homes. A session in a shared home
+  belongs to each unit sharing it; a session above every home belongs to none,
+  which is a resting state.
 - **Declarations decide what exists.** The grammar's patterns only propose
   candidates worth asking about, and roots are where it looks rather than what
   exists.
@@ -79,6 +80,9 @@ replaces the bundled grammar.
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
 | `orglens view` | Render where everything stands as a page, and open it |
 | `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--dry-run]` | Start a session for a unit, attributed before its first turn |
+| `orglens sessions [UNIT] [--none] [--all]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
+| `orglens resume UNIT\|SESSION-ID [--print]` | Resume a session, or a unit's newest open one, through `scad session resume` |
+| `orglens attribute SESSION-ID UNIT` | Say which unit a session was for, after the fact |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 | `orglens where [NAME]` | Which roots are configured, and which unit a name or this directory resolves to |
 | `orglens workflow ...` | Derive and validate filesystem-native workflows |
@@ -179,9 +183,17 @@ always reported with its age, since an authored sentence can go stale.
 
 ## How Sessions Get Attributed
 
-Containment attributes a session when its working directory sits inside exactly
-one home. Above a home it cannot: at the root of a documents repository with
-sixteen homes below it, 108 sessions belong to no unit.
+A session belongs to a set of units. An explicit attribution names one unit, and
+the session is that unit's alone. Otherwise the session belongs to every unit
+with a home containing its working directory: one unit ordinarily, two when a
+home is shared, none when it ran above every home. At the root of a documents
+repository with sixteen homes below it, that is most of the sessions.
+
+`orglens sessions UNIT` lists a unit's sessions and how each is the unit's;
+`orglens sessions --none` lists the ones that belong to no unit. `orglens resume`
+hands a session id, or a unit's newest open session, to `scad session resume`.
+`orglens attribute SESSION-ID UNIT` records an attribution after the fact, which
+is also how a shared-home session is narrowed to one unit.
 
 `orglens start UNIT` records the unit before the session's first turn. It picks
 one of the unit's homes, asking with `--home` when more than one resolves,
@@ -189,11 +201,6 @@ shells out to `scad session launch`, reads the session id from scad's output,
 and appends one `attributed` event to `~/.orglens/events/`. Unless you pass
 `--prompt`, the session's first turn names the unit, lists every home, and
 points at wherever the unit's status is authored.
-
-A session is attributed when someone names the unit at launch, or when
-containment gives exactly one answer. Sessions started any other way are
-attributed by containment where that is unambiguous, and reported as
-**unattributed** where it is not.
 
 `orglens start` on an undeclared name proposes a declaration from the
 directory's position: kind from where it sits, `part_of` from what contains it,

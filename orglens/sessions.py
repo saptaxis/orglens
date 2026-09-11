@@ -87,13 +87,14 @@ def _rows(index: Path) -> list[tuple]:
         db.close()
 
 
-def live_now() -> dict[str, str | None]:
-    """session id -> cwd, for every session whose process is running.
+def live_now() -> dict[str, dict]:
+    """session id -> {cwd, name}, for every session whose process is running.
 
     Liveness is a `kill(pid, 0)` against the registry. A stale file whose
-    process is gone is skipped, not reported.
+    process is gone is skipped, not reported. The name is what the person
+    called the session, which the index learns only on the next reindex.
     """
-    out: dict[str, str | None] = {}
+    out: dict[str, dict] = {}
     if not LIVE_REGISTRY.is_dir():
         return out
     for entry in sorted(LIVE_REGISTRY.glob("*.json")):
@@ -107,7 +108,13 @@ def live_now() -> dict[str, str | None]:
             os.kill(pid, 0)
         except OSError:
             continue
-        out[sid] = data.get("cwd")
+        # One session can have two files — a second process attached to the
+        # same id — and the newer one carries the name the person set.
+        updated = data.get("updatedAt") or 0
+        if sid in out and out[sid]["updated"] > updated:
+            continue
+        out[sid] = {"cwd": data.get("cwd"), "name": data.get("name") or None,
+                    "updated": updated}
     return out
 
 
@@ -175,18 +182,19 @@ def all_sessions(registry: Registry, index: Path, events_root: Path) -> list[Ses
         units, how = belongs(sid, cwd)
         out.append(Session(
             id=sid, agent=agent, cwd=cwd, started=started, ended=ended,
-            turns=turns, label=label, outcome=outcome, live=sid in live,
-            units=units, how=how,
+            turns=turns, label=label or live.get(sid, {}).get("name"),
+            outcome=outcome, live=sid in live, units=units, how=how,
         ))
     # Running, in the registry, not yet indexed: a session started by hand
     # reaches the index on the next reindex, and it is the unit's now.
-    for sid, cwd in live.items():
+    for sid, entry in live.items():
         if sid in seen:
             continue
-        units, how = belongs(sid, cwd)
+        units, how = belongs(sid, entry["cwd"])
         out.append(Session(
-            id=sid, agent="claude", cwd=cwd, started=None, ended=None,
-            turns=0, label=None, outcome=None, live=True, units=units, how=how,
+            id=sid, agent="claude", cwd=entry["cwd"], started=None, ended=None,
+            turns=0, label=entry["name"], outcome=None, live=True,
+            units=units, how=how,
         ))
     return out
 

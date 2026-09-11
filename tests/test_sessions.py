@@ -135,7 +135,8 @@ def _live(tmp_path, session, cwd):
     live = tmp_path / "live"
     live.mkdir(exist_ok=True)
     (live / f"{session}.json").write_text(json.dumps(
-        {"pid": os.getpid(), "sessionId": session, "cwd": str(cwd), "kind": "main"}))
+        {"pid": os.getpid(), "sessionId": session, "cwd": str(cwd), "kind": "main",
+         "name": "what-i-called-it"}))
     return live
 
 
@@ -199,3 +200,32 @@ def test_a_cwd_recorded_through_a_symlinked_root_still_matches(tmp_path):
 
     got = {s.id: s.units for s in all_sessions(registry, index, tmp_path / "events")}
     assert got == {"s-resolved": frozenset({"alpha"}), "s-linked": frozenset({"alpha"})}
+
+
+def test_a_running_sessions_name_comes_from_the_registry_when_the_index_has_none(tmp_path, monkeypatch):
+    registry = _tree(tmp_path, {"alpha": ["alpha-repo"]})
+    cwd = tmp_path / "code" / "alpha-repo"
+    index = scad_index(tmp_path, [
+        {"id": "s1", "kind": "main", "agent": "claude", "machine": "m", "cwd": str(cwd),
+         "n_turns": 0, "grade": "skeleton", "source": "scad-launch"},
+    ])
+    monkeypatch.setattr("orglens.sessions.LIVE_REGISTRY", _live(tmp_path, "s1", cwd))
+
+    [s] = all_sessions(registry, index, tmp_path / "events")
+    assert s.label == "what-i-called-it"
+
+
+def test_the_newer_of_two_registry_files_for_one_session_names_it(tmp_path, monkeypatch):
+    import json, os
+    registry = _tree(tmp_path, {"alpha": ["alpha-repo"]})
+    cwd = tmp_path / "code" / "alpha-repo"
+    live = tmp_path / "live"
+    live.mkdir()
+    for fname, name, updated in (("1.json", "derived-name", 100), ("2.json", "set-by-hand", 200)):
+        (live / fname).write_text(json.dumps(
+            {"pid": os.getpid(), "sessionId": "s1", "cwd": str(cwd), "kind": "main",
+             "name": name, "updatedAt": updated}))
+    monkeypatch.setattr("orglens.sessions.LIVE_REGISTRY", live)
+
+    [s] = all_sessions(registry, tmp_path / "absent.sqlite", tmp_path / "events")
+    assert s.label == "set-by-hand"
