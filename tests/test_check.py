@@ -407,3 +407,32 @@ def test_a_synthetic_declaring_home_is_never_reported_as_a_collision(tmp_path, g
     report = check.run(Registry([docs_root, code_root], grammar))
 
     assert not any(c.home == "eps" for c in report.collisions)
+
+
+def test_a_home_declared_on_two_units_is_reported_with_the_unit_that_answers(
+    tmp_path, grammar
+):
+    """Sharing is documented and intended, but `where` inside the shared
+    directory answers one unit and nothing said which. `at` takes the first
+    unit by name, so the report carries the units in that order.
+    """
+    docs_root = tmp_path / "docs-root"
+    code_root = tmp_path / "code-root"
+    (code_root / "sharedrepo").mkdir(parents=True)
+    for name in ("zeta", "alpha"):
+        unit_dir = docs_root / "projects" / name
+        unit_dir.mkdir(parents=True)
+        (unit_dir / MARKER).write_text(
+            f"unit: {name}\nkind: project\nhomes:\n  - sharedrepo\n"
+        )
+
+    registry = Registry([docs_root, code_root], grammar)
+    report = check.run(registry)
+
+    shared = next(s for s in report.shared if s.home == "sharedrepo")
+    assert shared.units == ["alpha", "zeta"]
+    assert registry.at(code_root / "sharedrepo").name == "alpha"
+
+
+def test_a_home_on_one_unit_is_not_reported_as_shared(registry):
+    assert check.run(registry).shared == []

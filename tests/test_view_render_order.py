@@ -43,3 +43,42 @@ def test_a_live_row_still_leads_regardless_of_timestamps():
     page = render([("Projects", rows)], CTX)
 
     assert page.index("ancient-but-live") < page.index("recent-but-idle")
+
+
+def test_a_live_session_renders_on_the_card():
+    from orglens import view
+    from orglens.activity import Activity
+    a = Activity(live=[{"session": "abc", "name": "working on it", "cwd": "/x/y"}])
+    row = {"name": "unit", "path": Path("/tmp/unit"), "why": None, "activity": a,
+           "artifacts": [], "dirs": [], "docs": []}
+    html = view._detail(row, {"docs_roots": [], "base_url": ""})
+    assert "Running now (1)" in html
+    assert "working on it" in html
+
+
+def test_a_recent_session_shows_how_it_is_the_units():
+    from orglens import view
+    from orglens.activity import Activity
+    a = Activity(recent=[{"id": "abc", "at": 1, "agent": "claude", "outcome": "done",
+                          "name": "n", "turns": 3, "open": False, "how": "attributed"}])
+    row = {"name": "unit", "path": Path("/tmp/unit"), "why": None, "activity": a,
+           "artifacts": [], "dirs": [], "docs": []}
+    html = view._detail(row, {"docs_roots": [], "base_url": ""})
+    assert "attributed" in html
+
+
+def test_unattributed_sessions_render_in_their_own_section_at_the_end():
+    from orglens.sessions import Session
+    loose = [Session(id="deadbeef-1", agent="codex", cwd="/nowhere", started=1000_000,
+                     ended=2000_000, turns=9, label="stray work", outcome="awaiting-user",
+                     live=False, units=frozenset(), how=None)]
+    page = render([("Projects", [_row("a", Activity())])], CTX, unattributed=loose)
+    assert "Unattributed (1)" in page
+    assert "stray work" in page
+    assert page.index("Unattributed (1)") > page.index("Projects")
+    assert "scad session resume deadbeef-1 --print" in page
+
+
+def test_no_unattributed_sessions_means_no_section():
+    page = render([("Projects", [_row("a", Activity())])], CTX, unattributed=[])
+    assert "Unattributed" not in page

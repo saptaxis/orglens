@@ -844,6 +844,26 @@ class TestCheckCommand:
         assert "dup-a" in result.output
         assert "dup-b" in result.output
 
+    def test_a_home_shared_by_two_units_says_which_one_answers_inside_it(
+        self, runner, tmp_path
+    ):
+        docs = tmp_path / "docs"
+        code = tmp_path / "code"
+        (code / "sharedrepo").mkdir(parents=True)
+        for name in ("zeta", "alpha"):
+            unit_dir = docs / "projects" / name
+            unit_dir.mkdir(parents=True)
+            (unit_dir / MARKER).write_text(
+                f"unit: {name}\nkind: project\nhomes:\n  - sharedrepo\n"
+            )
+
+        result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [docs, code]))
+
+        assert (
+            "home 'sharedrepo' is declared on alpha and zeta — inside it, "
+            "`where` answers alpha" in result.output
+        )
+
 
 class TestDuplicateDeclarations:
     """Two markers naming the same unit — a copy-pasted folder, a worktree, a

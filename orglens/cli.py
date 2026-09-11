@@ -21,11 +21,11 @@ from pathlib import Path
 
 import click
 
-from orglens import activity, check as check_module, documents, reference, view
+from orglens import activity, check as check_module, documents, reference, sessions, view
 from orglens.config import Config
 from orglens.declaration import MARKER
-from orglens.events import EVENTS_DIR, Event, append, attributions, this_machine
-from orglens.homes import Home
+from orglens.events import EVENTS_DIR, Event, append, this_machine
+from orglens.homes import Home, repo_of
 from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot
@@ -136,6 +136,19 @@ def _dated(act: activity.Activity) -> list[str]:
     return out
 
 
+
+def _sessions_by_unit(registry: Registry) -> tuple[list, dict[str, list]]:
+    """Every session, and every unit's, from one pass over the index and
+    the event log.
+
+    One pass, not one per unit: `attributions` walks every shard and the
+    index is one query, so a loop over thirty units would do the same work
+    thirty times for the same answer.
+    """
+    every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
+    return every, {unit.name: sessions.for_unit(every, unit.name) for unit in registry.units()}
+
+
 def _status_of(registry: Registry, unit):
     """The authored line for a unit, checked across every home in turn.
 
@@ -206,17 +219,13 @@ def list(kind_filter: str | None):
         click.echo("Nothing found.")
         return
 
-    # Read once, not once per unit: `attributions` walks every shard, and a
-    # loop over thirty units would re-read the whole log thirty times for the
-    # same answer.
-    attributed = attributions(root=EVENTS_DIR)
+    every, by_unit = _sessions_by_unit(registry)
 
     # `peek`, not `read`: the per-home git calls `read` makes for the last
     # commit and the dirty count are the entire gap between `list` at 1.9s
     # and `status` at 5.5s on the real tree, and sorting needs neither.
     acts = {
-        unit: activity.peek(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
-                             attributed=attributed)
+        unit: activity.peek(unit.paths, unit.name, sessions=by_unit[unit.name])
         for unit in units
     }
 
@@ -237,14 +246,9 @@ def status():
     registry, _ = _load_registry()
     units = registry.units()
 
-    # Read once, not once per unit: `attributions` walks every shard, and a
-    # loop over thirty units would re-read the whole log thirty times for the
-    # same answer.
-    attributed = attributions(root=EVENTS_DIR)
-
+    every, by_unit = _sessions_by_unit(registry)
     acts = {
-        unit: activity.read(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
-                             attributed=attributed)
+        unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name])
         for unit in units
     }
 
@@ -583,6 +587,13 @@ def check_cmd():
             f"directory — {shown}"
         )
 
+    for shared in report.shared:
+        names = " and ".join([", ".join(shared.units[:-1]), shared.units[-1]])
+        click.echo(
+            f"home '{shared.home}' is declared on {names} — inside it, "
+            f"`where` answers {shared.units[0]}"
+        )
+
     if not report:
         click.echo("No drift.")
 
@@ -625,7 +636,7 @@ def _repo_keys(unit: Unit) -> list[str]:
     for home in unit.homes:
         if home.path is None:
             continue
-        key = home.name.split("/")[0]
+        key = repo_of(home.name)
         if key not in keys:
             keys.append(key)
     return keys
@@ -700,10 +711,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
     ]
 
-    # Read once, not once per unit: `attributions` walks every shard, and a
-    # loop over thirty units would re-read the whole log thirty times for the
-    # same answer.
-    attributed = attributions(root=EVENTS_DIR)
+    every, by_unit = _sessions_by_unit(registry)
 
     groups = []
     for kind in sorted(by_kind):
@@ -716,9 +724,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
                     "path": unit.declared_at,
                     "why": status.text if status else None,
                     "activity": activity.read(
-                        unit.paths, unit.name,
-                        home_names=[h.name for h in unit.homes],
-                        attributed=attributed,
+                        unit.paths, unit.name, sessions=by_unit[unit.name],
                     ),
                     "artifacts": [
                         (heading, documents.find(registry, artifact_kind, unit))
@@ -734,10 +740,180 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
             groups.append((_heading(kind), rows))
 
     ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url}
-    path = view.write(view.render(groups, ctx), Path(out))
+    page = view.render(groups, ctx, unattributed=sessions.unattributed(every))
+    path = view.write(page, Path(out))
     click.echo(f"wrote {path}")
     if do_open:
         os.system(f"open '{path}'")
+
+
+# ── sessions ─────────────────────────────────────────────────────────────
+
+
+def _scad(argv: list[str]) -> int:
+    """Run scad with the terminal attached, and return its exit code.
+
+    Not captured: `session resume` attaches a tmux pane or execs the agent,
+    and either needs the tty. A missing scad is an ordinary failure here,
+    reported by exit code rather than raised.
+    """
+    try:
+        return subprocess.run(["scad", *argv]).returncode
+    except OSError:
+        click.echo("scad is not installed, or not on PATH.", err=True)
+        return 1
+
+
+def _find_session(every: list, prefix: str):
+    """The one session whose id is `prefix` or starts with it.
+
+    Returns `(session, [])` on a unique match, `(None, matches)` otherwise:
+    the caller says which ids matched, and refuses. Prefix matching is what
+    lets a human type the eight characters a listing shows.
+    """
+    exact = [s for s in every if s.id == prefix]
+    if exact:
+        return exact[0], []
+    matches = [s for s in every if s.id.startswith(prefix)]
+    if len(matches) == 1:
+        return matches[0], []
+    return None, matches
+
+
+def _session_line(s, show_how: bool = True) -> str:
+    when = _ago(s.when // 1000) + " ago" if s.when else "—"
+    if s.live:
+        state = "● live"
+    elif s.open:
+        state = "resumable"
+    else:
+        state = ""
+    how = (s.how or "") if show_how else ""
+    return (
+        f"  {s.id[:8]}  {s.agent:<6} {when:>8} {_count(s.turns, 'turn'):>10}  "
+        f"{how:<12} {state:<10} {s.label or ''}"
+    )
+
+
+@cli.command(name="sessions")
+@click.argument("unit_name", required=False)
+@click.option("--none", "only_none", is_flag=True,
+              help="Only the sessions that belong to no unit.")
+@click.option("--all", "everything", is_flag=True,
+              help="Include sessions with no turns yet.")
+def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
+    """List a unit's sessions, or every unit's, newest first.
+
+    A session is a unit's because `orglens start` or `orglens attribute`
+    said so, or because it ran inside one of the unit's homes. A home
+    shared by two units lists its sessions under both.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
+
+    if unit_name is not None and not only_none:
+        try:
+            unit = registry.resolve(unit_name)
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+        rows = sessions.listed(sessions.for_unit(every, unit.name), everything)
+        if not rows:
+            click.echo(f"{unit.name}: no sessions")
+            return
+        for s in rows:
+            click.echo(_session_line(s))
+        return
+
+    groups: list[tuple[str, list]] = []
+    if not only_none:
+        for unit in registry.units():
+            rows = sessions.listed(sessions.for_unit(every, unit.name), everything)
+            if rows:
+                groups.append((unit.name, rows))
+    loose = sessions.listed(sessions.unattributed(every), everything)
+    if loose:
+        groups.append(("unattributed", loose))
+    if not groups:
+        click.echo("no sessions")
+        return
+    for label, rows in groups:
+        click.echo(f"\n{label}:")
+        for s in rows:
+            click.echo(_session_line(s, show_how=label != "unattributed"))
+
+
+@cli.command()
+@click.argument("target")
+@click.option("--print", "print_only", is_flag=True,
+              help="Print the resume command instead of running it.")
+def resume(target: str, print_only: bool):
+    """Resume a session by id, or a unit's newest open session.
+
+    Hands the id to `scad session resume`, which knows where the session
+    ran; orglens does no working-directory work of its own.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
+
+    session, matches = _find_session(every, target)
+    if session is None and matches:
+        click.echo(f"'{target}' matches more than one session:", err=True)
+        for s in matches:
+            click.echo(_session_line(s), err=True)
+        sys.exit(1)
+    if session is None:
+        try:
+            unit = registry.resolve(target)
+        except ValueError:
+            click.echo(f"'{target}' is neither a session id nor a unit.", err=True)
+            sys.exit(1)
+        mine = sessions.listed(sessions.for_unit(every, unit.name), everything=False)
+        open_ = [s for s in mine if s.open]
+        if not open_:
+            click.echo(f"{unit.name}: nothing open to resume. Newest:", err=True)
+            for s in mine[:3]:
+                click.echo(_session_line(s), err=True)
+            sys.exit(1)
+        session = open_[0]
+
+    argv = ["session", "resume", session.id] + (["--print"] if print_only else [])
+    sys.exit(_scad(argv))
+
+
+@cli.command()
+@click.argument("session_id")
+@click.argument("unit_name")
+def attribute(session_id: str, unit_name: str):
+    """Say which unit a session was for, after the fact.
+
+    The same event `start` writes before a session's first turn. A later
+    attribution of the same session replaces the earlier one when read,
+    and both stay on disk. This is also how a session in a home shared by
+    two units is narrowed to one.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
+
+    session, matches = _find_session(every, session_id)
+    if session is None:
+        if matches:
+            click.echo(f"'{session_id}' matches more than one session:", err=True)
+            for s in matches:
+                click.echo(_session_line(s), err=True)
+        else:
+            click.echo(f"No session '{session_id}' in the index.", err=True)
+        sys.exit(1)
+    try:
+        unit = registry.resolve(unit_name)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+    append(Event(kind="attributed", unit=unit.name, session=session.id,
+                 at=int(time.time()), machine=this_machine()),
+           root=EVENTS_DIR)
+    click.echo(f"attributed session {session.id} to {unit.name}")
 
 
 def _session_id_from(output: str) -> str | None:

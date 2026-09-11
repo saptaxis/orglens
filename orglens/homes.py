@@ -41,6 +41,16 @@ class Home:
     how: str  # marker | remote | name | absent | declaring
 
 
+def repo_of(name: str) -> str:
+    """The repository segment of a home name.
+
+    A home is named `<repo>` or `<repo>/<path within it>`. Everything that
+    keys by repository — a scad mount, a container cwd, the remote and
+    directory-name rungs below — wants the first segment and nothing else.
+    """
+    return name.partition("/")[0]
+
+
 def normalise_remote(url: str) -> str | None:
     """The owner/repo tail of a git remote, host and alias discarded."""
     if not url:
@@ -71,7 +81,12 @@ def _remote_of(path: Path) -> str | None:
 def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candidate]:
     """Every directory under the roots that could be a home, with its evidence."""
     found: list[Candidate] = []
-    seen: set[Path] = set()
+    # The depth each directory was reached at. Roots may overlap — `docs`
+    # and `docs/research/prog` both listed — and the nested one exists to
+    # reach deeper than the outer one's bound allows. So a directory already
+    # reported is walked again when a later root reaches it with more depth
+    # to spend, but reported only once.
+    seen: dict[Path, int] = {}
 
     def walk(base: Path, depth: int) -> None:
         if depth > max_depth:
@@ -83,18 +98,19 @@ def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candid
         for child in children:
             if child.name.startswith("."):
                 continue
-            if child in seen:
+            if child in seen and seen[child] <= depth:
                 continue
-            seen.add(child)
-            marker = read_marker(child)
-            found.append(
-                Candidate(
-                    path=child,
-                    name=child.name,
-                    marker_home=marker.home if marker else None,
-                    remote=_remote_of(child) if (child / ".git").exists() else None,
+            if child not in seen:
+                marker = read_marker(child)
+                found.append(
+                    Candidate(
+                        path=child,
+                        name=child.name,
+                        marker_home=marker.home if marker else None,
+                        remote=_remote_of(child) if (child / ".git").exists() else None,
+                    )
                 )
-            )
+            seen[child] = depth
             walk(child, depth + 1)
 
     for root in roots:
@@ -116,7 +132,8 @@ def _rungs(name: str, candidates: list[Candidate]):
     `candidates_for`, which wants every pair at that same rung — the
     difference between "the answer" and "everyone who could have answered".
     """
-    repo, _, subpath = name.partition("/")
+    repo = repo_of(name)
+    subpath = name.partition("/")[2]
 
     def spoken_for(c: Candidate) -> bool:
         # A directory carrying a marker has already answered what home it is.
