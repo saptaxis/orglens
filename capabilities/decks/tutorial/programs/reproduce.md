@@ -1,4 +1,4 @@
-# Role: reproduce
+# Program: reproduce
 
 Establish whether the reported problem happens, and write down the smallest way
 to make it happen.
@@ -18,5 +18,4 @@ You do not fix anything. If you cannot reproduce it, say so plainly in
 
 When done:
 
-    orglens workflow record <packet> --workflow <deck>/WORKFLOW.yaml \
-        --deck <deck> --node reproduce
+    orglens workflow done <packet> --node reproduce --agent <you>

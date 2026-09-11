@@ -3,8 +3,8 @@
 An entity's `overview.md` carries a hand-written status line. It drifts, because
 nothing forces anyone to update it: orglens' own said "v1 core implemented"
 while plan 07 was merged. That is a stored status field — the shape the workflow
-face refuses outright, where `runs.jsonl` rejects the keys `status`, `state`,
-`pending`, `current_state` and `next_node` for exactly this reason.
+engine refuses outright: a packet's `session.jsonl` holds facts about the past
+and its position is derived from them, never written down.
 
 So the position is computed and only the reasoning stays written down. A
 sentence that says *"the draft is dead pending a literature refresh"* is a
@@ -15,7 +15,7 @@ Four sources, none of which reads a document body:
 
     git         when the directory was last committed to, and what is unstaged
     filenames   the highest-numbered plan
-    runs.jsonl  workflow packets, and which are waiting on a human
+    session.jsonl  workflow packets, and which are waiting on a human
     scad index  sessions attributed to this entity, and their open questions
 
 Every one degrades to empty rather than raising: a tree outside git, a machine
@@ -146,17 +146,28 @@ def _latest_plan(path: Path) -> str | None:
 
 
 def _packets(path: Path) -> tuple[int, int]:
-    """Workflow packets beneath the entity, and how many hold a question."""
-    from orglens.workflow.runstate import read_entries, unresolved_needs_human
+    """Workflow packets beneath the entity, and how many are waiting on a human.
+
+    A packet is a directory holding a `session.jsonl`. The deck is loaded
+    when it can be, so `review` gates count; where it cannot — not checked
+    out on this machine — only a `done` with a question counts.
+    """
+    from orglens.workflow import session
+    from orglens.workflow.deck import DeckError, load_deck
 
     total = blocked = 0
-    for log in path.rglob("runs.jsonl"):
+    for found in path.rglob(session.SESSION_FILE):
         total += 1
-        try:
-            if unresolved_needs_human(read_entries(log.parent)) is not None:
-                blocked += 1
-        except (ValueError, OSError):
-            pass
+        facts = session.read(found.parent)
+        bound = session.deck_path(facts)
+        deck = None
+        if bound is not None:
+            try:
+                deck = load_deck(bound)
+            except DeckError:
+                deck = None
+        if session.gated(facts, deck):
+            blocked += 1
     return total, blocked
 
 

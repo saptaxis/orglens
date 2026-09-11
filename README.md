@@ -85,7 +85,7 @@ replaces the bundled grammar.
 | `orglens attribute SESSION-ID UNIT` | Say which unit a session was for, after the fact |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 | `orglens where [NAME]` | Which roots are configured, and which unit a name or this directory resolves to |
-| `orglens workflow ...` | Derive and validate filesystem-native workflows |
+| `orglens workflow next\|done\|note\|goto PACKET` | Run a deck's nodes over a packet, one pass at a time, with a human between. See `capabilities/decks/tutorial/DECK.md` |
 
 ## Skills
 

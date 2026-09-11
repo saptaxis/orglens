@@ -115,7 +115,7 @@ def _dated(act: activity.Activity) -> list[str]:
 
     A bare `26d ago` never says which clock it is — commit, edit, or session
     — and printing two labels for the same moment is noise, not information.
-    Mirrors the reasoning in `view.py`'s card: a clock within an hour of one
+    Mirrors the reasoning in `view.py`'s program: a clock within an hour of one
     already shown adds nothing.
     """
     clocks = []

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## Unreleased
+
+The workflow engine is replaced. `orglens workflow` runs a deck as an ordered
+list of nodes: `next` says which program to perform and which file it writes,
+`done` records a finished node, `note` answers the open gate, `goto` points
+the workflow at a node. A packet's `session.jsonl` is the only record; position
+and gate are derived from its last routing fact. The guard-based engine
+(guards, roles, reads, terminal predicates, `runs.jsonl`) is removed in commit
+`76858fd`; the new package reuses its path, so recover the old one with
+`git show 76858fd^:orglens/workflow/<file>` or a checkout of `76858fd^` into a
+worktree. The tutorial deck is ported to `WORKFLOW.yaml`.
 A session belongs to a set of units: the one an attribution names, or every
 unit with a home containing where it ran. `orglens/sessions.py` is the one
 place that decides this; `list`, `status` and `view` read from it.

@@ -28,10 +28,11 @@ ENGINE = ROOT / "orglens"
 
 #: The vocabulary face. `activity.py` and `view.py` are exempt: they derive what
 #: is true rather than declaring what may exist, and they were built after the
-#: drift they would otherwise be blamed for. `workflow/` has its own check.
+#: drift they would otherwise be blamed for.
 FACE = ("cli.py", "check.py", "config.py", "declaration.py", "documents.py",
         "events.py", "grammar.py", "homes.py", "propose.py", "reference.py",
-        "scadconfig.py", "sessions.py", "snapshot.py", "state.py", "units.py")
+        "scadconfig.py", "sessions.py", "snapshot.py", "state.py", "units.py",
+        "workflow/deck.py", "workflow/session.py", "workflow/cli.py")
 
 
 def default_grammar() -> Grammar:
@@ -106,7 +107,7 @@ def test_no_declared_noun_is_hardcoded_in_the_face(word: str):
 def test_every_module_in_the_face_is_accounted_for():
     """A new module in the vocabulary face joins the check, or the check rots."""
     present = {
-        p.name for p in ENGINE.glob("*.py")
+        str(p.relative_to(ENGINE)) for p in (*ENGINE.glob("*.py"), *ENGINE.glob("workflow/*.py"))
         if p.name not in ("__init__.py", "activity.py", "view.py")
     }
     assert present == set(FACE), (

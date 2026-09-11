@@ -1,131 +1,80 @@
-"""The tutorial deck, and the claims its DECK.md makes.
+"""The tutorial deck, and the walkthrough its DECK.md promises.
 
-This deck is the only witness that the engine is generic. The writing deck
-cannot prove it — the engine was grown alongside it, so a domain assumption
-would be invisible from inside. A bug-triage loop sharing zero vocabulary with
-an essay is the check.
-
-The DECK.md walkthrough is a promise to whoever runs it. These tests hold it to
-that promise, because a tutorial that lies is worse than no tutorial.
+This deck is the only witness that the engine is generic: a bug-triage loop
+sharing no vocabulary with an essay. A tutorial that lies is worse than no
+tutorial, so the walkthrough's every step is held to here.
 """
 
-from __future__ import annotations
-
-import copy
 from pathlib import Path
 
-import pytest
+from click.testing import CliRunner
 
-from orglens.workflow.definition import load_workflow
-from orglens.workflow.derive import derive_next_node
-from orglens.workflow.job import resolve_job
-from orglens.workflow.result import Outcome
-from orglens.workflow.validate import validate_definition
+from orglens.workflow.deck import load_deck
+from orglens.cli import cli
 
 DECK = Path(__file__).resolve().parents[2] / "capabilities" / "decks" / "tutorial"
-WORKFLOW_PATH = DECK / "WORKFLOW.yaml"
+CHAIN = DECK / "WORKFLOW.yaml"
 
 
-@pytest.fixture
-def workflow() -> dict:
-    return load_workflow(WORKFLOW_PATH)
+def run(*argv):
+    return CliRunner().invoke(cli, ["workflow", *argv])
 
 
-def packet(tmp_path: Path, cursor: str | None = None, **files: str) -> Path:
-    (tmp_path / "report.md").write_text("a bug")
-    for name, body in files.items():
-        (tmp_path / name.replace("__", ".")).write_text(body)
-    if cursor:
-        (tmp_path / "runs.jsonl").write_text(
-            '{"type":"node_completed","node":"%s","at":"t","event_id":"1"}\n' % cursor
-        )
-    return tmp_path
+def test_the_shipped_deck_loads_and_every_program_resolves():
+    deck = load_deck(CHAIN)
+    assert [s.name for s in deck.nodes] == ["reproduce", "fix", "verify"]
+    assert [s.review for s in deck.nodes] == [False, True, False]
+    assert all(s.program.is_file() for s in deck.nodes)
 
 
-def test_the_shipped_definition_validates(workflow):
-    assert validate_definition(workflow) == []
+def test_the_deck_shares_no_vocabulary_with_a_writing_chain():
+    writing = {"brief", "claim-sheet", "skeleton", "prose", "critique", "revise", "audit", "polish"}
+    assert {s.name for s in load_deck(CHAIN).nodes} & writing == set()
 
 
-#: The writing deck's node names, recorded here rather than loaded. That deck
-#: moved to `orglens-extras`, and the claim below is about words, not files —
-#: a literal keeps the proof in this repo instead of making it depend on one
-#: the reader may not have. Update it if that deck's vocabulary changes.
-ANOTHER_DECKS_VOCABULARY = {"audit", "brief", "critique", "draft", "polish", "revise"}
+def test_the_walkthrough_in_deck_md(tmp_path):
+    pkt = tmp_path / "bug-417"
+    pkt.mkdir()
+    (pkt / "report.md").write_text("Login fails with a space in the password.\n")
+
+    # 1. Where am I?
+    out = run("next", str(pkt), "--deck", str(CHAIN)).output
+    assert "node: reproduce" in out and "write: " in out
+
+    # 2. Do the pass, record it.
+    (pkt / "repro.md").write_text("Steps: log in with 'a b'.\n")
+    assert run("done", str(pkt), "--node", "reproduce", "--agent", "claude").exit_code == 0
+    assert "node: fix" in run("next", str(pkt)).output
+
+    # 3. A gate.
+    (pkt / "fix.md").write_text("Change: stop trimming.\n")
+    run("done", str(pkt), "--node", "fix", "--agent", "claude")
+    out = run("next", str(pkt)).output
+    assert "waiting on: review before verify" in out
+    assert run("done", str(pkt), "--node", "verify", "--agent", "claude").exit_code == 2
+    run("note", str(pkt), "agreed, ship it")
+    out = run("next", str(pkt)).output
+    assert "node: verify" in out and 'note:  "agreed, ship it"' in out
+
+    # 4. The verdict fails: round again, by hand.
+    (pkt / "verdict.md").write_text("FAILS\n")
+    run("done", str(pkt), "--node", "verify", "--agent", "codex")
+    assert "complete" in run("next", str(pkt)).output
+    run("goto", str(pkt), "--node", "reproduce", "--why", "verdict FAILS on a trailing space")
+    out = run("next", str(pkt)).output
+    assert "node: reproduce" in out and "trailing space" in out
+
+    # 5. Round two, all the way through.
+    run("done", str(pkt), "--node", "reproduce", "--agent", "claude")
+    run("done", str(pkt), "--node", "fix", "--agent", "claude")
+    run("note", str(pkt), "yes")
+    run("done", str(pkt), "--node", "verify", "--agent", "codex")
+    assert "complete" in run("next", str(pkt)).output
 
 
-def test_the_deck_shares_no_vocabulary_with_another_deck(workflow):
-    """The point of this deck. If these overlap it proves nothing."""
-    assert set(workflow["nodes"]) & ANOTHER_DECKS_VOCABULARY == set()
-
-
-@pytest.mark.parametrize(
-    "cursor,expected",
-    [
-        (None, "reproduce"),
-        ("reproduce", "fix"),
-        ("fix", "verify"),
-        ("verify", "reproduce"),  # the loop-back edge
-    ],
-)
-def test_the_loop_walks_and_closes(tmp_path: Path, workflow, cursor, expected):
-    result = derive_next_node(packet(tmp_path, cursor), workflow)
-    assert result.outcome == Outcome.RUNNABLE
-    assert result.node == expected
-
-
-def test_exactly_one_node_matches_at_every_cursor(tmp_path: Path, workflow):
-    for cursor in [None, *workflow["nodes"]]:
-        result = derive_next_node(packet(tmp_path, cursor), workflow)
-        assert result.outcome == Outcome.RUNNABLE, (cursor, result.reason)
-
-
-def test_a_closed_packet_is_terminal_whatever_the_cursor(tmp_path: Path, workflow):
-    """DECK.md §6, and the correction in 'Try changing it'."""
-    root = packet(tmp_path, "fix")
-    (root / "CLOSED").write_text("")
-    assert derive_next_node(root, workflow).outcome == Outcome.TERMINAL
-
-
-def test_deleting_the_log_returns_to_the_entry_node(tmp_path: Path, workflow):
-    """DECK.md 'Try changing it' — only true once CLOSED is gone too."""
-    root = packet(tmp_path, "fix")
-    (root / "runs.jsonl").unlink()
-    assert derive_next_node(root, workflow).node == "reproduce"
-
-
-def test_a_read_that_matches_nothing_is_reported_not_fatal(tmp_path: Path, workflow):
-    """DECK.md §2 promises `verdict.md (no match)` on the first round."""
-    job = resolve_job(packet(tmp_path), DECK, workflow, "reproduce")
-    assert "verdict.md" in job.unmatched
-    assert any(p.endswith("report.md") for p in job.reads)
-
-
-def test_every_role_the_deck_names_exists(tmp_path: Path, workflow):
-    for name in workflow["nodes"]:
-        job = resolve_job(packet(tmp_path), DECK, workflow, name)
-        assert job.role is not None and Path(job.role).is_file(), name
-
-
-def test_the_gate_is_declared_where_the_tutorial_says(workflow):
-    """DECK.md §4."""
-    assert workflow["nodes"]["fix"].get("human_review") is True
-    assert not workflow["nodes"]["reproduce"].get("human_review")
-
-
-def test_two_nodes_claiming_one_cursor_is_caught_statically(workflow):
-    """DECK.md 'Try changing it', first bullet — the exact edit it suggests."""
-    broken = copy.deepcopy(workflow)
-    broken["nodes"]["verify"]["guard"] = {"all": ["after:reproduce"]}
-    problems = validate_definition(broken)
-    assert any("fix" in p and "verify" in p and "after:reproduce" in p for p in problems)
-
-
-def test_the_tutorial_only_shows_commands_that_exist():
-    """A walkthrough that names a verb the CLI lacks is a broken tutorial."""
-    import re
-
-    from orglens.workflow.cli import workflow as workflow_group
-
-    verbs = set(workflow_group.commands)
-    shown = set(re.findall(r"orglens workflow (\w+)", (DECK / "DECK.md").read_text()))
-    assert shown <= verbs, f"DECK.md names verbs that do not exist: {shown - verbs}"
+def test_every_program_ends_by_telling_the_pass_how_to_record_itself():
+    for node in load_deck(CHAIN).nodes:
+        text = node.program.read_text()
+        assert f"--node {node.name}" in text, node.name
+        assert "orglens workflow done" in text, node.name
+        assert "workflow record" not in text, node.name
