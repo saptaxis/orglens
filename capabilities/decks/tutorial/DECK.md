@@ -1,60 +1,44 @@
-# Tutorial deck — a three-node loop you can run in five minutes
+# Tutorial deck — a three-stage chain you can run in five minutes
 
-This deck exists to be run, not read. It is a bug-triage loop — *reproduce, fix,
-verify, round again* — chosen because it is obviously **not** about writing. The
-engine that runs it is the same engine that runs the writing deck, and it knows
-nothing about bugs, articles, or anything else. `reproduce`, `report.md`,
-`CLOSED` are strings this deck invents.
+This deck exists to be run, not read. It is a bug-triage chain — *reproduce,
+fix, verify* — chosen because it is obviously **not** about writing. The engine
+that runs it is the same engine that runs a writing deck, and it knows nothing
+about bugs, articles, or anything else. `reproduce`, `report.md`, `verdict.md`
+are strings this deck invents.
 
-By the end you will have used every mechanic the system has: the cursor, a gate,
-a loop-back edge, a terminal condition, and moving the cursor by hand.
+By the end you will have used every mechanic the engine has: `next`, `done`, a
+gate, `note`, and `goto`.
 
 ## Set up
 
 ```bash
-# Run this from the root of your orglens clone — $DECK must be absolute,
-# because step 0 moves you to /tmp.
-export DECK="$PWD/capabilities/decks/tutorial"
-export WF=$DECK/WORKFLOW.yaml
+# Run this from the root of your orglens clone. $CHAIN must be absolute,
+# because the next step moves you elsewhere.
+export CHAIN="$PWD/capabilities/decks/tutorial/CHAIN.yaml"
 
-mkdir -p /tmp/triage/bug-417 && cd /tmp/triage
-git init -q . && export PKT=/tmp/triage/bug-417
+mkdir -p ~/vsr-tmp/triage/bug-417 && cd ~/vsr-tmp/triage
+export PKT=$PWD/bug-417
 echo 'Login fails with a space in the password.' > $PKT/report.md
-git add -A && git commit -qm "bug 417 reported"
 ```
 
 A **packet** is just that directory. There is no database and no registry.
 
-## 1. Where am I?
+## 1. What runs next?
 
 ```bash
-$ orglens workflow derive $PKT --workflow $WF
-runnable: reproduce
-  reproduce: guard matched
+$ orglens chain next $PKT --deck $CHAIN
+stage: reproduce
+card:  .../tutorial/cards/reproduce.md
+write: .../bug-417/repro.md
 ```
 
-The log is empty, so the cursor is nothing, and `reproduce` is the only node
-whose guard accepts that. Nothing was configured — the answer comes from the
-directory and an absent log.
+The packet has no session yet, so the first stage runs. `--deck` bound the
+packet to this deck; you will not pass it again. The card is the instructions
+for the pass; `write` is the one file the pass produces.
 
-## 2. What exactly does that pass get?
+## 2. Do the pass, then say so
 
-```bash
-$ orglens workflow job $PKT --workflow $WF --deck $DECK
-node:   reproduce
-role:   .../tutorial/roles/reproduce.md
-read:   report.md  -> /tmp/triage/bug-417/report.md
-read:   verdict.md (no match)
-write:  /tmp/triage/bug-417/repro.md
-```
-
-Note `verdict.md (no match)`. `reproduce` declares it because on later rounds a
-verdict exists — on the first round it does not, and that is reported rather
-than treated as an error. **You see what a pass is being handed before it runs.**
-
-## 3. Do the pass, then record it
-
-The engine does not run anything. You (or an agent given `role`) do the work.
+The engine runs nothing. You, or an agent handed the card, do the work.
 
 ```bash
 $ cat > $PKT/repro.md <<'EOF'
@@ -64,19 +48,21 @@ Expected: success.
 Confidence: every time.
 EOF
 
-$ orglens workflow record $PKT --workflow $WF --deck $DECK --node reproduce
-recorded reproduce
+$ orglens chain done $PKT --stage reproduce --agent you
+done: reproduce
 
-$ orglens workflow derive $PKT --workflow $WF
-runnable: fix
-  fix: guard matched
+$ orglens chain next $PKT
+stage: fix
+card:  .../tutorial/cards/fix.md
+write: .../bug-417/fix.md
 ```
 
-Recording moved the cursor. That is the only thing that moves it.
+`done` is the only thing that moves the chain forward. It refuses a stage the
+chain is not on: try `--stage verify` here and it says so.
 
-## 4. A gate
+## 3. A gate
 
-`fix` declares `human_review: true`.
+`fix` carries `review: true`.
 
 ```bash
 $ cat > $PKT/fix.md <<'EOF'
@@ -85,94 +71,79 @@ Why: the trim was cosmetic.
 Risk: none known.
 EOF
 
-$ orglens workflow record $PKT --workflow $WF --deck $DECK --node fix
-recorded fix
-raised the declared review gate
+$ orglens chain done $PKT --stage fix --agent you
+done: fix
 
-$ orglens workflow derive $PKT --workflow $WF
-runnable: verify
-  verify: guard matched
-  blocked on fix: fix is declared for human review before the next node runs
+$ orglens chain next $PKT
+waiting on: review before verify            (after stage fix)
 ```
 
-It tells you the next node *and* that you are blocked. Clear it with a reason:
+Nothing runs until a human answers. The answer is a note, and it is the only
+channel from you to the next pass:
 
 ```bash
-$ orglens workflow resolve $PKT --note "agreed, ship it"
-resolved f7b4f8226911
+$ orglens chain note $PKT "agreed, ship it"
+noted; next: verify
+
+$ orglens chain next $PKT
+stage: verify
+card:  .../tutorial/cards/verify.md
+write: .../bug-417/verdict.md
+note:  "agreed, ship it"
 ```
 
-> **Watch out:** `derive` prints `blocked` but its exit code is still `0`. Fine
-> when you are reading it; a trap if you script `derive && do_next`. Use
-> `orglens workflow run` for automation — it checks blocking first.
+A pass can also raise a gate of its own: `done --question "..."` waits the same
+way, with your question printed instead of `review before`.
 
-## 5. The loop closes
+## 4. The end of the list
 
 ```bash
-$ echo 'FAILS — still 500 on a trailing space.' > $PKT/verdict.md
-$ orglens workflow record $PKT --workflow $WF --deck $DECK --node verify
-recorded verify
+$ echo 'FAILS: still 500 on a trailing space.' > $PKT/verdict.md
+$ orglens chain done $PKT --stage verify --agent someone-else
+done: verify
 
-$ orglens workflow derive $PKT --workflow $WF
-runnable: reproduce
-  reproduce: guard matched
+$ orglens chain next $PKT
+complete
 ```
 
-**Back to `reproduce`, in the same directory, with nothing cleared.** That is the
-loop-back edge — `reproduce`'s guard is `any: ["after:nothing", "after:verify"]`,
-so it is both the entry point and the return point. A second round is the same
-pipeline over current data; `verdict.md` now exists, so this time it matches.
+`verify` is the last stage, so the chain is complete. The engine did not read
+`verdict.md`; it does not know the fix failed.
 
-## 6. Ending it is a human act
-
-The engine cannot read `verdict.md` and does not know your fix worked. Only one
-thing ends the loop:
+## 5. Round again is a human act
 
 ```bash
-$ touch $PKT/CLOSED
-$ orglens workflow derive $PKT --workflow $WF
-terminal: -
-  terminal: closed (exists:CLOSED=True)
+$ orglens chain goto $PKT --stage reproduce --why "verdict FAILS on a trailing space"
+next: reproduce
+
+$ orglens chain next $PKT
+stage: reproduce
+card:  .../tutorial/cards/reproduce.md
+write: .../bug-417/repro.md
+note:  "verdict FAILS on a trailing space"
 ```
 
-## 7. Moving the cursor by hand
-
-Suppose a report arrives with a reproduction already attached. Skip the node:
-
-```bash
-$ orglens workflow goto $PKT --workflow $WF --node reproduce \
-      --note "reporter attached a clean repro"
-cursor moved to reproduce: reporter attached a clean repro
-```
-
-Forward, backward, redo a stage — any node, any time. It appends a fact with
-your reason rather than setting a field, so six months later the packet says
-*who skipped what and why*. You cannot move silently, and that is the only
-restriction.
+`goto` names the stage to run next. Forward, backward, the same stage again:
+any stage, any time. It appends a fact with your reason rather than setting a
+field, so six months later the packet says who moved what and why. It also
+clears an open gate, because a human moving the chain is the human acting.
 
 ## What you just used
 
 | mechanic | where |
 |---|---|
-| the cursor is the run log | §1, §3 |
-| `exists:<glob>` over the directory | §6 terminal, §2 `(no match)` |
-| `after:<node>` over the cursor | every guard |
-| entry and loop-back in one guard | §5 |
-| a human gate | §4 |
-| moving the cursor by hand | §7 |
+| `next` derives the position from the session file | every step |
+| `done` moves the chain, and refuses the wrong stage | §2 |
+| `review: true` on a stage opens a gate | §3 |
+| `note` answers it, and reaches the next card | §3 |
+| the end of the list is the end | §4 |
+| `goto` moves the chain by hand | §5 |
+
+Everything the engine knows is in `$PKT/session.jsonl`, one fact per line,
+never rewritten. Delete it and you are back at `reproduce`; git is the backup.
 
 ## Try changing it
 
-The fastest way to understand the engine is to break this deck.
-
-- Give `verify` the guard `all: ["after:reproduce"]` and run
-  `orglens workflow check` — two nodes now claim the same cursor, and it says so
-  without running anything. Ambiguity is decidable here because exactly one
-  `after:` is ever true.
-- Delete `runs.jsonl` **and `CLOSED`**, then derive — you are back at
-  `reproduce`. The log *is* the position; git is the backup, `goto` is the
-  repair. (Leave `CLOSED` in place and you get `terminal` instead: terminal
-  conditions are checked before any guard, so a closed packet stays closed no
-  matter what the cursor says.)
-- Rename every node and file to something from your own domain. Nothing in
-  `orglens/workflow/` needs to change, because nothing in it knows these words.
+- Add `review: true` to `verify` and run the chain again: it waits before
+  `complete` now, and a `note` finishes it.
+- Rename every stage and file to something from your own domain. Nothing in
+  `orglens/chain/` needs to change, because nothing in it knows these words.

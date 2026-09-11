@@ -1,4 +1,4 @@
-# Role: fix
+# Card: fix
 
 Make the smallest change that addresses what `repro.md` establishes.
 
@@ -11,14 +11,13 @@ Write `fix.md`:
 - **Why this and not more** — the smallest-change argument.
 - **Risk** — what this could break.
 
-**This pass ends at a gate.** The declaration carries `human_review: true`, so
-recording it raises a question and the loop stops until someone answers:
+**This pass ends at a gate.** The stage carries `review: true`, so finishing it
+stops the chain until someone answers:
 
-    orglens workflow resolve <packet> --note "..."
+    orglens chain note <packet> "..."
 
 That is deliberate. A fix nobody agreed to is not a fix.
 
 When done:
 
-    orglens workflow record <packet> --workflow <deck>/WORKFLOW.yaml \
-        --deck <deck> --node fix
+    orglens chain done <packet> --stage fix --agent <you>
