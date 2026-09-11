@@ -160,9 +160,9 @@ def _packets(path: Path) -> tuple[int, int]:
     from orglens.chain.deck import DeckError, load_deck
 
     total = blocked = 0
-    for log in path.rglob(session.LOG):
+    for found in path.rglob(session.SESSION_FILE):
         total += 1
-        facts = session.read(log.parent)
+        facts = session.read(found.parent)
         bound = session.deck_path(facts)
         deck = None
         if bound is not None:

@@ -85,7 +85,7 @@ class TestNext:
         (deck).write_text("deck: demo\nstages:\n  - {name: one, card: cards/a.md, writes: one.md}\n")
         r = run("next", str(packet))
         assert r.exit_code == 1
-        assert "unknown stage in log: three" in r.output
+        assert "unknown stage in session: three" in r.output
 
     def test_a_bad_deck_is_exit_2(self, packet, deck):
         deck.write_text("deck: x\nstages: []\n")

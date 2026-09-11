@@ -20,7 +20,7 @@ from pathlib import Path
 
 from orglens.chain.deck import Deck, Stage
 
-LOG = "session.jsonl"
+SESSION_FILE = "session.jsonl"
 
 #: What each fact type must carry, beyond `type`, `at` and `id`.
 REQUIRED: dict[str, tuple[str, ...]] = {
@@ -60,7 +60,7 @@ class Position:
 def read(packet: Path) -> list[dict]:
     """Every fact, in order. A broken line is skipped: a log that refuses to
     be read because one line is bad loses everything for the sake of one."""
-    path = Path(packet) / LOG
+    path = Path(packet) / SESSION_FILE
     if not path.exists():
         return []
     out: list[dict] = []
@@ -88,7 +88,7 @@ def append(packet: Path, fact: dict) -> dict:
     stamped = {**fact, "at": datetime.now().astimezone().isoformat(timespec="seconds"),
                "id": secrets.token_hex(6)}
     _validate(stamped)
-    path = Path(packet) / LOG
+    path = Path(packet) / SESSION_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as handle:
         handle.write(json.dumps(stamped, sort_keys=True) + "\n")

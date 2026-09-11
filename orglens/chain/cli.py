@@ -92,7 +92,7 @@ def next_cmd(packet: Path, deck_opt: str | None, as_json: bool):
     elif pos.state == State.COMPLETE:
         click.echo("complete")
     else:
-        _fail(f"unknown stage in log: {pos.after}", code=1)
+        _fail(f"unknown stage in session: {pos.after}", code=1)
 
 
 @chain.command()
