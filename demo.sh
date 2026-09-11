@@ -51,7 +51,7 @@ fi
 if [ "$STEP" = "all" ] || [ "$STEP" = "2" ]; then
     print_header 2 "Configure"
 
-    CONFIG_DIR="$HOME/.config/orglens"
+    CONFIG_DIR="$HOME/.orglens"
     CONFIG_FILE="$CONFIG_DIR/config.yaml"
 
     if [ -f "$CONFIG_FILE" ]; then

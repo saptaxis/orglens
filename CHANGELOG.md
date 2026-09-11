@@ -40,6 +40,9 @@ bound under the old names.
   parent as a root.
 - `orglens check` reports a home declared on more than one unit, and which of
   them `where` answers inside it.
+- Everything orglens keeps on a machine is under `~/.orglens/`: `config.yaml`,
+  `cache/snapshot.md`, `events/`. Move `~/.config/orglens/config.yaml` there;
+  nothing reads the old path.
 
 ## [0.2.0] — 2026-09-10
 

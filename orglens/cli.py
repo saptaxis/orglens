@@ -23,7 +23,7 @@ from pathlib import Path
 import click
 
 from orglens import activity, check as check_module, documents, reference, sessions, view
-from orglens.config import Config
+from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
 from orglens.events import EVENTS_DIR, Event, append, this_machine
 from orglens.homes import Home, repo_of
@@ -448,7 +448,7 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
         # Warn, don't refuse: a unit outside every root is allowed to exist,
         # it is simply un-met until a root is added or someone works in it —
         # `Registry.at` reads a marker directly on the way up, roots or not.
-        source = os.environ.get("ORGLENS_CONFIG") or "~/.config/orglens/config.yaml"
+        source = os.environ.get("ORGLENS_CONFIG") or str(ORGLENS_HOME / "config.yaml")
         click.echo(
             "note: this is under none of your configured roots, so `list`, "
             "`status`, `snapshot`, and `check` will not see it. Add its root "
@@ -495,7 +495,7 @@ def where_cmd(name: str | None):
     """
     registry, _ = _load_registry()
 
-    source = os.environ.get("ORGLENS_CONFIG") or "~/.config/orglens/config.yaml"
+    source = os.environ.get("ORGLENS_CONFIG") or str(ORGLENS_HOME / "config.yaml")
     click.echo(f"roots:  {registry.roots[0]}  (config: {source})")
     for extra in registry.roots[1:]:
         click.echo(f"        {extra}")

@@ -1,4 +1,4 @@
-"""The durable half of `~/.orglens` — what someone asserted, and when.
+"""The durable part of `~/.orglens` — what someone asserted, and when.
 
 Everything else orglens knows is derived: scan the tree again and it comes
 back. This does not. An attribution exists *because* nothing could compute it
@@ -24,7 +24,9 @@ import socket
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-EVENTS_DIR = Path.home() / ".orglens" / "events"
+from orglens.config import ORGLENS_HOME
+
+EVENTS_DIR = ORGLENS_HOME / "events"
 
 
 @dataclass(frozen=True)

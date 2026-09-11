@@ -51,8 +51,8 @@ pip install -e .
 orglens needs to know where your docs tree lives:
 
 ```bash
-mkdir -p ~/.config/orglens
-cat > ~/.config/orglens/config.yaml <<'EOF'
+mkdir -p ~/.orglens
+cat > ~/.orglens/config.yaml <<'EOF'
 roots:
   - ~/path/to/your/docs
   - ~/path/to/your/code
@@ -130,9 +130,9 @@ Homes can be shared: one repository is a home of two units when both work in it,
 and each sees its own documents. Inside a shared home, `where` answers the first
 of those units by name; `check` reports every shared home and which unit that is.
 
-Everything needed to find a unit travels with it in git. `~/.orglens` holds an
-index and an event log; deleting it loses speed and attribution history, not the
-definition of your work.
+Everything needed to find a unit travels with it in git. `~/.orglens` holds the
+config, a snapshot cache and the event log; deleting it loses your roots, speed
+and attribution history, not the definition of your work.
 
 ## Grammar
 
