@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- A root listed inside another root is swept to its own depth, so a marker
+  deeper than three directories below the outer root is found by listing its
+  parent as a root.
+- `orglens check` reports a home declared on more than one unit, and which of
+  them `where` answers inside it.
+
 ## [0.2.0] — 2026-09-10
 
 `orglens start UNIT` picks one of the unit's homes, launches through scad, and
