@@ -168,3 +168,28 @@ def test_a_root_reached_through_a_symlink_yields_resolved_paths(tmp_path):
     home = resolve_home("world-model-ladder", scan_roots([link]))
     assert home.path == (real / "world-model-ladder").resolve()
     assert "via-symlink" not in home.path.parts
+
+
+def test_a_nested_root_reaches_past_the_outer_root_depth_bound(tmp_path):
+    # With `docs` and `docs/research/prog` both listed, a marker at
+    # `docs/research/prog/articles/piece` is depth 4 from the first root and
+    # depth 2 from the second. It has to be found: the setup note prescribes
+    # adding the nested root as the remedy for anything past the bound.
+    docs = tmp_path / "docs"
+    prog = docs / "research" / "prog"
+    piece = prog / "articles" / "piece"
+    piece.mkdir(parents=True)
+    (piece / MARKER).write_text("home: piece\n")
+
+    candidates = scan_roots([docs, prog])
+    assert resolve_home("piece", candidates).how == "marker"
+
+
+def test_overlapping_roots_report_each_directory_once(tmp_path):
+    docs = tmp_path / "docs"
+    prog = docs / "research" / "prog"
+    prog.mkdir(parents=True)
+
+    candidates = scan_roots([docs, prog])
+    paths = [c.path for c in candidates]
+    assert len(paths) == len(set(paths))

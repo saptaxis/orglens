@@ -61,7 +61,9 @@ EOF
 `roots` are the directories orglens sweeps for declarations: your documents tree
 and wherever your repositories are checked out. A unit outside every root is
 un-met rather than invisible, and registers itself the first time you work in
-it. `grammar: /path/to/custom.yaml` replaces the bundled grammar.
+it. The sweep goes three directories below each root; a marker deeper than
+that is found by listing its parent as a root too. `grammar: /path/to/custom.yaml`
+replaces the bundled grammar.
 
 ## CLI Reference
 
