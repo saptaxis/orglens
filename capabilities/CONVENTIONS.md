@@ -1,38 +1,48 @@
 # Deck conventions
 
-A **deck** is a self-contained, themed bundle of programs that moves in or out of
-the bank as a unit. This is the shape to copy when adding one.
+A **deck** is a self-contained, themed bundle of programs and skills that moves
+in or out of the bank as a unit. This is the shape to copy when adding one.
 
-## What every deck has
+## What a deck has
 
-- **`DECK.md`** — the descriptor. Purpose, the programs it holds, its state model (if any), and its triggers. orglens treats a deck as an entity keyed on it.
-- **Programs** — one or more of:
-  - **operators** (`operators/<name>.md`) — prompted agents, often stateless.
-  - **skills** (`skills/<name>/SKILL.md`) — harness-native, with frontmatter, description and explicit triggers.
-  - **agents** (`agents/<name>.md`) — harness-format named agents.
-- **packs** (optional, `packs/{bias,voice}/<name>.md`) — swappable content that parameterizes programs.
+- **`DECK.md`** — the descriptor. What the deck is for, its programs and skills,
+  its workflow if it has one, and what triggers it. orglens treats a deck as a
+  unit keyed on this file.
+- **`WORKFLOW.yaml`** — the deck's workflow, when it has state: an ordered list
+  of nodes, each naming a program and the one file it writes. A deck of skills
+  alone has none. `orglens workflow` runs it; see the [tutorial](decks/tutorial/DECK.md).
+- **`programs/`** — node programs. One file per program; a program is what one
+  node runs, and it is performed by whoever is at the packet: this session, a
+  subagent, a container, another model.
+- **`skills/`** — `skills/<name>/SKILL.md`, the harness-native form with
+  frontmatter, description and triggers. `bootstrap` routes these out.
+- **`references/`** — what programs and skills read: templates, a voice, lists
+  of patterns. Nothing in it is performed on its own.
 
 ## Rules
 
-1. **Programs compose.** A deck may stack higher-order operators on a base producer: one program generates, another decides between its outputs and publishes. Write two programs that compose rather than one that does everything.
-2. **State declares intent; existence is the record.** A plan file says what should be there; the files that exist say what is done. No status flags to keep in sync.
-3. **Programs reach engines through peer skills.** A program gets to Codex, Claude or pi through the invocation layer (a `codex` skill's profile, scad, the companion), which normalizes argv, inputs, sandbox and resume in, and hands back a structured result.
+1. **A program does one pass and writes one file.** Two programs that compose
+   beat one that does everything; the workflow is where they are put in order.
+2. **A program reads what it says it reads.** Nothing declares reads for it,
+   and the engine opens no artifact. A glob that silently matched nothing was
+   the previous engine's worst failure, so there is no glob.
+3. **State is the packet's session file.** `session.jsonl` records what
+   finished, what was asked, and what was answered; position is derived from
+   it and never stored. No status flag anywhere to keep in sync.
+4. **Programs reach engines through peer skills.** A program gets to Codex,
+   Claude or another harness through the invocation layer — a `codex` skill,
+   scad, the companion — which handles argv, inputs, sandbox and resume.
 
 ## Adding a deck
 
 1. `mkdir decks/<name>/`, write `DECK.md`.
-2. Drop programs under `operators/` and/or `skills/`; packs under `packs/` if it needs them.
-3. Keep domain state (binaries, large outputs) gitignored. Version the skills and config, not the artifacts.
-4. `./bootstrap` routes the new deck's skills to the harness locations by walking the repo for `SKILL.md` files. No central registry to edit.
+2. Put programs under `programs/`, skills under `skills/<name>/`, and whatever
+   they read under `references/`. Write `WORKFLOW.yaml` if the programs run in
+   order over a packet.
+3. Keep domain state (binaries, large outputs) gitignored. Version the deck,
+   not the artifacts it produces.
+4. `./bootstrap` routes the deck's skills to the harness locations by walking
+   the repo for `SKILL.md` files. No central registry to edit.
 
-## Method deck vs domain deck
-
-| | Method deck | Domain deck |
-|---|---|---|
-| Scope | cross-domain (any problem) | one recurring task |
-| Programs | mostly stateless operators | skills with domain state |
-| Taste lives in | packs (bias/voice) | the skill prompts + state model |
-
-Both kinds share this anatomy, the orglens grammar and the bootstrap. This repo
-ships `tutorial`, a three-node loop for running the engine once. Working decks
-of both kinds live in `orglens-extras`.
+This repo ships `tutorial`, a three-node workflow for running the engine once.
+Working decks live in `orglens-extras`, with this same shape.

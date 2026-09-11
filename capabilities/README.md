@@ -1,6 +1,6 @@
 # capabilities — the deck bank
 
-A bank of **decks**, each a self-contained bundle of operators and skills for
+A bank of **decks**, each a self-contained bundle of programs and skills for
 one purpose.
 
 | Tool | Owns |
@@ -21,23 +21,19 @@ tree has with orglens. The engine reads this tree's grammar
 ## The model: bank → deck → program
 
 - **Bank** — this directory. All decks under one roof, one grammar.
-- **Deck** — a themed, self-contained bundle: operators and/or skills for a
-  purpose, plus the packs and state they need. Two kinds:
-  - **Method decks** (general, cross-domain) — inception / verification /
-    communication operators. Domain-agnostic; the packs carry the taste.
-  - **Domain decks** (one recurring real task) — a workflow of nodes with its own
-    vocabulary and state.
-- **Program** — a single file you deal out and an agent performs: a `SKILL.md`,
-  a node program, a named agent.
+- **Deck** — a themed, self-contained bundle for one purpose: programs, skills,
+  what they read, and a workflow if the programs run in order.
+- **Program** — what one node of a workflow runs. One file, one pass, one
+  file written, performed by whoever is at the packet.
+- **Skill** — a `SKILL.md` a harness loads on its own triggers. A deck can be
+  skills alone, with no workflow.
 
 New decks accrete over time. A deck is just a directory — port one in or out
-freely. See [`CONVENTIONS.md`](CONVENTIONS.md) for the anatomy, and the caveat
-that it was reverse-engineered from one deck rather than designed.
+freely. See [`CONVENTIONS.md`](CONVENTIONS.md) for the anatomy.
 
-**Both kinds are only illustrated here, not shipped.** The decks that carried
-personal method moved to `orglens-extras` — see *Private decks* below. What
-remains is `tutorial`, and it is not a stand-in: it is the check that the
-engine is generic.
+The decks that carry personal method live in `orglens-extras` — see *Private
+decks* below. What ships here is `tutorial`, and it is not a stand-in: it is
+the check that the engine is generic.
 
 ## Layout
 
@@ -45,7 +41,7 @@ engine is generic.
 orglens/
   bootstrap                # install the tool, route every deck's skills
   capabilities/
-    .orglens-grammar.yml   # grammar: deck, operator, pack, agent as artifact types
+    .orglens-grammar.yml   # grammar: deck as the unit; program, skill, reference as artifacts
     CONVENTIONS.md         # what a deck is — the anatomy to copy when adding one
     decks/
       tutorial/            # a three-node workflow, run in five minutes
@@ -84,7 +80,10 @@ It prints what it would remove and confirms once before doing any of it. `~/.age
 
 ## Status
 
-Scaffold. Structure defined; **decks and operators harvested as they prove themselves on real problems — not designed up front.** The first domain deck was built before the pattern was named, and moved to `orglens-extras` when this repo went public — the anatomy it demonstrated is what stayed.
+Structure defined; decks harvested as they prove themselves on real problems,
+not designed up front. The first working deck was built before the pattern was
+named and moved to `orglens-extras` when this repo went public; the anatomy it
+demonstrated is what stayed.
 
 ## Private decks
 
