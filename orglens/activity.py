@@ -485,7 +485,7 @@ def _session_clock(
 def peek(
     paths: list[Path],
     name: str,
-    index: Path = SCAD_INDEX,
+    index: Path | None = None,
     home_names: list[str] | None = None,
     attributed: dict[str, str] | None = None,
 ) -> Activity:
@@ -507,6 +507,10 @@ def peek(
     paths = [Path(p) for p in paths]
     home_names = home_names or []
     mine = [s for s, u in (attributed or {}).items() if u == name]
+    # Resolved here, not in the signature: a default argument is bound at
+    # import, and `SCAD_INDEX` is what a test reassigns to keep the real
+    # `~/.scad` out of the suite.
+    index = SCAD_INDEX if index is None else index
     a = Activity()
     if not paths:
         return a
@@ -519,7 +523,7 @@ def peek(
 def read(
     paths: list[Path],
     name: str,
-    index: Path = SCAD_INDEX,
+    index: Path | None = None,
     home_names: list[str] | None = None,
     attributed: dict[str, str] | None = None,
 ) -> Activity:
@@ -527,6 +531,7 @@ def read(
     paths = [Path(p) for p in paths]
     home_names = home_names or []
     mine = [s for s, u in (attributed or {}).items() if u == name]
+    index = SCAD_INDEX if index is None else index
     activity = Activity()
     if not paths:
         return activity

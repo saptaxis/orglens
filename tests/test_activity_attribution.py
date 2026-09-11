@@ -122,3 +122,16 @@ def test_an_attributed_live_session_shows_even_from_outside_every_home(
     got = activity.read([home], "orglens", index=index,
                         attributed={"s1": "orglens"}).live
     assert [e["session"] for e in got] == ["s1"]
+
+
+def test_the_index_location_is_read_when_called_not_when_imported(tmp_path, monkeypatch):
+    # `index` defaulted to `SCAD_INDEX` in the signature, which bound the real
+    # `~/.scad/index.sqlite` at import time, so a caller that passed nothing
+    # (`list`, `status`, `view`) could not be pointed anywhere else by a test.
+    home = tmp_path / "orglens"
+    home.mkdir()
+    index = _index(tmp_path, [("s1", str(home), "orglens")])
+    monkeypatch.setattr(activity, "SCAD_INDEX", index)
+
+    assert activity.read([home], "orglens").sessions == 1
+    assert activity.peek([home], "orglens").sessions == 1
