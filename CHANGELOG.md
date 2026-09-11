@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+A session belongs to a set of units: the one an attribution names, or every
+unit with a home containing where it ran. `orglens/sessions.py` is the one
+place that decides this; `list`, `status` and `view` read from it.
+
+- `orglens sessions [UNIT]` lists a unit's sessions, or every unit's grouped,
+  with how each is the unit's. `--none` lists the sessions belonging to no unit.
+- `orglens resume UNIT|SESSION-ID` hands a session, or a unit's newest open
+  one, to `scad session resume`.
+- `orglens attribute SESSION-ID UNIT` records an attribution after the fact.
+- `view` shows how each recent session is the unit's, and ends with the
+  unattributed sessions, each with its resume command.
+- Session counts are main sessions only. Subagents and workflow agents used to
+  be counted too, which is why a unit's number can be lower than before.
+- A home reached through a symlinked root matches sessions that recorded
+  either spelling of the path.
 - A root listed inside another root is swept to its own depth, so a marker
   deeper than three directories below the outer root is found by listing its
   parent as a root.
