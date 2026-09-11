@@ -583,6 +583,13 @@ def check_cmd():
             f"directory — {shown}"
         )
 
+    for shared in report.shared:
+        names = " and ".join([", ".join(shared.units[:-1]), shared.units[-1]])
+        click.echo(
+            f"home '{shared.home}' is declared on {names} — inside it, "
+            f"`where` answers {shared.units[0]}"
+        )
+
     if not report:
         click.echo("No drift.")
 

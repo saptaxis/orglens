@@ -123,7 +123,8 @@ named repositories, optionally with a path inside one — the marker's own
 directory is always a home whether or not it is listed.
 
 Homes can be shared: one repository is a home of two units when both work in it,
-and each sees its own documents.
+and each sees its own documents. Inside a shared home, `where` answers the first
+of those units by name; `check` reports every shared home and which unit that is.
 
 Everything needed to find a unit travels with it in git. `~/.orglens` holds an
 index and an event log; deleting it loses speed and attribution history, not the

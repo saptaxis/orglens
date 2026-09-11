@@ -75,6 +75,18 @@ class Collision:
 
 
 @dataclass(frozen=True)
+class Shared:
+    """A home declared on more than one unit. Sharing is intended — one
+    repository can be a home of two units when both work in it — but `where`
+    inside that directory answers one of them, and which one is a fact worth
+    seeing: `Registry.at` takes the first by unit name, and `units` is in
+    that order.
+    """
+    home: str
+    units: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class Report:
     drifted: list[Drift] = field(default_factory=list)
     #: Directories that look like work and have not declared themselves. The
@@ -102,6 +114,8 @@ class Report:
     duplicates: list[Duplicate] = field(default_factory=list)
     #: Home names more than one candidate directory could have satisfied.
     collisions: list[Collision] = field(default_factory=list)
+    #: Home names declared on more than one unit.
+    shared: list[Shared] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(
@@ -111,6 +125,7 @@ class Report:
             or self.unmatched
             or self.duplicates
             or self.collisions
+            or self.shared
         )
 
 
@@ -237,6 +252,21 @@ def run(registry: Registry) -> Report:
                     )
                 )
 
+    # `units` is sorted by name, so the first unit listed under a home is
+    # the one `at` answers with inside it.
+    units_by_home: dict[str, list[str]] = {}
+    for unit in units:
+        for home in unit.homes:
+            if home.how == "declaring":
+                continue
+            if unit.name not in units_by_home.setdefault(home.name, []):
+                units_by_home[home.name].append(unit.name)
+    shared = [
+        Shared(home=name, units=names)
+        for name, names in sorted(units_by_home.items())
+        if len(names) > 1
+    ]
+
     return Report(
         drifted=drifted,
         undeclared=registry.candidates(),
@@ -244,4 +274,5 @@ def run(registry: Registry) -> Report:
         unmatched=unmatched,
         duplicates=duplicates,
         collisions=collisions,
+        shared=shared,
     )
