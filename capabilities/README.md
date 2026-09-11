@@ -18,17 +18,17 @@ tree has with orglens. The engine reads this tree's grammar
 (`.orglens-grammar.yml`) and content. A **grammar** describes an entire tree; a
 **declaration** (`.orglens.yml`) describes one unit within it.
 
-## The model: bank → deck → card
+## The model: bank → deck → program
 
 - **Bank** — this directory. All decks under one roof, one grammar.
 - **Deck** — a themed, self-contained bundle: operators and/or skills for a
   purpose, plus the packs and state they need. Two kinds:
   - **Method decks** (general, cross-domain) — inception / verification /
     communication operators. Domain-agnostic; the packs carry the taste.
-  - **Domain decks** (one recurring real task) — a chain of passes with its own
+  - **Domain decks** (one recurring real task) — a workflow of nodes with its own
     vocabulary and state.
-- **Card** — a single operator or skill you deal out: a `SKILL.md`, an operator
-  prompt, a named agent.
+- **Program** — a single file you deal out and an agent performs: a `SKILL.md`,
+  a node program, a named agent.
 
 New decks accrete over time. A deck is just a directory — port one in or out
 freely. See [`CONVENTIONS.md`](CONVENTIONS.md) for the anatomy, and the caveat
@@ -48,16 +48,16 @@ orglens/
     .orglens-grammar.yml   # grammar: deck, operator, pack, agent as artifact types
     CONVENTIONS.md         # what a deck is — the anatomy to copy when adding one
     decks/
-      tutorial/            # a three-stage chain, run in five minutes
+      tutorial/            # a three-node workflow, run in five minutes
         DECK.md
-        CHAIN.yaml
-        cards/             reproduce / fix / verify
+        WORKFLOW.yaml
+        programs/          reproduce / fix / verify
       <next deck>/         # the bank grows here
 ```
 
-`tutorial` is the only deck this repo ships. It is a bug-triage chain and shares no vocabulary with any writing deck, so it tests that the engine carries none of its own. The engine is `orglens chain`: a deck is an ordered list of stages in `CHAIN.yaml`, each naming a card and the one file it writes; a packet is a directory; its `session.jsonl` is an append-only record of what finished, what was asked, and what was answered. Decks about work that cannot be published live in `orglens-extras`.
+`tutorial` is the only deck this repo ships. It is a bug-triage workflow and shares no vocabulary with any writing deck, so it tests that the engine carries none of its own. The engine is `orglens workflow`: a deck is an ordered list of nodes in `WORKFLOW.yaml`, each naming a program and the one file it writes; a packet is a directory; its `session.jsonl` is an append-only record of what finished, what was asked, and what was answered. Decks about work that cannot be published live in `orglens-extras`.
 
-Canonical prompts live here once. `bootstrap` routes each deck's cards out with `npx skills add`, which walks a repo and owns the harness path table — a wrong skills path fails silently, so the tool decides it rather than a list here. Cards install as **copies**, not symlinks, so re-run `bootstrap` after editing one.
+Canonical prompts live here once. `bootstrap` routes each deck's skills out with `npx skills add`, which walks a repo and owns the harness path table — a wrong skills path fails silently, so the tool decides it rather than a list here. Skills install as **copies**, not symlinks, so re-run `bootstrap` after editing one.
 
 ## Install
 

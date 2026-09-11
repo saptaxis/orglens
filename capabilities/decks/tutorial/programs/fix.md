@@ -1,4 +1,4 @@
-# Card: fix
+# Program: fix
 
 Make the smallest change that addresses what `repro.md` establishes.
 
@@ -11,13 +11,13 @@ Write `fix.md`:
 - **Why this and not more** — the smallest-change argument.
 - **Risk** — what this could break.
 
-**This pass ends at a gate.** The stage carries `review: true`, so finishing it
-stops the chain until someone answers:
+**This pass ends at a gate.** The node carries `review: true`, so finishing it
+stops the workflow until someone answers:
 
-    orglens chain note <packet> "..."
+    orglens workflow note <packet> "..."
 
 That is deliberate. A fix nobody agreed to is not a fix.
 
 When done:
 
-    orglens chain done <packet> --stage fix --agent <you>
+    orglens workflow done <packet> --node fix --agent <you>

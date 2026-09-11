@@ -32,7 +32,7 @@ ENGINE = ROOT / "orglens"
 FACE = ("cli.py", "check.py", "config.py", "declaration.py", "documents.py",
         "events.py", "grammar.py", "homes.py", "propose.py", "reference.py",
         "scadconfig.py", "snapshot.py", "state.py", "units.py",
-        "chain/deck.py", "chain/session.py", "chain/cli.py")
+        "workflow/deck.py", "workflow/session.py", "workflow/cli.py")
 
 
 def default_grammar() -> Grammar:
@@ -107,7 +107,7 @@ def test_no_declared_noun_is_hardcoded_in_the_face(word: str):
 def test_every_module_in_the_face_is_accounted_for():
     """A new module in the vocabulary face joins the check, or the check rots."""
     present = {
-        str(p.relative_to(ENGINE)) for p in (*ENGINE.glob("*.py"), *ENGINE.glob("chain/*.py"))
+        str(p.relative_to(ENGINE)) for p in (*ENGINE.glob("*.py"), *ENGINE.glob("workflow/*.py"))
         if p.name not in ("__init__.py", "activity.py", "view.py")
     }
     assert present == set(FACE), (

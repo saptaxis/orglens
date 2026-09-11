@@ -1,4 +1,4 @@
-# Card: verify
+# Program: verify
 
 Check the fix against the reproduction. Nothing else.
 
@@ -9,11 +9,11 @@ Write `verdict.md` with one of two outcomes, stated in the first line:
 - **PASSES** — the steps no longer produce the observed behaviour.
 - **FAILS** — they still do, or they now produce something else. Say which.
 
-`verify` is the last stage, so after it the chain reports `complete` whatever
+`verify` is the last node, so after it the workflow reports `complete` whatever
 your verdict says — the engine does not read prose. Going round again is a
 human act:
 
-    orglens chain goto <packet> --stage reproduce --why "FAILS: ..."
+    orglens workflow goto <packet> --node reproduce --why "FAILS: ..."
 
 Your verdict is that next reproduction's input. Write it so the next round is
 better than the last one.
@@ -25,4 +25,4 @@ fresh session.
 
 When done:
 
-    orglens chain done <packet> --stage verify --agent <you>
+    orglens workflow done <packet> --node verify --agent <you>

@@ -1,4 +1,4 @@
-# Card: reproduce
+# Program: reproduce
 
 Establish whether the reported problem happens, and write down the smallest way
 to make it happen.
@@ -18,4 +18,4 @@ You do not fix anything. If you cannot reproduce it, say so plainly in
 
 When done:
 
-    orglens chain done <packet> --stage reproduce --agent <you>
+    orglens workflow done <packet> --node reproduce --agent <you>

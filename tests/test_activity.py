@@ -63,11 +63,11 @@ def test_plan_is_the_highest_numbered_plan_across_homes(tmp_path):
 
 
 def _chain_packet(directory, gate: bool):
-    """A chain packet: a session log, with an unanswered question if `gate`."""
-    from orglens.chain import session
+    """A workflow packet: a session log, with an unanswered question if `gate`."""
+    from orglens.workflow import session
     directory.mkdir(parents=True)
-    session.bind(directory, directory / "CHAIN.yaml")
-    fact = {"type": "done", "stage": "one", "agent": "claude"}
+    session.bind(directory, directory / "WORKFLOW.yaml")
+    fact = {"type": "done", "node": "one", "agent": "claude"}
     if gate:
         fact["question"] = "which way?"
     session.append(directory, fact)

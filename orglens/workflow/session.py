@@ -1,10 +1,10 @@
 """The packet's log, and the two things derived from it.
 
-`session.jsonl` is append-only. Each line is a fact about the past: a stage
+`session.jsonl` is append-only. Each line is a fact about the past: a node
 finished, a human answered, a human pointed somewhere. Nothing is rewritten,
 so nothing here can go stale.
 
-Where the chain stands is read off the last routing fact (`done` or `goto`);
+Where the workflow stands is read off the last routing fact (`done` or `goto`);
 whether it is waiting is read off that same fact and whether a `note` answers
 it. Neither is stored.
 """
@@ -18,16 +18,16 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from orglens.chain.deck import Deck, Stage
+from orglens.workflow.deck import Deck, Node
 
 SESSION_FILE = "session.jsonl"
 
 #: What each fact type must carry, beyond `type`, `at` and `id`.
 REQUIRED: dict[str, tuple[str, ...]] = {
     "deck": ("path",),
-    "done": ("stage", "agent"),
+    "done": ("node", "agent"),
     "note": ("resolves", "text"),
-    "goto": ("stage", "why"),
+    "goto": ("node", "why"),
 }
 
 ROUTING = frozenset({"done", "goto"})
@@ -47,9 +47,9 @@ class State(str, Enum):
 @dataclass(frozen=True)
 class Position:
     state: State
-    #: The stage to run next. None when complete or unknown.
-    stage: Stage | None = None
-    #: The stage the last routing fact named; what a gate or an unknown is after.
+    #: The node to run next. None when complete or unknown.
+    node: Node | None = None
+    #: The node the last routing fact named; what a gate or an unknown is after.
     after: str | None = None
     #: What the human said: the note answering the last gate, or a goto's why.
     note: str | None = None
@@ -110,19 +110,19 @@ def bind(packet: Path, deck: Path) -> dict:
     return append(packet, {"type": "deck", "path": str(deck)})
 
 
-def next_stage(deck: Deck, facts: list[dict]) -> Position:
+def next_node(deck: Deck, facts: list[dict]) -> Position:
     """The whole of the engine's reasoning, from the last routing fact."""
     routing = [f for f in facts if f["type"] in ROUTING]
     if not routing:
-        return Position(State.RUNNABLE, stage=deck.stages[0])
+        return Position(State.RUNNABLE, node=deck.nodes[0])
 
     last = routing[-1]
-    named = deck.stage(last["stage"])
+    named = deck.node(last["node"])
     if named is None:
-        return Position(State.UNKNOWN, after=last["stage"])
+        return Position(State.UNKNOWN, after=last["node"])
 
     if last["type"] == "goto":
-        return Position(State.RUNNABLE, stage=named, after=named.name, note=last["why"])
+        return Position(State.RUNNABLE, node=named, after=named.name, note=last["why"])
 
     following = deck.after(named.name)
     answer = next(
@@ -132,22 +132,22 @@ def next_stage(deck: Deck, facts: list[dict]) -> Position:
     asked = last.get("question")
     if (asked or named.review) and answer is None:
         question = asked or f"review before {following.name if following else 'complete'}"
-        return Position(State.WAITING, stage=following, after=named.name, question=question)
+        return Position(State.WAITING, node=following, after=named.name, question=question)
     if following is None:
         return Position(State.COMPLETE, after=named.name, note=answer)
-    return Position(State.RUNNABLE, stage=following, after=named.name, note=answer)
+    return Position(State.RUNNABLE, node=following, after=named.name, note=answer)
 
 
 def gated(facts: list[dict], deck: Deck | None = None) -> bool:
     """Whether the log's last routing fact is waiting on a human.
 
-    With the deck, this is `next_stage`. Without it — a machine where the
+    With the deck, this is `next_node`. Without it — a machine where the
     deck is not checked out — only a `done` carrying a question can be seen
     to wait; a `review` gate needs the deck to say so. `activity` counts
     open gates across a tree and must not fail on a deck it cannot load.
     """
     if deck is not None:
-        return next_stage(deck, facts).state == State.WAITING
+        return next_node(deck, facts).state == State.WAITING
     routing = [f for f in facts if f["type"] in ROUTING]
     if not routing or routing[-1]["type"] != "done" or not routing[-1].get("question"):
         return False

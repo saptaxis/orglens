@@ -2,7 +2,7 @@
 
 An entity's `overview.md` carries a hand-written status line. It drifts, because
 nothing forces anyone to update it: orglens' own said "v1 core implemented"
-while plan 07 was merged. That is a stored status field — the shape the chain
+while plan 07 was merged. That is a stored status field — the shape the workflow
 engine refuses outright: a packet's `session.jsonl` holds facts about the past
 and its position is derived from them, never written down.
 
@@ -15,7 +15,7 @@ Four sources, none of which reads a document body:
 
     git         when the directory was last committed to, and what is unstaged
     filenames   the highest-numbered plan
-    session.jsonl  chain packets, and which are waiting on a human
+    session.jsonl  workflow packets, and which are waiting on a human
     scad index  sessions attributed to this entity, and their open questions
 
 Every one degrades to empty rather than raising: a tree outside git, a machine
@@ -150,14 +150,14 @@ def _latest_plan(path: Path) -> str | None:
 
 
 def _packets(path: Path) -> tuple[int, int]:
-    """Chain packets beneath the entity, and how many are waiting on a human.
+    """Workflow packets beneath the entity, and how many are waiting on a human.
 
     A packet is a directory holding a `session.jsonl`. The deck is loaded
     when it can be, so `review` gates count; where it cannot — not checked
     out on this machine — only a `done` with a question counts.
     """
-    from orglens.chain import session
-    from orglens.chain.deck import DeckError, load_deck
+    from orglens.workflow import session
+    from orglens.workflow.deck import DeckError, load_deck
 
     total = blocked = 0
     for found in path.rglob(session.SESSION_FILE):
@@ -321,7 +321,7 @@ def _home_clause(
     attributed by assertion or not at all.
 
     Parenthesised as one group because callers append `and ...` to it, and
-    `AND` binds tighter than `OR` — an unparenthesised chain silently let
+    `AND` binds tighter than `OR` — an unparenthesised workflow silently let
     excluded rows back in.
     """
     clauses: list[str] = []

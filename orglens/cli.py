@@ -31,7 +31,7 @@ from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
 from orglens.units import Registry, Unit
-from orglens.chain.cli import chain as chain_group
+from orglens.workflow.cli import workflow as workflow_group
 
 #: Where a rendered config lands unless `--out` says otherwise. A module-level
 #: constant, not inlined, so a test can monkeypatch it rather than write to
@@ -59,7 +59,7 @@ def cli():
     pass
 
 
-cli.add_command(chain_group, name="chain")
+cli.add_command(workflow_group, name="workflow")
 
 
 def _ago(ts: float) -> str:
@@ -115,7 +115,7 @@ def _dated(act: activity.Activity) -> list[str]:
 
     A bare `26d ago` never says which clock it is — commit, edit, or session
     — and printing two labels for the same moment is noise, not information.
-    Mirrors the reasoning in `view.py`'s card: a clock within an hour of one
+    Mirrors the reasoning in `view.py`'s program: a clock within an hour of one
     already shown adds nothing.
     """
     clocks = []

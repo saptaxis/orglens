@@ -1,6 +1,6 @@
-# Tutorial deck — a three-stage chain you can run in five minutes
+# Tutorial deck — a three-node workflow you can run in five minutes
 
-This deck exists to be run, not read. It is a bug-triage chain — *reproduce,
+This deck exists to be run, not read. It is a bug-triage workflow — *reproduce,
 fix, verify* — chosen because it is obviously **not** about writing. The engine
 that runs it is the same engine that runs a writing deck, and it knows nothing
 about bugs, articles, or anything else. `reproduce`, `report.md`, `verdict.md`
@@ -12,9 +12,9 @@ gate, `note`, and `goto`.
 ## Set up
 
 ```bash
-# Run this from the root of your orglens clone. $CHAIN must be absolute,
+# Run this from the root of your orglens clone. $WF must be absolute,
 # because the next step moves you elsewhere.
-export CHAIN="$PWD/capabilities/decks/tutorial/CHAIN.yaml"
+export WF="$PWD/capabilities/decks/tutorial/WORKFLOW.yaml"
 
 mkdir -p ~/vsr-tmp/triage/bug-417 && cd ~/vsr-tmp/triage
 export PKT=$PWD/bug-417
@@ -26,19 +26,19 @@ A **packet** is just that directory. There is no database and no registry.
 ## 1. What runs next?
 
 ```bash
-$ orglens chain next $PKT --deck $CHAIN
-stage: reproduce
-card:  .../tutorial/cards/reproduce.md
+$ orglens workflow next $PKT --deck $WF
+node: reproduce
+program: .../tutorial/programs/reproduce.md
 write: .../bug-417/repro.md
 ```
 
-The packet has no session yet, so the first stage runs. `--deck` bound the
-packet to this deck; you will not pass it again. The card is the instructions
+The packet has no session yet, so the first node runs. `--deck` bound the
+packet to this deck; you will not pass it again. The program is the instructions
 for the pass; `write` is the one file the pass produces.
 
 ## 2. Do the pass, then say so
 
-The engine runs nothing. You, or an agent handed the card, do the work.
+The engine runs nothing. You, or an agent handed the program, do the work.
 
 ```bash
 $ cat > $PKT/repro.md <<'EOF'
@@ -48,17 +48,17 @@ Expected: success.
 Confidence: every time.
 EOF
 
-$ orglens chain done $PKT --stage reproduce --agent you
+$ orglens workflow done $PKT --node reproduce --agent you
 done: reproduce
 
-$ orglens chain next $PKT
-stage: fix
-card:  .../tutorial/cards/fix.md
+$ orglens workflow next $PKT
+node: fix
+program: .../tutorial/programs/fix.md
 write: .../bug-417/fix.md
 ```
 
-`done` is the only thing that moves the chain forward. It refuses a stage the
-chain is not on: try `--stage verify` here and it says so.
+`done` is the only thing that moves the workflow forward. It refuses a node the
+workflow is not on: try `--node verify` here and it says so.
 
 ## 3. A gate
 
@@ -71,23 +71,23 @@ Why: the trim was cosmetic.
 Risk: none known.
 EOF
 
-$ orglens chain done $PKT --stage fix --agent you
+$ orglens workflow done $PKT --node fix --agent you
 done: fix
 
-$ orglens chain next $PKT
-waiting on: review before verify            (after stage fix)
+$ orglens workflow next $PKT
+waiting on: review before verify            (after node fix)
 ```
 
 Nothing runs until a human answers. The answer is a note, and it is the only
 channel from you to the next pass:
 
 ```bash
-$ orglens chain note $PKT "agreed, ship it"
+$ orglens workflow note $PKT "agreed, ship it"
 noted; next: verify
 
-$ orglens chain next $PKT
-stage: verify
-card:  .../tutorial/cards/verify.md
+$ orglens workflow next $PKT
+node: verify
+program: .../tutorial/programs/verify.md
 write: .../bug-417/verdict.md
 note:  "agreed, ship it"
 ```
@@ -99,51 +99,51 @@ way, with your question printed instead of `review before`.
 
 ```bash
 $ echo 'FAILS: still 500 on a trailing space.' > $PKT/verdict.md
-$ orglens chain done $PKT --stage verify --agent someone-else
+$ orglens workflow done $PKT --node verify --agent someone-else
 done: verify
 
-$ orglens chain next $PKT
+$ orglens workflow next $PKT
 complete
 ```
 
-`verify` is the last stage, so the chain is complete. The engine did not read
+`verify` is the last node, so the workflow is complete. The engine did not read
 `verdict.md`; it does not know the fix failed.
 
 ## 5. Round again is a human act
 
 ```bash
-$ orglens chain goto $PKT --stage reproduce --why "verdict FAILS on a trailing space"
+$ orglens workflow goto $PKT --node reproduce --why "verdict FAILS on a trailing space"
 next: reproduce
 
-$ orglens chain next $PKT
-stage: reproduce
-card:  .../tutorial/cards/reproduce.md
+$ orglens workflow next $PKT
+node: reproduce
+program: .../tutorial/programs/reproduce.md
 write: .../bug-417/repro.md
 note:  "verdict FAILS on a trailing space"
 ```
 
-`goto` names the stage to run next. Forward, backward, the same stage again:
-any stage, any time. It appends a fact with your reason rather than setting a
+`goto` names the node to run next. Forward, backward, the same node again:
+any node, any time. It appends a fact with your reason rather than setting a
 field, so six months later the packet says who moved what and why. It also
-clears an open gate, because a human moving the chain is the human acting.
+clears an open gate, because a human moving the workflow is the human acting.
 
 ## What you just used
 
 | mechanic | where |
 |---|---|
 | `next` derives the position from the session file | every step |
-| `done` moves the chain, and refuses the wrong stage | §2 |
-| `review: true` on a stage opens a gate | §3 |
-| `note` answers it, and reaches the next card | §3 |
+| `done` moves the workflow, and refuses the wrong node | §2 |
+| `review: true` on a node opens a gate | §3 |
+| `note` answers it, and reaches the next program | §3 |
 | the end of the list is the end | §4 |
-| `goto` moves the chain by hand | §5 |
+| `goto` moves the workflow by hand | §5 |
 
 Everything the engine knows is in `$PKT/session.jsonl`, one fact per line,
 never rewritten. Delete it and you are back at `reproduce`; git is the backup.
 
 ## Try changing it
 
-- Add `review: true` to `verify` and run the chain again: it waits before
+- Add `review: true` to `verify` and run the workflow again: it waits before
   `complete` now, and a `note` finishes it.
-- Rename every stage and file to something from your own domain. Nothing in
-  `orglens/chain/` needs to change, because nothing in it knows these words.
+- Rename every node and file to something from your own domain. Nothing in
+  `orglens/workflow/` needs to change, because nothing in it knows these words.
