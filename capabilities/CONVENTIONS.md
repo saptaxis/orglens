@@ -1,16 +1,16 @@
-# Deck conventions
+# Capability conventions
 
-A **deck** is a self-contained, themed bundle of programs and skills that moves
-in or out of the bank as a unit. This is the shape to copy when adding one.
+A **capability** is a self-contained bundle of programs and skills that moves in
+or out of this tree as a unit — one folder per capability, directly under `capabilities/`. This is the shape to copy when adding one.
 
-## What a deck has
+## What a capability has
 
-- **`DECK.md`** — the descriptor. What the deck is for, its programs and skills,
-  its workflow if it has one, and what triggers it. orglens treats a deck as a
-  unit keyed on this file.
-- **`WORKFLOW.yaml`** — the deck's workflow, when it has state: an ordered list
-  of nodes, each naming a program and the one file it writes. A deck of skills
-  alone has none. `orglens workflow` runs it; see the [tutorial](decks/tutorial/DECK.md).
+- **`README.md`** — the descriptor. What the capability is for, its programs and
+  skills, its workflow if it has one, and what triggers it. orglens treats a
+  capability as a unit keyed on this file.
+- **`WORKFLOW.yaml`** — the capability's workflow, when it has state: an ordered list
+  of nodes, each naming a program and the one file it writes. A capability of skills
+  alone has none. `orglens workflow` runs it; see the [tutorial](tutorial/README.md).
 - **`programs/`** — node programs. One file per program; a program is what one
   node runs, and it is performed by whoever is at the packet: this session, a
   subagent, a container, another model.
@@ -33,16 +33,16 @@ in or out of the bank as a unit. This is the shape to copy when adding one.
    Claude or another harness through the invocation layer — a `codex` skill,
    scad, the companion — which handles argv, inputs, sandbox and resume.
 
-## Adding a deck
+## Adding a capability
 
-1. `mkdir decks/<name>/`, write `DECK.md`.
+1. `mkdir <name>/` here, write `README.md`.
 2. Put programs under `programs/`, skills under `skills/<name>/`, and whatever
    they read under `references/`. Write `WORKFLOW.yaml` if the programs run in
    order over a packet.
-3. Keep domain state (binaries, large outputs) gitignored. Version the deck,
-   not the artifacts it produces.
-4. `./bootstrap` routes the deck's skills to the harness locations by walking
+3. Keep domain state (binaries, large outputs) gitignored. Version the
+   capability, not the artifacts it produces.
+4. `./bootstrap` routes the capability's skills to the harness locations by walking
    the repo for `SKILL.md` files. No central registry to edit.
 
 This repo ships `tutorial`, a three-node workflow for running the engine once.
-Working decks live in `orglens-extras`, with this same shape.
+Working capabilities live in `orglens-extras`, with this same shape.

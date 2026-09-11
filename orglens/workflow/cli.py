@@ -1,10 +1,10 @@
 """`orglens workflow <verb> <packet>`: next, done, note, goto.
 
-The packet is a directory. The deck comes from the log's `deck` line;
-`--deck` overrides it and, on a packet with no log yet, writes that line.
+The packet is a directory. The workflow comes from the log's `workflow` line;
+`--workflow` overrides it and, on a packet with no log yet, writes that line.
 
 Exit codes: 0 for `next` on a runnable node, complete, or waiting; 1 for a
-log naming a node the deck no longer has; 2 for a bad deck or a refused
+log naming a node the workflow no longer has; 2 for a bad workflow or a refused
 write. Programs and dispatchers read `--json`; humans read the text.
 """
 
@@ -17,7 +17,7 @@ from pathlib import Path
 import click
 
 from orglens.workflow import session
-from orglens.workflow.deck import Deck, DeckError, load_deck
+from orglens.workflow.definition import Workflow, WorkflowError, load_workflow
 from orglens.workflow.session import Position, State
 
 
@@ -26,26 +26,26 @@ def _fail(message: str, code: int = 2) -> None:
     sys.exit(code)
 
 
-def _load(packet: Path, deck_opt: str | None) -> tuple[Deck, list[dict]]:
-    """The deck and the log. Binds the packet when `--deck` names a deck it
+def _load(packet: Path, workflow_opt: str | None) -> tuple[Workflow, list[dict]]:
+    """The workflow and the log. Binds the packet when `--workflow` names a workflow it
     has none of; refuses a second, different binding."""
     facts = session.read(packet)
-    bound = session.deck_path(facts)
-    if deck_opt is not None:
-        given = Path(deck_opt).expanduser().resolve()
+    bound = session.workflow_path(facts)
+    if workflow_opt is not None:
+        given = Path(workflow_opt).expanduser().resolve()
         if bound is None:
             session.bind(packet, given)
             facts = session.read(packet)
         elif bound.resolve() != given:
-            _fail(f"{packet} is bound to {bound}; --deck names {given}")
+            _fail(f"{packet} is bound to {bound}; --workflow names {given}")
         path = given
     elif bound is not None:
         path = bound
     else:
-        _fail("no deck bound: pass --deck once to bind this packet")
+        _fail("no workflow bound: pass --workflow once to bind this packet")
     try:
-        return load_deck(path), facts
-    except DeckError as exc:
+        return load_workflow(path), facts
+    except WorkflowError as exc:
         _fail(str(exc))
     raise AssertionError("unreachable")
 
@@ -67,12 +67,12 @@ def workflow():
 
 @workflow.command(name="next")
 @click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
-@click.option("--deck", "deck_opt", default=None, help="Bind or override the deck.")
+@click.option("--workflow", "workflow_opt", default=None, help="Bind or override the workflow.")
 @click.option("--json", "as_json", is_flag=True)
-def next_cmd(packet: Path, deck_opt: str | None, as_json: bool):
+def next_cmd(packet: Path, workflow_opt: str | None, as_json: bool):
     """What to run next, or why nothing can run."""
-    deck, facts = _load(packet, deck_opt)
-    pos = session.next_node(deck, facts)
+    workflow, facts = _load(packet, workflow_opt)
+    pos = session.next_node(workflow, facts)
 
     if as_json:
         out = _describe(packet, pos)
@@ -100,23 +100,23 @@ def next_cmd(packet: Path, deck_opt: str | None, as_json: bool):
 @click.option("--node", required=True)
 @click.option("--agent", required=True, help="Who performed the program: claude, codex, ...")
 @click.option("--question", default=None, help="Ask the human before the next node.")
-@click.option("--deck", "deck_opt", default=None)
+@click.option("--workflow", "workflow_opt", default=None)
 @click.option("--force", is_flag=True, help="Finish a node the workflow is not on.")
 def done(packet: Path, node: str, agent: str, question: str | None,
-         deck_opt: str | None, force: bool):
+         workflow_opt: str | None, force: bool):
     """Record that a node finished. Refuses a node the workflow is not on."""
-    deck, facts = _load(packet, deck_opt)
-    target = deck.node(node)
+    workflow, facts = _load(packet, workflow_opt)
+    target = workflow.node(node)
     if target is None:
-        _fail(f"'{node}' is not a node of {deck.name}: "
-              + ", ".join(s.name for s in deck.nodes))
-    pos = session.next_node(deck, facts)
+        _fail(f"'{node}' is not a node of {workflow.name}: "
+              + ", ".join(s.name for s in workflow.nodes))
+    pos = session.next_node(workflow, facts)
     if not force:
         if pos.state == State.WAITING:
             _fail(f"waiting on: {pos.question} (after node {pos.after}); "
                   "answer it with `note`, or move with `goto`")
         if pos.state == State.COMPLETE:
-            _fail(f"{deck.name} is complete; `goto` a node to run it again")
+            _fail(f"{workflow.name} is complete; `goto` a node to run it again")
         if pos.node is None or pos.node.name != node:
             on = pos.node.name if pos.node else pos.after
             _fail(f"the workflow is on {on}, not {node}; --force records it anyway")
@@ -136,8 +136,8 @@ def done(packet: Path, node: str, agent: str, question: str | None,
 @click.argument("text")
 def note(packet: Path, text: str):
     """Answer the open gate. The text is handed to the next program verbatim."""
-    deck, facts = _load(packet, None)
-    pos = session.next_node(deck, facts)
+    workflow, facts = _load(packet, None)
+    pos = session.next_node(workflow, facts)
     if pos.state != State.WAITING:
         _fail("no gate is open")
     last = [f for f in facts if f["type"] in session.ROUTING][-1]
@@ -149,13 +149,13 @@ def note(packet: Path, text: str):
 @click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
 @click.option("--node", required=True, help="The node to run next.")
 @click.option("--why", required=True)
-@click.option("--deck", "deck_opt", default=None)
-def goto(packet: Path, node: str, why: str, deck_opt: str | None):
+@click.option("--workflow", "workflow_opt", default=None)
+def goto(packet: Path, node: str, why: str, workflow_opt: str | None):
     """Point the workflow at a node. Clears any open gate; `why` is the note."""
-    deck, _ = _load(packet, deck_opt)
-    if deck.node(node) is None:
-        _fail(f"'{node}' is not a node of {deck.name}: "
-              + ", ".join(s.name for s in deck.nodes))
+    workflow, _ = _load(packet, workflow_opt)
+    if workflow.node(node) is None:
+        _fail(f"'{node}' is not a node of {workflow.name}: "
+              + ", ".join(s.name for s in workflow.nodes))
     session.append(packet, {"type": "goto", "node": node, "why": why})
     click.echo(f"next: {node}")
 

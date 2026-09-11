@@ -2,7 +2,7 @@
 
 Before plan 08 the tree's vocabulary lived in three places: `grammars/default.yaml`,
 four Python modules that hardcoded the same strings, and hand-written tables in
-`SKILL.md`. All three drifted — `orglens list --type deck` raised `KeyError`,
+`SKILL.md`. All three drifted — `orglens list --type workflow` raised `KeyError`,
 88 documents were invisible to `find`, and the skill's table disagreed with the
 grammar about which files a research program needs.
 
@@ -32,7 +32,7 @@ ENGINE = ROOT / "orglens"
 FACE = ("cli.py", "check.py", "config.py", "declaration.py", "documents.py",
         "events.py", "grammar.py", "homes.py", "propose.py", "reference.py",
         "scadconfig.py", "sessions.py", "snapshot.py", "state.py", "units.py",
-        "workflow/deck.py", "workflow/session.py", "workflow/cli.py")
+        "workflow/definition.py", "workflow/session.py", "workflow/cli.py")
 
 
 def default_grammar() -> Grammar:

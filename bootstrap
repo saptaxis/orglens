@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# orglens bootstrap — set a machine up for orglens and its decks.
+# orglens bootstrap — set a machine up for orglens and its capabilities.
 #
 # Usage:
 #   ./bootstrap                              # editable install, plus this repo's skills
 #   ./bootstrap --pinned                     # non-editable, for a clean machine
-#   ./bootstrap --extras ~/code/orglens-extras   # include a private deck repo
+#   ./bootstrap --extras ~/code/orglens-extras   # include a private capabilities repo
 #   ./bootstrap --no-skills                  # install the tool, route no skills
 #   ./bootstrap --dry-run                    # print the commands, run nothing
 #   ./bootstrap --uninstall                  # remove the tool and its skills, keep data
@@ -28,7 +28,7 @@ set -euo pipefail
 #   symlink `configs/*` into `~/.scad`, `~/.config/orglens` and `~/.claude`.
 #   Those directories only ever held a `.gitkeep`.
 #
-# A repo without a `pyproject.toml` is a deck repo: its skills are routed and
+# A repo without a `pyproject.toml` is a capabilities repo: its skills are routed and
 # nothing is pip-installed. That is how `orglens-extras` works today, and it
 # keeps working unchanged the day it grows a package.
 
@@ -64,7 +64,7 @@ install_package() {
     # two never share a dependency resolution.
     local repo="$1" name="$2" venv="$SHARE_DIR/$2/venv"
     if [ ! -f "$repo/pyproject.toml" ]; then
-        echo "  $name: no pyproject.toml — deck repo, nothing to install"
+        echo "  $name: no pyproject.toml — capabilities repo, nothing to install"
         return
     fi
     echo "  $name: installing into $venv$([ "$EDITABLE" = true ] && echo ' (editable)')"

@@ -148,25 +148,25 @@ def _latest_plan(path: Path) -> str | None:
 def _packets(path: Path) -> tuple[int, int]:
     """Workflow packets beneath the entity, and how many are waiting on a human.
 
-    A packet is a directory holding a `session.jsonl`. The deck is loaded
+    A packet is a directory holding a `session.jsonl`. The workflow is loaded
     when it can be, so `review` gates count; where it cannot — not checked
     out on this machine — only a `done` with a question counts.
     """
     from orglens.workflow import session
-    from orglens.workflow.deck import DeckError, load_deck
+    from orglens.workflow.definition import WorkflowError, load_workflow
 
     total = blocked = 0
     for found in path.rglob(session.SESSION_FILE):
         total += 1
         facts = session.read(found.parent)
-        bound = session.deck_path(facts)
-        deck = None
+        bound = session.workflow_path(facts)
+        workflow = None
         if bound is not None:
             try:
-                deck = load_deck(bound)
-            except DeckError:
-                deck = None
-        if session.gated(facts, deck):
+                workflow = load_workflow(bound)
+            except WorkflowError:
+                workflow = None
+        if session.gated(facts, workflow):
             blocked += 1
     return total, blocked
 

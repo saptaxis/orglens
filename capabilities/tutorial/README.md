@@ -1,10 +1,10 @@
-# Tutorial deck — a three-node workflow you can run in five minutes
+# Tutorial — a three-node workflow you can run in five minutes
 
-This deck exists to be run, not read. It is a bug-triage workflow — *reproduce,
+This capability exists to be run, not read. It is a bug-triage workflow — *reproduce,
 fix, verify* — chosen because it is obviously **not** about writing. The engine
-that runs it is the same engine that runs a writing deck, and it knows nothing
+that runs it is the same engine that runs a writing workflow, and it knows nothing
 about bugs, articles, or anything else. `reproduce`, `report.md`, `verdict.md`
-are strings this deck invents.
+are strings this file invents.
 
 By the end you will have used every mechanic the engine has: `next`, `done`, a
 gate, `note`, and `goto`.
@@ -14,7 +14,7 @@ gate, `note`, and `goto`.
 ```bash
 # Run this from the root of your orglens clone. $WF must be absolute,
 # because the next step moves you elsewhere.
-export WF="$PWD/capabilities/decks/tutorial/WORKFLOW.yaml"
+export WF="$PWD/capabilities/tutorial/WORKFLOW.yaml"
 
 mkdir -p ~/vsr-tmp/triage/bug-417 && cd ~/vsr-tmp/triage
 export PKT=$PWD/bug-417
@@ -26,14 +26,14 @@ A **packet** is just that directory. There is no database and no registry.
 ## 1. What runs next?
 
 ```bash
-$ orglens workflow next $PKT --deck $WF
+$ orglens workflow next $PKT --workflow $WF
 node: reproduce
 program: .../tutorial/programs/reproduce.md
 write: .../bug-417/repro.md
 ```
 
-The packet has no session yet, so the first node runs. `--deck` bound the
-packet to this deck; you will not pass it again. The program is the instructions
+The packet has no session yet, so the first node runs. `--workflow` bound the
+packet to this workflow; you will not pass it again. The program is the instructions
 for the pass; `write` is the one file the pass produces.
 
 ## 2. Do the pass, then say so

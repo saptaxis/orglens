@@ -18,13 +18,13 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
-from orglens.workflow.deck import Deck, Node
+from orglens.workflow.definition import Workflow, Node
 
 SESSION_FILE = "session.jsonl"
 
 #: What each fact type must carry, beyond `type`, `at` and `id`.
 REQUIRED: dict[str, tuple[str, ...]] = {
-    "deck": ("path",),
+    "workflow": ("path",),
     "done": ("node", "agent"),
     "note": ("resolves", "text"),
     "goto": ("node", "why"),
@@ -95,36 +95,36 @@ def append(packet: Path, fact: dict) -> dict:
     return stamped
 
 
-def deck_path(facts: list[dict]) -> Path | None:
-    """The deck this packet is bound to, from its `deck` line."""
+def workflow_path(facts: list[dict]) -> Path | None:
+    """The workflow this packet is bound to, from its `workflow` line."""
     for fact in facts:
-        if fact["type"] == "deck":
+        if fact["type"] == "workflow":
             return Path(fact["path"]).expanduser()
     return None
 
 
-def bind(packet: Path, deck: Path) -> dict:
-    """Write the `deck` line. Once: a packet runs one deck."""
-    if deck_path(read(packet)) is not None:
-        raise SessionError(f"{packet} is already bound to a deck")
-    return append(packet, {"type": "deck", "path": str(deck)})
+def bind(packet: Path, workflow: Path) -> dict:
+    """Write the `workflow` line. Once: a packet runs one workflow."""
+    if workflow_path(read(packet)) is not None:
+        raise SessionError(f"{packet} is already bound to a workflow")
+    return append(packet, {"type": "workflow", "path": str(workflow)})
 
 
-def next_node(deck: Deck, facts: list[dict]) -> Position:
+def next_node(workflow: Workflow, facts: list[dict]) -> Position:
     """The whole of the engine's reasoning, from the last routing fact."""
     routing = [f for f in facts if f["type"] in ROUTING]
     if not routing:
-        return Position(State.RUNNABLE, node=deck.nodes[0])
+        return Position(State.RUNNABLE, node=workflow.nodes[0])
 
     last = routing[-1]
-    named = deck.node(last["node"])
+    named = workflow.node(last["node"])
     if named is None:
         return Position(State.UNKNOWN, after=last["node"])
 
     if last["type"] == "goto":
         return Position(State.RUNNABLE, node=named, after=named.name, note=last["why"])
 
-    following = deck.after(named.name)
+    following = workflow.after(named.name)
     answer = next(
         (f["text"] for f in facts if f["type"] == "note" and f.get("resolves") == last["id"]),
         None,
@@ -138,16 +138,16 @@ def next_node(deck: Deck, facts: list[dict]) -> Position:
     return Position(State.RUNNABLE, node=following, after=named.name, note=answer)
 
 
-def gated(facts: list[dict], deck: Deck | None = None) -> bool:
+def gated(facts: list[dict], workflow: Workflow | None = None) -> bool:
     """Whether the log's last routing fact is waiting on a human.
 
-    With the deck, this is `next_node`. Without it — a machine where the
-    deck is not checked out — only a `done` carrying a question can be seen
-    to wait; a `review` gate needs the deck to say so. `activity` counts
-    open gates across a tree and must not fail on a deck it cannot load.
+    With the workflow, this is `next_node`. Without it — a machine where the
+    workflow is not checked out — only a `done` carrying a question can be seen
+    to wait; a `review` gate needs the workflow to say so. `activity` counts
+    open gates across a tree and must not fail on a workflow it cannot load.
     """
-    if deck is not None:
-        return next_node(deck, facts).state == State.WAITING
+    if workflow is not None:
+        return next_node(workflow, facts).state == State.WAITING
     routing = [f for f in facts if f["type"] in ROUTING]
     if not routing or routing[-1]["type"] != "done" or not routing[-1].get("question"):
         return False

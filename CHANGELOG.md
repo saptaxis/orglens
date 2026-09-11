@@ -6,7 +6,7 @@ A session belongs to a set of units: the one an attribution names, or every
 unit with a home containing where it ran. `orglens/sessions.py` is the one
 place that decides this; `list`, `status` and `view` read from it.
 
-The workflow engine is replaced. `orglens workflow` runs a deck as an ordered
+The workflow engine is replaced. `orglens workflow` runs a workflow as an ordered
 list of nodes: `next` says which program to perform and which file it writes,
 `done` records a finished node, `note` answers the open gate, `goto` points
 the workflow at a node. A packet's `session.jsonl` is the only record; position
@@ -14,7 +14,15 @@ and gate are derived from its last routing fact. The guard-based engine
 (guards, roles, reads, terminal predicates, `runs.jsonl`) is removed in commit
 `76858fd`; the new package reuses its path, so recover the old one with
 `git show 76858fd^:orglens/workflow/<file>` or a checkout of `76858fd^` into a
-worktree. The tutorial deck is ported to `WORKFLOW.yaml`.
+worktree. The tutorial is ported to `WORKFLOW.yaml`.
+
+"Deck" is retired. A bundle of programs, skills and references is a
+**capability**, and lives directly under `capabilities/<name>/` with a
+`README.md` as its descriptor; `capabilities/decks/` and `DECK.md` are gone.
+In the engine, what `--deck` named was always the `WORKFLOW.yaml`, so the flag
+is `--workflow`, the session's binding fact is `{"type": "workflow", ...}`, and
+the loader is `orglens.workflow.definition.load_workflow`. No packet had been
+bound under the old names.
 
 - `orglens sessions [UNIT]` lists a unit's sessions, or every unit's grouped,
   with how each is the unit's. `--none` lists the sessions belonging to no unit.

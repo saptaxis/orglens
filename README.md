@@ -85,7 +85,7 @@ replaces the bundled grammar.
 | `orglens attribute SESSION-ID UNIT` | Say which unit a session was for, after the fact |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 | `orglens where [NAME]` | Which roots are configured, and which unit a name or this directory resolves to |
-| `orglens workflow next\|done\|note\|goto PACKET` | Run a deck's nodes over a packet, one pass at a time, with a human between. See `capabilities/decks/tutorial/DECK.md` |
+| `orglens workflow next\|done\|note\|goto PACKET` | Run a capability's workflow over a packet, one pass at a time, with a human between. See `capabilities/tutorial/README.md` |
 
 ## Skills
 
@@ -96,7 +96,7 @@ them:
 ./bootstrap
 ```
 
-Decks about work that cannot be published live in a second repo and install the
+Capabilities about work that cannot be published live in a second repo and install the
 same way:
 
 ```bash
@@ -104,7 +104,7 @@ same way:
 ```
 
 Skills install as copies, so re-run `bootstrap` after editing a `SKILL.md`. See
-[`capabilities/README.md`](capabilities/README.md) for the deck layout.
+[`capabilities/README.md`](capabilities/README.md) for the capability layout.
 
 ## Declaring a unit
 
@@ -162,7 +162,7 @@ structure:                    # what each part is for. Authoring, never discover
 ```
 
 The grammar is data. Adding a kind is one line and needs no Python change:
-`deck: capabilities/*` is a working example, exercised by
+`capability: "*"` is a working example, exercised by
 `capabilities/.orglens-grammar.yml`. A rendering of the grammar lives at
 `skills/orglens/references/grammar-reference.md`.
 

@@ -1,18 +1,18 @@
-# How orglens sees this bank — a second tree, and a second grammar file.
+# How orglens sees this tree of capabilities — a second tree, and a second grammar file.
 # Nothing in the engine assumes there is only one; which grammar governs which
 # root is a config question, not an engine one.
 version: 2
 
-driver: DECK.md
+driver: README.md
 
 entities:
-  deck: decks/*
+  capability: "*"
 
 artifacts:
   program:
     find: programs/*.md
     means: >
-      A node program: what one node of a deck's workflow runs. One pass, one
+      A node program: what one node of a capability's workflow runs. One pass, one
       file written, performed by whoever is at the packet.
   skill:
     find: skills/*/SKILL.md
@@ -26,5 +26,5 @@ artifacts:
       patterns. Never performed on its own.
 
 structure:
-  deck:
-    DECK.md: What the deck is for, and how its programs and skills fit together.
+  capability:
+    README.md: What the capability is for, and how its programs and skills fit together.
