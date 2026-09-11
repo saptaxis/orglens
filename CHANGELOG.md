@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## [0.3.0] — 2026-09-11
 
-## Unreleased
+A session belongs to a set of units: the one an attribution names, or every
+unit with a home containing where it ran. `orglens/sessions.py` is the one
+place that decides this; `list`, `status` and `view` read from it.
 
 The workflow engine is replaced. `orglens workflow` runs a deck as an ordered
 list of nodes: `next` says which program to perform and which file it writes,
@@ -13,9 +15,6 @@ and gate are derived from its last routing fact. The guard-based engine
 `76858fd`; the new package reuses its path, so recover the old one with
 `git show 76858fd^:orglens/workflow/<file>` or a checkout of `76858fd^` into a
 worktree. The tutorial deck is ported to `WORKFLOW.yaml`.
-A session belongs to a set of units: the one an attribution names, or every
-unit with a home containing where it ran. `orglens/sessions.py` is the one
-place that decides this; `list`, `status` and `view` read from it.
 
 - `orglens sessions [UNIT]` lists a unit's sessions, or every unit's grouped,
   with how each is the unit's. `--none` lists the sessions belonging to no unit.
