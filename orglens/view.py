@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 from orglens.activity import Activity, recency
+from orglens.sessions import listed
 
 CSS = """
 :root { color-scheme: light dark;
@@ -210,10 +211,14 @@ def _detail(row: dict, ctx: dict) -> str:
                 f"<span class='pin'>{html.escape(str(s['outcome']))}</span>"
                 if s["open"] else ""
             )
+            # `how` says why this session is on this card. On a card for a
+            # unit sharing a home, the same session sits on the other card
+            # too, and this is what makes that read as intended.
+            how = f" · {html.escape(s['how'])}" if s.get("how") else ""
             out.append(
                 f"<li{mark}>{flag}{html.escape(str(s['name'] or 'untitled'))[:70]}"
                 f"<span class='when'> · {s['agent']} · {s['turns']:,} turns · "
-                f"{ago(s['at'])}</span></li>"
+                f"{ago(s['at'])}{how}</span></li>"
             )
         out.append("</ol>")
 
@@ -292,8 +297,30 @@ def _card(name: str, why: str | None, a: Activity) -> str:
     return "".join(out)
 
 
-def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
+def _unattributed(loose: list) -> str:
+    """Sessions belonging to no unit, newest first, each with the command
+    that resumes it. The copy affordance takes any text, not only a path."""
+    out = [f"<h2 class='grp'>Unattributed ({len(loose)})</h2><ol class='list'>"]
+    for s in loose:
+        mark = " class='open'" if s.open else (" class='live'" if s.live else "")
+        cmd = f"scad session resume {s.id} --print"
+        when = ago(s.when // 1000) if s.when else "—"
+        out.append(
+            f"<li{mark}>{html.escape(str(s.label or s.id))[:70]}"
+            f"<span class='when'> · {html.escape(s.agent)} · {s.turns:,} turns · {when}"
+            f" · {html.escape(str(s.cwd or '')[-46:])}</span>"
+            f"<span class='cp' data-path='{html.escape(cmd)}' title='copy resume command'>"
+            "&#x2398;</span></li>"
+        )
+    out.append("</ol>")
+    return "".join(out)
+
+
+def render(
+    groups: list[tuple[str, list[dict]]], ctx: dict, unattributed: list | None = None
+) -> str:
     """`groups` is [(label, [row, ...]), ...]; a row is what `cli.view` builds.
+    `unattributed` is the sessions belonging to no unit, rendered last.
 
     Ordered by use — most recently touched first — because the question is
     almost always about what you were last doing, not what is alphabetically
@@ -334,6 +361,10 @@ def render(groups: list[tuple[str, list[dict]]], ctx: dict) -> str:
                 + _detail(row, ctx)
                 + "</details>"
             )
+
+    loose = listed(unattributed or [])
+    if loose:
+        body.append(_unattributed(loose))
 
     stamp = time.strftime("%Y-%m-%d %H:%M")
     return (

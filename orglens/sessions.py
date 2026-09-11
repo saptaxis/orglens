@@ -205,3 +205,14 @@ def for_unit(sessions: list[Session], name: str) -> list[Session]:
 
 def unattributed(sessions: list[Session]) -> list[Session]:
     return [s for s in sessions if not s.units]
+
+
+def listed(sessions: list[Session], everything: bool = False) -> list[Session]:
+    """What a listing shows, in the order it shows it.
+
+    Running first: a just-launched session has no clock yet, and it is the
+    one you most want to see. Without `everything`, the rows scad indexed
+    at launch that have no turn yet are left out, unless they are running.
+    """
+    shown = [s for s in sessions if everything or s.turns or s.live]
+    return sorted(shown, key=lambda s: (s.live, s.when or 0, s.id), reverse=True)

@@ -25,7 +25,6 @@ without scad, an entity with no plans are all ordinary.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import subprocess
 from dataclasses import dataclass, field

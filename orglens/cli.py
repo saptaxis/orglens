@@ -137,15 +137,16 @@ def _dated(act: activity.Activity) -> list[str]:
 
 
 
-def _sessions_by_unit(registry: Registry) -> dict[str, list]:
-    """Every unit's sessions, from one pass over the index and the event log.
+def _sessions_by_unit(registry: Registry) -> tuple[list, dict[str, list]]:
+    """Every session, and every unit's, from one pass over the index and
+    the event log.
 
     One pass, not one per unit: `attributions` walks every shard and the
     index is one query, so a loop over thirty units would do the same work
     thirty times for the same answer.
     """
     every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
-    return {unit.name: sessions.for_unit(every, unit.name) for unit in registry.units()}
+    return every, {unit.name: sessions.for_unit(every, unit.name) for unit in registry.units()}
 
 
 def _status_of(registry: Registry, unit):
@@ -218,7 +219,7 @@ def list(kind_filter: str | None):
         click.echo("Nothing found.")
         return
 
-    by_unit = _sessions_by_unit(registry)
+    every, by_unit = _sessions_by_unit(registry)
 
     # `peek`, not `read`: the per-home git calls `read` makes for the last
     # commit and the dirty count are the entire gap between `list` at 1.9s
@@ -245,7 +246,7 @@ def status():
     registry, _ = _load_registry()
     units = registry.units()
 
-    by_unit = _sessions_by_unit(registry)
+    every, by_unit = _sessions_by_unit(registry)
     acts = {
         unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name])
         for unit in units
@@ -710,7 +711,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
     ]
 
-    by_unit = _sessions_by_unit(registry)
+    every, by_unit = _sessions_by_unit(registry)
 
     groups = []
     for kind in sorted(by_kind):
@@ -739,7 +740,8 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
             groups.append((_heading(kind), rows))
 
     ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url}
-    path = view.write(view.render(groups, ctx), Path(out))
+    page = view.render(groups, ctx, unattributed=sessions.unattributed(every))
+    path = view.write(page, Path(out))
     click.echo(f"wrote {path}")
     if do_open:
         os.system(f"open '{path}'")
@@ -793,15 +795,6 @@ def _session_line(s, show_how: bool = True) -> str:
     )
 
 
-def _listed(sessions_, everything: bool) -> list:
-    """Newest first; without `--all`, the rows scad indexed at launch that
-    have no turn yet are left out, unless they are running now."""
-    shown = [s for s in sessions_ if everything or s.turns or s.live]
-    # Running first: a just-launched session has no clock yet, and it is
-    # the one you most want to see.
-    return sorted(shown, key=lambda s: (s.live, s.when or 0, s.id), reverse=True)
-
-
 @cli.command(name="sessions")
 @click.argument("unit_name", required=False)
 @click.option("--none", "only_none", is_flag=True,
@@ -824,7 +817,7 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
         except ValueError as exc:
             click.echo(str(exc), err=True)
             sys.exit(1)
-        rows = _listed(sessions.for_unit(every, unit.name), everything)
+        rows = sessions.listed(sessions.for_unit(every, unit.name), everything)
         if not rows:
             click.echo(f"{unit.name}: no sessions")
             return
@@ -835,10 +828,10 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
     groups: list[tuple[str, list]] = []
     if not only_none:
         for unit in registry.units():
-            rows = _listed(sessions.for_unit(every, unit.name), everything)
+            rows = sessions.listed(sessions.for_unit(every, unit.name), everything)
             if rows:
                 groups.append((unit.name, rows))
-    loose = _listed(sessions.unattributed(every), everything)
+    loose = sessions.listed(sessions.unattributed(every), everything)
     if loose:
         groups.append(("unattributed", loose))
     if not groups:
@@ -875,7 +868,7 @@ def resume(target: str, print_only: bool):
         except ValueError:
             click.echo(f"'{target}' is neither a session id nor a unit.", err=True)
             sys.exit(1)
-        mine = _listed(sessions.for_unit(every, unit.name), everything=False)
+        mine = sessions.listed(sessions.for_unit(every, unit.name), everything=False)
         open_ = [s for s in mine if s.open]
         if not open_:
             click.echo(f"{unit.name}: nothing open to resume. Newest:", err=True)
