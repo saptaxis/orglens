@@ -4,39 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from orglens import activity
-
-
-def _index(tmp_path, rows):
-    """A scad index with the tables `_sessions` actually queries.
-
-    The auxiliary tables matter: a missing `turns` raises inside the query and
-    the bare `except sqlite3.Error` returns zeros, so every assertion would
-    pass or fail for the wrong reason.
-    """
-    db_path = tmp_path / "index.sqlite"
-    db = sqlite3.connect(db_path)
-    db.execute(
-        "create table sessions (id text primary key, kind text not null, "
-        "agent text not null, machine text not null, cwd text, project text, "
-        "title text, name text, started integer, ended integer, "
-        "n_turns integer not null default 0, grade text not null default '', "
-        "source text not null default '', outcome text, needs text)"
-    )
-    db.execute("create table turns (session_id text, ts integer, role text, text text)")
-    db.execute(
-        "create table notes (session_id text, idx integer, ts integer, topic text, "
-        "relation text, parent text, title text, tags text, entities text, "
-        "note_path text, kind text, project text)"
-    )
-    for row in rows:
-        db.execute(
-            "insert into sessions (id, kind, agent, machine, cwd, project, n_turns) "
-            "values (?, 'main', 'claude', 'test', ?, ?, 1)",
-            row,
-        )
-    db.commit()
-    db.close()
-    return db_path
+from tests.conftest import scad_index as _index
 
 
 def test_an_attributed_session_counts_even_from_outside_every_home(tmp_path):

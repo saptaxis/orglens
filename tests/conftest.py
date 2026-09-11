@@ -1,5 +1,7 @@
 """Shared test fixtures."""
 
+import sqlite3
+
 import pytest
 from pathlib import Path
 from orglens.declaration import MARKER
@@ -11,7 +13,8 @@ from orglens.units import Registry, Unit
 
 @pytest.fixture(autouse=True)
 def no_real_machine_state(tmp_path, monkeypatch):
-    """Keep `~/.scad/index.sqlite` and `~/.orglens/events` out of every test.
+    """Keep `~/.scad/index.sqlite`, `~/.claude/sessions` and `~/.orglens/events`
+    out of every test.
 
     Both are read by commands that take no path argument, so without this a
     test's session count depends on which machine runs it. A test that wants
@@ -19,6 +22,7 @@ def no_real_machine_state(tmp_path, monkeypatch):
     it, which a later `monkeypatch.setattr` still does.
     """
     monkeypatch.setattr("orglens.activity.SCAD_INDEX", tmp_path / "no-index.sqlite")
+    monkeypatch.setattr("orglens.activity.LIVE_REGISTRY", tmp_path / "no-live")
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "no-events")
 
 
@@ -247,3 +251,45 @@ def unit_with_clobbering_runtime(tmp_path):
         declared_at=tmp_path / "orglens",
         runtime={"name": "hijacked", "repos": {"evil": {"path": "/nope"}}},
     )
+
+
+def scad_index(tmp_path, rows):
+    """A scad index with the tables `_sessions` actually queries.
+
+    The auxiliary tables matter: a missing `turns` raises inside the query and
+    the bare `except sqlite3.Error` returns zeros, so every assertion would
+    pass or fail for the wrong reason.
+    """
+    db_path = tmp_path / "index.sqlite"
+    db = sqlite3.connect(db_path)
+    db.execute(
+        "create table sessions (id text primary key, kind text not null, "
+        "agent text not null, machine text not null, cwd text, project text, "
+        "title text, name text, started integer, ended integer, "
+        "n_turns integer not null default 0, grade text not null default '', "
+        "source text not null default '', outcome text, needs text)"
+    )
+    db.execute("create table turns (session_id text, ts integer, role text, text text)")
+    db.execute(
+        "create table notes (session_id text, idx integer, ts integer, topic text, "
+        "relation text, parent text, title text, tags text, entities text, "
+        "note_path text, kind text, project text)"
+    )
+    for row in rows:
+        # (id, cwd, project) as the attribution tests write it, or a dict
+        # naming any column, for tests about the rows themselves.
+        if isinstance(row, dict):
+            cols = ", ".join(row)
+            db.execute(
+                f"insert into sessions ({cols}) values ({', '.join('?' * len(row))})",
+                tuple(row.values()),
+            )
+        else:
+            db.execute(
+                "insert into sessions (id, kind, agent, machine, cwd, project, n_turns) "
+                "values (?, 'main', 'claude', 'test', ?, ?, 1)",
+                row,
+            )
+    db.commit()
+    db.close()
+    return db_path
