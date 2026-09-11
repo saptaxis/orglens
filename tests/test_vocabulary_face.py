@@ -28,7 +28,7 @@ ENGINE = ROOT / "orglens"
 
 #: The vocabulary face. `activity.py` and `view.py` are exempt: they derive what
 #: is true rather than declaring what may exist, and they were built after the
-#: drift they would otherwise be blamed for. `workflow/` has its own check.
+#: drift they would otherwise be blamed for.
 FACE = ("cli.py", "check.py", "config.py", "declaration.py", "documents.py",
         "events.py", "grammar.py", "homes.py", "propose.py", "reference.py",
         "scadconfig.py", "snapshot.py", "state.py", "units.py")
