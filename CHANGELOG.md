@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+The workflow engine is replaced. `orglens chain` runs a deck as an ordered
+list of stages: `next` says which card to perform and which file it writes,
+`done` records a finished stage, `note` answers the open gate, `goto` points
+the chain at a stage. A packet's `session.jsonl` is the only record; position
+and gate are derived from its last routing fact. The guard-based engine in
+`orglens/workflow/` (guards, roles, reads, terminal predicates, `runs.jsonl`)
+is removed in commit `76858fd`; `git checkout 76858fd^ -- orglens/workflow`
+recovers it. The tutorial deck is ported to `CHAIN.yaml`.
+
 ## [0.2.0] — 2026-09-10
 
 `orglens start UNIT` picks one of the unit's homes, launches through scad, and

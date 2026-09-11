@@ -79,7 +79,7 @@ it. `grammar: /path/to/custom.yaml` replaces the bundled grammar.
 | `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--dry-run]` | Start a session for a unit, attributed before its first turn |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 | `orglens where [NAME]` | Which roots are configured, and which unit a name or this directory resolves to |
-| `orglens workflow ...` | Derive and validate filesystem-native workflows |
+| `orglens chain next\|done\|note\|goto PACKET` | Run a deck's stages over a packet, one pass at a time, with a human between. See `capabilities/decks/tutorial/DECK.md` |
 
 ## Skills
 

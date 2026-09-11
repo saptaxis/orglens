@@ -2,9 +2,9 @@
 
 An entity's `overview.md` carries a hand-written status line. It drifts, because
 nothing forces anyone to update it: orglens' own said "v1 core implemented"
-while plan 07 was merged. That is a stored status field — the shape the workflow
-face refuses outright, where `runs.jsonl` rejects the keys `status`, `state`,
-`pending`, `current_state` and `next_node` for exactly this reason.
+while plan 07 was merged. That is a stored status field — the shape the chain
+engine refuses outright: a packet's `session.jsonl` holds facts about the past
+and its position is derived from them, never written down.
 
 So the position is computed and only the reasoning stays written down. A
 sentence that says *"the draft is dead pending a literature refresh"* is a
@@ -15,7 +15,7 @@ Four sources, none of which reads a document body:
 
     git         when the directory was last committed to, and what is unstaged
     filenames   the highest-numbered plan
-    runs.jsonl  workflow packets, and which are waiting on a human
+    session.jsonl  chain packets, and which are waiting on a human
     scad index  sessions attributed to this entity, and their open questions
 
 Every one degrades to empty rather than raising: a tree outside git, a machine
