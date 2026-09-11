@@ -62,36 +62,41 @@ def test_plan_is_the_highest_numbered_plan_across_homes(tmp_path):
     assert act.plan == "07"
 
 
+def _chain_packet(directory, gate: bool):
+    """A chain packet: a session log, with an unanswered question if `gate`."""
+    from orglens.chain import session
+    directory.mkdir(parents=True)
+    session.bind(directory, directory / "CHAIN.yaml")
+    fact = {"type": "done", "stage": "one", "agent": "claude"}
+    if gate:
+        fact["question"] = "which way?"
+    session.append(directory, fact)
+
+
 def test_packets_are_summed_across_homes(tmp_path):
-    """A workflow packet in the code home must not go uncounted because the
-    docs home happened to be listed first and holds none.
-    """
     docs = tmp_path / "docs"
     code = tmp_path / "code"
-    (docs / "packet-a").mkdir(parents=True)
-    (code / "packet-b").mkdir(parents=True)
-    (docs / "packet-a" / "runs.jsonl").write_text("")
-    (code / "packet-b" / "runs.jsonl").write_text("")
+    _chain_packet(docs / "packet-a", gate=False)
+    _chain_packet(code / "packet-b", gate=False)
+    # The old engine's log is not a packet any more.
+    (code / "old").mkdir()
+    (code / "old" / "runs.jsonl").write_text("")
 
     act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
 
     assert act.packets == 2
 
 
-def test_blocked_packets_are_summed_across_homes(tmp_path):
+def test_blocked_packets_are_the_ones_with_an_open_gate(tmp_path):
     docs = tmp_path / "docs"
     code = tmp_path / "code"
-    (docs / "packet-a").mkdir(parents=True)
-    (code / "packet-b").mkdir(parents=True)
-    (docs / "packet-a" / "runs.jsonl").write_text(
-        json.dumps({"type": "needs_human", "event_id": "e1"}) + "\n"
-    )
-    (code / "packet-b" / "runs.jsonl").write_text(
-        json.dumps({"type": "needs_human", "event_id": "e2"}) + "\n"
-    )
+    _chain_packet(docs / "packet-a", gate=True)
+    _chain_packet(code / "packet-b", gate=True)
+    _chain_packet(code / "packet-c", gate=False)
 
     act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
 
+    assert act.packets == 3
     assert act.blocked == 2
 
 

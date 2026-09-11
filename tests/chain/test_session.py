@@ -153,3 +153,15 @@ def test_a_broken_line_is_skipped_not_fatal(packet):
     with (packet / "session.jsonl").open("a") as h:
         h.write("not json\n")
     assert len(read(packet)) == 1
+
+
+def test_gated_without_the_deck_sees_a_question_but_not_a_review(deck, packet):
+    from orglens.chain.session import gated
+    append(packet, {"type": "done", "stage": "one", "agent": "claude"})
+    append(packet, {"type": "done", "stage": "two", "agent": "claude"})   # review stage
+    assert gated(read(packet), deck) is True
+    assert gated(read(packet), None) is False
+    done = append(packet, {"type": "done", "stage": "three", "agent": "claude", "question": "q"})
+    assert gated(read(packet), None) is True
+    append(packet, {"type": "note", "resolves": done["id"], "text": "a"})
+    assert gated(read(packet), None) is False

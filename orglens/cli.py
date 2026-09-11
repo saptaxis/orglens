@@ -31,7 +31,7 @@ from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot
 from orglens.state import read_status
 from orglens.units import Registry, Unit
-from orglens.workflow.cli import workflow as workflow_group
+from orglens.chain.cli import chain as chain_group
 
 #: Where a rendered config lands unless `--out` says otherwise. A module-level
 #: constant, not inlined, so a test can monkeypatch it rather than write to
@@ -59,7 +59,7 @@ def cli():
     pass
 
 
-cli.add_command(workflow_group, name="workflow")
+cli.add_command(chain_group, name="chain")
 
 
 def _ago(ts: float) -> str:

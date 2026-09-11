@@ -150,17 +150,28 @@ def _latest_plan(path: Path) -> str | None:
 
 
 def _packets(path: Path) -> tuple[int, int]:
-    """Workflow packets beneath the entity, and how many hold a question."""
-    from orglens.workflow.runstate import read_entries, unresolved_needs_human
+    """Chain packets beneath the entity, and how many are waiting on a human.
+
+    A packet is a directory holding a `session.jsonl`. The deck is loaded
+    when it can be, so `review` gates count; where it cannot — not checked
+    out on this machine — only a `done` with a question counts.
+    """
+    from orglens.chain import session
+    from orglens.chain.deck import DeckError, load_deck
 
     total = blocked = 0
-    for log in path.rglob("runs.jsonl"):
+    for log in path.rglob(session.LOG):
         total += 1
-        try:
-            if unresolved_needs_human(read_entries(log.parent)) is not None:
-                blocked += 1
-        except (ValueError, OSError):
-            pass
+        facts = session.read(log.parent)
+        bound = session.deck_path(facts)
+        deck = None
+        if bound is not None:
+            try:
+                deck = load_deck(bound)
+            except DeckError:
+                deck = None
+        if session.gated(facts, deck):
+            blocked += 1
     return total, blocked
 
 

@@ -136,3 +136,20 @@ def next_stage(deck: Deck, facts: list[dict]) -> Position:
     if following is None:
         return Position(State.COMPLETE, after=named.name, note=answer)
     return Position(State.RUNNABLE, stage=following, after=named.name, note=answer)
+
+
+def gated(facts: list[dict], deck: Deck | None = None) -> bool:
+    """Whether the log's last routing fact is waiting on a human.
+
+    With the deck, this is `next_stage`. Without it — a machine where the
+    deck is not checked out — only a `done` carrying a question can be seen
+    to wait; a `review` gate needs the deck to say so. `activity` counts
+    open gates across a tree and must not fail on a deck it cannot load.
+    """
+    if deck is not None:
+        return next_stage(deck, facts).state == State.WAITING
+    routing = [f for f in facts if f["type"] in ROUTING]
+    if not routing or routing[-1]["type"] != "done" or not routing[-1].get("question"):
+        return False
+    last = routing[-1]
+    return not any(f["type"] == "note" and f.get("resolves") == last["id"] for f in facts)
