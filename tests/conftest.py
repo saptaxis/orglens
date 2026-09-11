@@ -24,6 +24,11 @@ def no_real_machine_state(tmp_path, monkeypatch):
     monkeypatch.setattr("orglens.activity.SCAD_INDEX", tmp_path / "no-index.sqlite")
     monkeypatch.setattr("orglens.sessions.LIVE_REGISTRY", tmp_path / "no-live")
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "no-events")
+    # Per-process caches: one command is one process, but the suite is one
+    # process running hundreds of trees.
+    from orglens import activity, documents
+    activity._status_lines.cache_clear()
+    documents._dirs_under.cache_clear()
 
 
 @pytest.fixture

@@ -40,6 +40,10 @@ bound under the old names.
   parent as a root.
 - `orglens check` reports a home declared on more than one unit, and which of
   them `where` answers inside it.
+- `status` runs in 5s and `view` in 4.4s on a 23-unit tree, from 12.4s and
+  10.6s: git is asked once per repository instead of three times per home,
+  a checkout's remote is read from `.git/config`, and each home is walked
+  once for every document kind.
 - Everything orglens keeps on a machine is under `~/.orglens/`: `config.yaml`,
   `cache/snapshot.md`, `events/`. Move `~/.config/orglens/config.yaml` there;
   nothing reads the old path.

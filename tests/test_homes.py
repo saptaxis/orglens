@@ -201,3 +201,29 @@ def test_repo_of_is_the_first_segment_of_a_home_name():
     # `traitful-docs` repository; a bare name is its own repository.
     assert repo_of("traitful-docs/docs/projects/orglens") == "traitful-docs"
     assert repo_of("orglens") == "orglens"
+
+
+def test_a_remote_is_read_from_git_config_without_running_git(tmp_path, monkeypatch):
+    # The sweep runs once per command over every checkout under the roots;
+    # a subprocess per checkout was 1.4s of a 9s `status`. The URL is in
+    # `.git/config`, which is a file.
+    import subprocess as sp
+    from orglens import homes
+    d = tmp_path / "some-checkout"
+    (d / ".git").mkdir(parents=True)
+    (d / ".git" / "config").write_text(
+        "[core]\n\trepositoryformatversion = 0\n"
+        "[remote \"origin\"]\n\turl = git@github.com:saptaxis/world-model-ladder.git\n"
+        "\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+    )
+    monkeypatch.setattr(sp, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("git was run")))
+
+    assert homes._remote_of(d) == "saptaxis/world-model-ladder"
+
+
+def test_a_checkout_without_an_origin_has_no_remote(tmp_path):
+    from orglens import homes
+    d = tmp_path / "local-only"
+    (d / ".git").mkdir(parents=True)
+    (d / ".git" / "config").write_text("[core]\n\tbare = false\n")
+    assert homes._remote_of(d) is None

@@ -141,3 +141,46 @@ class TestPeek:
 
         assert act.sessions == 0
         assert act.last_session is None
+
+
+class TestGitCostsOncePerRepo:
+    """`status` used to run three git subprocesses per home. The root is
+    found by walking up to `.git`, and `git status` runs once per repository
+    however many homes it holds."""
+
+    def test_repo_root_is_found_without_running_git(self, tmp_path, monkeypatch):
+        import subprocess as sp
+        repo = tmp_path / "repo"
+        deep = repo / "docs" / "projects" / "x"
+        deep.mkdir(parents=True)
+        (repo / ".git").mkdir()
+        monkeypatch.setattr(sp, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("git was run")))
+
+        assert activity._repo_root(deep) == repo
+        assert activity._repo_root(tmp_path / "nowhere") is None
+
+    def test_a_worktree_git_file_counts_as_a_root(self, tmp_path):
+        repo = tmp_path / "wt"
+        (repo / "sub").mkdir(parents=True)
+        (repo / ".git").write_text("gitdir: /elsewhere/.git/worktrees/wt\n")
+        assert activity._repo_root(repo / "sub") == repo
+
+    def test_dirty_runs_git_status_once_per_repo(self, tmp_path, monkeypatch):
+        import subprocess as sp
+        repo = tmp_path / "repo"
+        a, b = repo / "a", repo / "b"
+        a.mkdir(parents=True); b.mkdir()
+        sp.run(["git", "init", "-q"], cwd=repo, check=True)
+        (a / "one.txt").write_text("x"); (a / "two.txt").write_text("y")
+        (b / "three.txt").write_text("z")
+
+        calls = []
+        real = activity._git
+        def spy(args, cwd):
+            calls.append(args[0]); return real(args, cwd)
+        monkeypatch.setattr(activity, "_git", spy)
+        activity._status_lines.cache_clear()
+
+        assert activity._dirty(repo, a) == 2
+        assert activity._dirty(repo, b) == 1
+        assert calls.count("status") == 1

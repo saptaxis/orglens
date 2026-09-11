@@ -14,6 +14,7 @@ documents follow, with nothing renamed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from orglens.units import Registry, Unit
@@ -69,7 +70,31 @@ def _containers(home: Path, directory: str) -> list[Path]:
     """
     if not directory:
         return [home]
-    return sorted(d for d in home.rglob(directory) if d.is_dir())
+    return [d for d in _dirs_under(home) if d.name == directory]
+
+
+@lru_cache(maxsize=None)
+def _dirs_under(home: Path) -> tuple[Path, ...]:
+    """Every directory under a home, walked once per process and filtered
+    per kind. `find` runs once per unit per kind, and a walk per call was
+    92 walks over the same directories for 23 units."""
+    found: list[Path] = []
+    stack = [home]
+    while stack:
+        try:
+            entries = sorted(stack.pop().iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name.startswith("."):
+                continue
+            try:
+                if entry.is_dir():
+                    found.append(entry)
+                    stack.append(entry)
+            except OSError:
+                continue
+    return tuple(sorted(found))
 
 
 def find(

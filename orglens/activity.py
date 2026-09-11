@@ -29,6 +29,7 @@ import sqlite3
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 from orglens.sessions import Session
@@ -96,8 +97,17 @@ def _git(args: list[str], cwd: Path) -> str:
 
 
 def _repo_root(path: Path) -> Path | None:
-    out = _git(["rev-parse", "--show-toplevel"], path)
-    return Path(out.strip()) if out.strip() else None
+    """The repository holding `path`: the nearest ancestor with a `.git`.
+
+    A directory or a file — a worktree's `.git` is a file naming the real
+    one. Walked in Python rather than asked of git: `rev-parse` per home
+    was sixty subprocesses per `status`.
+    """
+    here = Path(path).resolve()
+    for directory in (here, *here.parents):
+        if (directory / ".git").exists():
+            return directory
+    return None
 
 
 def _last_commit(root: Path, path: Path) -> int | None:
@@ -105,9 +115,32 @@ def _last_commit(root: Path, path: Path) -> int | None:
     return int(out) if out.isdigit() else None
 
 
+@lru_cache(maxsize=None)
+def _status_lines(root: Path) -> tuple[str, ...]:
+    """`git status --porcelain` for a whole repository, once per process.
+
+    Several homes sit in one repository, and each used to run its own
+    status. The paths come back repository-relative.
+    """
+    out = _git(["status", "--porcelain", "--untracked-files=all"], root)
+    return tuple(line for line in out.splitlines() if line.strip())
+
+
 def _dirty(root: Path, path: Path) -> int:
-    out = _git(["status", "--porcelain", "--", str(path)], root)
-    return sum(1 for line in out.splitlines() if line.strip())
+    """Uncommitted paths under `path`, from the repository's one status."""
+    try:
+        rel = Path(path).resolve().relative_to(Path(root).resolve())
+    except ValueError:
+        return 0
+    prefix = "" if str(rel) == "." else str(rel).rstrip("/") + "/"
+    count = 0
+    for line in _status_lines(Path(root).resolve()):
+        # Porcelain: two status columns, a space, then the path; a rename
+        # is `old -> new` and the new path is what exists.
+        entry = line[3:].split(" -> ")[-1].strip('"')
+        if entry.startswith(prefix):
+            count += 1
+    return count
 
 
 _SKIP = {".git", "node_modules", "__pycache__", ".venv"}

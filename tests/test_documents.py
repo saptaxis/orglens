@@ -237,3 +237,17 @@ def test_a_shared_home_is_seen_by_each_unit_that_shares_it(tmp_path, grammar):
 
     assert len(found) == 2
     assert {d.unit for d in found} == {"unit-a", "unit-b"}
+
+
+def test_a_home_is_walked_once_however_many_kinds_are_asked_for(two_root_tree, grammar):
+    """`find` used to `rglob` each home once per document kind — 92 walks
+    for 23 units. The directory list is computed once per home and every
+    kind filters it."""
+    from orglens import documents
+    documents._dirs_under.cache_clear()
+    unit = two_root_tree.resolve("orglens")
+    for kind in two_root_tree.grammar.artifact_types:
+        documents.find(two_root_tree, kind, unit)
+    info = documents._dirs_under.cache_info()
+    assert info.misses == len(unit.paths)
+    assert info.hits >= len(two_root_tree.grammar.artifact_types) - 1

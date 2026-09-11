@@ -66,6 +66,28 @@ def normalise_remote(url: str) -> str | None:
 
 
 def _remote_of(path: Path) -> str | None:
+    """The origin remote, read from `.git/config`.
+
+    A file read, not a subprocess: the sweep visits every checkout under the
+    roots on every command, and `git remote get-url` per checkout was 1.4s
+    of a 9s `status`. A worktree's `.git` is a file pointing elsewhere; that
+    one case still asks git.
+    """
+    dot_git = path / ".git"
+    if dot_git.is_dir():
+        try:
+            text = (dot_git / "config").read_text()
+        except OSError:
+            return None
+        section = None
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("["):
+                section = stripped
+            elif section == '[remote "origin"]' and stripped.startswith("url"):
+                _, _, url = stripped.partition("=")
+                return normalise_remote(url.strip())
+        return None
     try:
         result = subprocess.run(
             ["git", "-C", str(path), "remote", "get-url", "origin"],
