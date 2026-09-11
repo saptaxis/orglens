@@ -3,9 +3,10 @@ name: orglens
 description: >
   This skill should be used when the user starts a session that involves
   organizational docs, asks "what projects exist", "where do plans go",
-  "create a new plan/spec/log", "what's the status of X", or needs to
-  understand the organizational topology. Also triggers when the user
-  mentions orglens, topology, or organizational structure.
+  "create a new plan/spec/log", "what's the status of X", "which sessions
+  belong to X", "resume the last session on X", or needs to understand the
+  organizational topology. Also triggers when the user mentions orglens,
+  units, homes, a packet or a workflow, or organizational structure.
 ---
 
 # Organizational Context
@@ -93,6 +94,41 @@ through scad, and appends one `attributed` event — so the session is joined
 to its unit by record, not by guessing from where it landed. If the unit
 named is not declared yet, `start` offers to declare it inline, the same way
 `declare` does on its own.
+
+**Sessions:**
+
+```bash
+orglens sessions <unit>               # the unit's sessions, newest first, with how each is its
+orglens sessions                      # every unit's, grouped; unattributed last
+orglens sessions --none               # only the sessions belonging to no unit
+orglens resume <unit>                 # resume the unit's newest open session
+orglens resume <session-id>           # resume one by id or unique prefix
+orglens attribute <session-id> <unit> # say which unit a session was for, after the fact
+```
+
+A session belongs to a set of units: the one an attribution names, or every
+unit with a home containing where it ran. `sessions` shows `attributed` or
+`containment` beside each so a session in a shared home reads as intended;
+`attribute` narrows such a session to one unit. `resume` hands the id to
+`scad session resume`, which knows where the session ran. Use `sessions
+--none` as the worklist for what `start` was not used for.
+
+**Workflow:**
+
+```bash
+orglens workflow next <packet> --workflow <path>   # bind a packet, and say what runs next
+orglens workflow next <packet>                     # node, program, file to write, and any note
+orglens workflow done <packet> --node <n> --agent <who> [--question "..."]
+orglens workflow note <packet> "..."               # answer the open gate
+orglens workflow goto <packet> --node <n> --why "..."
+```
+
+A capability with state has a `WORKFLOW.yaml`: nodes in a line, each naming a
+program and the one file it writes. `next` derives the position from the
+packet's `session.jsonl` and names the program to perform; whoever is at the
+packet performs it and runs `done`. A node marked `review: true`, or a `done`
+carrying `--question`, waits for a `note` before the next node. The tutorial
+at `capabilities/tutorial/README.md` walks all of it in five minutes.
 
 **Container:**
 

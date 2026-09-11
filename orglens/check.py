@@ -15,7 +15,7 @@ goes dark while the tree is half declared.
 
 A glob that matches nothing anywhere is a different silent failure again —
 not an undeclared directory, but a mistyped or misplaced pattern that quietly
-stops finding documents it should. `operators/*.md` once pointed one
+stops finding documents it should. A capabilities glob once pointed one
 directory too high and found nothing, and nothing said so. `unmatched` is
 what says so.
 """

@@ -157,7 +157,7 @@ class TestSilentFailure:
         """The real bank declares three kinds it holds none of.
 
         A glob at the wrong depth looks exactly like this, which is how the
-        capabilities grammar came to point `operators/*.md` at documents that
+        capabilities grammar once pointed a pattern at documents that
         actually live one directory lower. `candidates()` only ever iterates
         `entity_types`, so this failure mode is not the one `undeclared`
         superseded — it needs its own field.

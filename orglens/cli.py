@@ -1,8 +1,9 @@
 """CLI — click commands for orglens.
 
 Every command asks the grammar what kinds exist. None of them knows a noun:
-that is what `orglens list --type deck` used to fail on, raising `KeyError`
-because four modules carried their own copy of the type list.
+`orglens list --type <kind>` used to raise `KeyError` for any kind the grammar
+declared but the code did not, because four modules carried their own copy of
+the type list.
 
 Every command also speaks in units now, not folder position. A unit is
 whatever has declared itself — via a marker, resolved through `Registry` —
