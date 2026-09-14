@@ -27,20 +27,45 @@ from orglens.sessions import listed
 
 CSS = """
 :root { color-scheme: light dark;
-  --bg:#fff; --fg:#111; --dim:#666; --line:#e3e3e3; --card:#fafafa; --warn:#b45309; --ok:#15803d; }
+  --bg:#f8f5ee; --fg:#2a2622; --dim:#7a7168; --line:#e2dccf; --card:#fffdf8;
+  --warn:#a05a1c; --ok:#4c7a3f; --claude:#a3562b; --codex:#2f6f5e; --kimi:#6b4f9a;
+  --bar:#f2eee4; }
 @media (prefers-color-scheme: dark) { :root {
-  --bg:#111; --fg:#eee; --dim:#999; --line:#2a2a2a; --card:#191919; --warn:#fbbf24; --ok:#4ade80; } }
+  --bg:#1b1917; --fg:#ece6da; --dim:#9a9184; --line:#33302b; --card:#242220;
+  --warn:#e0a35a; --ok:#8fbf7a; --claude:#d78a5e; --codex:#6fb8a2; --kimi:#b394d8;
+  --bar:#211f1c; } }
 * { box-sizing:border-box }
-body { margin:0; padding:2rem 1.5rem; background:var(--bg); color:var(--fg);
+body { margin:0; padding:0 1.5rem 3rem; background:var(--bg); color:var(--fg);
   font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",sans-serif; }
 main { max-width:1000px; margin:0 auto }
-h1 { font-size:1.1rem; font-weight:600; margin:0 0 .25rem }
-.sub { color:var(--dim); font-size:.82rem; margin-bottom:1.75rem }
+h1, h2.grp, .name { font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif }
+h1 { font-size:1.35rem; font-weight:600; margin:1.6rem 0 .2rem; letter-spacing:.01em }
+.sub { color:var(--dim); font-size:.82rem; margin-bottom:1rem }
+.filters { position:sticky; top:0; z-index:20; background:var(--bar);
+  border:1px solid var(--line); border-radius:8px; padding:.55rem .8rem;
+  margin:0 0 1.4rem; display:flex; flex-wrap:wrap; gap:.5rem 1.2rem; align-items:center }
+.facet { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap }
+.flabel { font-size:.68rem; text-transform:uppercase; letter-spacing:.07em; color:var(--dim) }
+.tab, .achip { font:inherit; font-size:.78rem; border:1px solid var(--line); background:transparent;
+  color:var(--fg); border-radius:999px; padding:.1rem .6rem; cursor:pointer }
+.tab.on, .achip.on { background:var(--fg); color:var(--bg); border-color:var(--fg) }
+.tab .n { color:var(--dim); font-size:.7rem; margin-left:.3rem }
+.tab.on .n { color:var(--bg); opacity:.8 }
+.tab.hot { border-color:var(--warn) }
+.achip.claude { color:var(--claude) } .achip.codex { color:var(--codex) } .achip.kimi { color:var(--kimi) }
+.achip.on.claude { background:var(--claude); border-color:var(--claude); color:var(--bg) }
+.achip.on.codex { background:var(--codex); border-color:var(--codex); color:var(--bg) }
+.achip.on.kimi { background:var(--kimi); border-color:var(--kimi); color:var(--bg) }
+#find { font:inherit; font-size:.82rem; border:1px solid var(--line); border-radius:6px;
+  background:var(--card); color:var(--fg); padding:.2rem .5rem; min-width:16rem }
 .badge { display:inline-block; border:1px solid var(--warn); color:var(--warn);
   border-radius:999px; padding:.15rem .6rem; font-size:.75rem; font-weight:600;
-  margin-bottom:1.5rem }
+  margin-bottom:1.2rem }
 .badge.clear { border-color:var(--line); color:var(--dim); font-weight:400 }
 .badge.live-badge { border-color:var(--ok); color:var(--ok); margin-right:.4rem }
+section.lead { margin-bottom:1.2rem }
+section.lead ol.list { padding-left:1.2rem }
+section.lead .unit { font-weight:600; margin-right:.4rem }
 details.card > summary { cursor:pointer; list-style:none; outline:none }
 details.card > summary::-webkit-details-marker { display:none }
 details.card[open] { background:transparent }
@@ -56,7 +81,10 @@ details.card[open] { background:transparent }
 .said { white-space:pre-wrap; color:var(--dim); border-left:2px solid var(--line);
   padding-left:.6rem; margin:.2rem 0 }
 ol.list { margin:.2rem 0; padding-left:1.4rem }
-ol.list li { margin:.18rem 0 }
+ol.list li { margin:.18rem 0; border-left:2px solid transparent; padding-left:.35rem }
+ol.list li[data-agent="claude"] { border-left-color:var(--claude) }
+ol.list li[data-agent="codex"] { border-left-color:var(--codex) }
+ol.list li[data-agent="kimi"] { border-left-color:var(--kimi) }
 ol.list li.open { color:var(--warn) }
 ol.list li.live, .live { color:var(--ok); font-weight:600 }
 .pin { display:inline-block; border:1px solid var(--warn); color:var(--warn);
@@ -67,14 +95,15 @@ ol.list li.live, .live { color:var(--ok); font-weight:600 }
   user-select:none }
 .cp:hover { color:var(--fg) }
 .cp.done { color:var(--warn) }
-h2.grp { font-size:.78rem; text-transform:uppercase; letter-spacing:.07em;
-  color:var(--dim); margin:1.75rem 0 .6rem; border-bottom:1px solid var(--line);
-  padding-bottom:.3rem }
+h2.grp { font-size:.92rem; font-weight:600; color:var(--fg); margin:1.6rem 0 .5rem;
+  border-bottom:1px solid var(--line); padding-bottom:.25rem }
+h2.grp .n { color:var(--dim); font-weight:400; font-size:.78rem; margin-left:.4rem }
 .card { border:1px solid var(--line); border-radius:8px; background:var(--card);
   padding:.85rem 1.05rem; margin-bottom:.6rem }
 .card.idle { opacity:.55 }
+.card[hidden], li[hidden], section[hidden], h2[hidden] { display:none }
 .top { display:flex; justify-content:space-between; align-items:baseline; gap:1rem }
-.name { font-weight:600 }
+.name { font-weight:600; font-size:1.02rem }
 .facts { color:var(--dim); font-size:.82rem; font-variant-numeric:tabular-nums }
 .why { margin-top:.3rem; font-size:.9rem }
 .notes { margin-top:.5rem; font-size:.8rem; color:var(--dim) }
@@ -216,8 +245,9 @@ def _detail(row: dict, ctx: dict) -> str:
             # unit sharing a home, the same session sits on the other card
             # too, and this is what makes that read as intended.
             how = f" · {html.escape(s['how'])}" if s.get("how") else ""
+            agent = html.escape(str(s.get("agent") or ""))
             out.append(
-                f"<li{mark}>{flag}{html.escape(str(s['name'] or 'untitled'))[:70]}"
+                f"<li{mark} data-agent='{agent}'>{flag}{html.escape(str(s['name'] or 'untitled'))[:70]}"
                 f"<span class='when'> · {s['agent']} · {s['turns']:,} turns · "
                 f"{ago(s['at'])}{how}</span></li>"
             )
@@ -317,6 +347,127 @@ def _unattributed(loose: list) -> str:
     return "".join(out)
 
 
+def _searchable(row: dict) -> str:
+    """Everything the find box matches on a card, lowercased: the unit's
+    name, its status line, session labels, note titles, document names."""
+    a = row["activity"]
+    parts = [row["name"], row.get("why") or ""]
+    parts += [str(s.get("name") or "") for s in a.recent]
+    parts += [str(s.get("name") or "") for s in a.live]
+    parts += [str(n.get("title") or "") + " " + str(n.get("topic") or "") for n in a.notes]
+    parts += [d.name for d in row.get("docs", [])]
+    parts += [art.name for _, items in row.get("artifacts", []) for art in items]
+    return html.escape(" ".join(p for p in parts if p).lower(), quote=True)
+
+
+def _tabs(rows: list[dict]) -> str:
+    """One tab per top-level unit, most recently active first, carrying
+    two counts: how much is here, and how much of it wants you. A unit that
+    is part of another is filed under that one's tab, so a programme's tab
+    holds its experiments.
+
+    Recency, not the alphabet: the unit you were just in is the one you are
+    coming back to, and an alphabetical strip buries it wherever its name
+    falls.
+    """
+    top = {r["name"]: r for r in rows if not r.get("part_of")}
+    tabs: dict[str, dict] = {}
+    for r in rows:
+        key = r["name"] if r["name"] in top else (r.get("part_of") or r["name"])
+        tab = tabs.setdefault(key, {"sessions": 0, "waiting": 0, "recency": 0})
+        a = r["activity"]
+        tab["sessions"] += a.sessions
+        tab["waiting"] += a.waiting
+        tab["recency"] = max(tab["recency"], recency(a))
+    out = ["<button class='tab on' data-tab=''>all</button>"]
+    for name, tab in sorted(tabs.items(), key=lambda kv: kv[1]["recency"], reverse=True):
+        hot = " hot" if tab["waiting"] else ""
+        counts = f"{tab['sessions']}"
+        if tab["waiting"]:
+            counts += f" · {tab['waiting']} waiting"
+        out.append(
+            f"<button class='tab{hot}' data-tab='{html.escape(name, quote=True)}'>"
+            f"{html.escape(name)}<span class='n'>{counts}</span></button>"
+        )
+    return "".join(out)
+
+
+def _lead_sections(rows: list[dict]) -> str:
+    """What wants you and what is running, across every unit, before the
+    cards. Each row names its unit and carries the same data attributes the
+    cards do, so the filters scope them together."""
+    out = []
+    waiting = []
+    for r in rows:
+        a = r["activity"]
+        unit = html.escape(r["name"])
+        attrs = f"data-unit='{html.escape(r['name'], quote=True)}' data-parent='{html.escape(r.get('part_of') or '', quote=True)}'"
+        if a.blocked:
+            waiting.append(f"<li {attrs}><span class='unit'>{unit}</span>"
+                           f"<span class='ask'>{a.blocked} workflow packet(s) at a gate</span></li>")
+        for ask in a.needs:
+            when = f"<span class='when'> · asked {ago(ask['at'])}</span>" if ask.get("at") else ""
+            waiting.append(f"<li {attrs}><span class='unit'>{unit}</span>"
+                           f"<span class='ask'>{html.escape(ask['question'].strip()[:200])}</span>{when}</li>")
+    if waiting:
+        out.append(f"<section class='lead' data-sec='waiting'><h2 class='grp'>Waiting on you"
+                   f"<span class='n'>{len(waiting)}</span></h2><ol class='list'>"
+                   + "".join(waiting) + "</ol></section>")
+    running = []
+    for r in rows:
+        a = r["activity"]
+        unit = html.escape(r["name"])
+        attrs = f"data-unit='{html.escape(r['name'], quote=True)}' data-parent='{html.escape(r.get('part_of') or '', quote=True)}'"
+        for s in a.live:
+            running.append(f"<li class='live' {attrs} data-agent='claude'><span class='unit'>{unit}</span>"
+                           f"&#x25CF; {html.escape(str(s['name'] or s['session'] or '')[:60])}"
+                           f"<span class='when'> · {html.escape(str(s['cwd'] or '')[-46:])}</span></li>")
+    if running:
+        out.append(f"<section class='lead' data-sec='running'><h2 class='grp'>Running now"
+                   f"<span class='n'>{len(running)}</span></h2><ol class='list'>"
+                   + "".join(running) + "</ol></section>")
+    return "".join(out)
+
+
+JS = """
+const tabs = document.querySelectorAll('.tab'), chips = document.querySelectorAll('.achip');
+const find = document.getElementById('find');
+let unit = '', agent = '', q = '';
+function apply() {
+  document.querySelectorAll('[data-unit]').forEach(el => {
+    const mine = !unit || el.dataset.unit === unit || el.dataset.parent === unit;
+    const agents = (el.dataset.agents || el.dataset.agent || '').split(' ');
+    const byAgent = !agent || agents.includes(agent);
+    const text = el.dataset.text || el.textContent.toLowerCase();
+    const byText = !q || text.includes(q);
+    el.hidden = !(mine && byAgent && byText);
+  });
+  document.querySelectorAll('.card li[data-agent]').forEach(li => {
+    li.hidden = !!agent && li.dataset.agent !== agent;
+  });
+  document.querySelectorAll('h2.grp[data-group]').forEach(h => {
+    const any = [...document.querySelectorAll(`[data-group-of='${h.dataset.group}']`)].some(c => !c.hidden);
+    h.hidden = !any;
+  });
+  document.querySelectorAll('section.lead').forEach(sec => {
+    sec.hidden = ![...sec.querySelectorAll('li')].some(li => !li.hidden);
+  });
+}
+tabs.forEach(t => t.addEventListener('click', () => {
+  unit = t.dataset.tab; tabs.forEach(x => x.classList.toggle('on', x === t)); apply();
+}));
+chips.forEach(c => c.addEventListener('click', () => {
+  agent = c.dataset.agent; chips.forEach(x => x.classList.toggle('on', x === c)); apply();
+}));
+find.addEventListener('input', () => { q = find.value.trim().toLowerCase(); apply(); });
+document.addEventListener('click', e => {
+  const c = e.target.closest('.cp'); if (!c) return; e.preventDefault();
+  navigator.clipboard.writeText(c.dataset.path).then(() => {
+    c.classList.add('done'); setTimeout(() => c.classList.remove('done'), 900); });
+});
+"""
+
+
 def render(
     groups: list[tuple[str, list[dict]]], ctx: dict, unattributed: list | None = None
 ) -> str:
@@ -325,38 +476,70 @@ def render(
 
     Ordered by use — most recently touched first — because the question is
     almost always about what you were last doing, not what is alphabetically
-    first. The badge counts; the detail lives in the card it belongs to.
+    first. The page embeds every row and scopes itself in the browser: the
+    tabs, the agent chips and the find box hide what does not match, and
+    nothing is filtered before render.
     """
-    open_items = sum(r["activity"].waiting for _, rows in groups for r in rows)
-    projects = len([r for _, rows in groups for r in rows if r["activity"].waiting])
+    rows = [r for _, group in groups for r in group]
+    open_items = sum(r["activity"].waiting for r in rows)
+    projects = len([r for r in rows if r["activity"].waiting])
     body = []
 
-    running = sum(r["activity"].live_sessions for _, rows in groups for r in rows)
+    body.append(
+        "<div class='filters'>"
+        f"<div class='facet'><span class='flabel'>unit</span>{_tabs(rows)}</div>"
+        "<div class='facet'><span class='flabel'>agent</span>"
+        "<button class='achip on' data-agent=''>all</button>"
+        "<button class='achip claude' data-agent='claude'>claude</button>"
+        "<button class='achip codex' data-agent='codex'>codex</button>"
+        "<button class='achip kimi' data-agent='kimi'>kimi</button></div>"
+        "<div class='facet'><span class='flabel'>find</span>"
+        "<input id='find' placeholder='unit, session, document, note…' autocomplete='off'></div>"
+        "</div>"
+    )
+
+    running = sum(r["activity"].live_sessions for r in rows)
     if running:
         body.append(f"<div class='badge live-badge'>&#x25CF; {running} running now</div> ")
 
     if open_items:
         oldest = min(
-            (ask["at"] for _, rows in groups for r in rows
-             for ask in r["activity"].needs if ask.get("at")),
+            (ask["at"] for r in rows for ask in r["activity"].needs if ask.get("at")),
             default=None,
         )
         age = f" · oldest {ago(oldest)}" if oldest else ""
         body.append(
             f"<div class='badge'>{open_items} waiting on you"
-            f" · {projects} project{'s' * (projects != 1)}{age}</div>"
+            f" · {projects} unit{'s' * (projects != 1)}{age}</div>"
         )
     else:
         body.append("<div class='badge clear'>nothing waiting</div>")
 
-    for label, rows in groups:
-        if not rows:
+    body.append(_lead_sections(rows))
+
+    # Groups led by whichever holds the newest member, the same rule `list`
+    # uses: the kind that sorts first alphabetically has no claim to the top.
+    def newest(group):
+        return max((recency(r["activity"]) for r in group), default=0)
+
+    for label, group in sorted(groups, key=lambda g: newest(g[1]), reverse=True):
+        if not group:
             continue
-        body.append(f"<h2 class='grp'>{html.escape(label)}</h2>")
-        for row in sorted(rows, key=lambda r: recency(r["activity"]), reverse=True):
-            card = _card(row["name"], row["why"], row["activity"])
+        gid = html.escape(label, quote=True)
+        body.append(f"<h2 class='grp' data-group='{gid}'>{html.escape(label)}"
+                    f"<span class='n'>{len(group)}</span></h2>")
+        for row in sorted(group, key=lambda r: recency(r["activity"]), reverse=True):
+            a = row["activity"]
+            agents = " ".join(sorted({str(s.get("agent") or "") for s in a.recent} - {""}))
+            attrs = (
+                f" data-unit='{html.escape(row['name'], quote=True)}'"
+                f" data-parent='{html.escape(row.get('part_of') or '', quote=True)}'"
+                f" data-agents='{agents}' data-group-of='{gid}'"
+                f" data-text='{_searchable(row)}'"
+            )
+            card = _card(row["name"], row["why"], a)
             body.append(
-                card.replace("<div class='card", "<details class='card", 1)
+                card.replace("<div class='card", "<details" + attrs + " class='card", 1)
                 .replace("<div class='top'>", "<summary><div class='top'>", 1)
                 .replace("</div></div>", "</div></summary>", 1)
                 + _detail(row, ctx)
@@ -380,11 +563,7 @@ def render(
         + "".join(body)
         + f"<footer>rendered {stamp} · links open {html.escape(ctx['base_url'])}"
         " · &#x2398; copies the path</footer></main>"
-        "<script>document.addEventListener('click',e=>{"
-        "const c=e.target.closest('.cp'); if(!c) return; e.preventDefault();"
-        "navigator.clipboard.writeText(c.dataset.path).then(()=>{"
-        "c.classList.add('done'); setTimeout(()=>c.classList.remove('done'),900);});"
-        "});</script>"
+        f"<script>{JS}</script>"
     )
 
 

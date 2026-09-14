@@ -824,6 +824,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
             rows.append(
                 {
                     "name": unit.name,
+                    "part_of": unit.part_of,
                     "path": unit.declared_at,
                     "why": status.text if status else None,
                     "activity": activity.read(

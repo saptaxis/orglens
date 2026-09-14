@@ -79,7 +79,7 @@ replaces the bundled grammar.
 | `orglens check` | Report where the tree has drifted: missing driver documents, undeclared folders, weak or shared homes, kinds that match nothing, folders of documents the grammar has no word for. Reports only — never gates |
 | `orglens snapshot [--stdout] [--check]` | Generate a topology snapshot (markdown); `--check` says whether the written one is older than any declaration or driver document, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
-| `orglens view` | Render where everything stands as a page, and open it |
+| `orglens view` | Render where everything stands as a page, and open it: what is waiting and running first, then a card per unit; filter by unit, agent, or text in the page |
 | `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--dry-run]` | Start a session for a unit, attributed before its first turn |
 | `orglens sessions [UNIT] [--none] [--all]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
 | `orglens resume UNIT\|SESSION-ID [--print]` | Resume a session, or a unit's newest open one, through `scad session resume` |

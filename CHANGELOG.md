@@ -37,6 +37,13 @@ bound under the old names.
 - `orglens attribute SESSION-ID UNIT` records an attribution after the fact.
 - `view` shows how each recent session is the unit's, and ends with the
   unattributed sessions, each with its resume command.
+- `view` has a filter bar: a tab per top-level unit (most recently active
+  first, with its session count and how much is waiting; a programme's tab
+  holds its experiments), agent chips, and a find box over unit names,
+  session labels, document names and note titles. Waiting and running come
+  first, across units, before the cards. The page embeds everything and
+  scopes itself in the browser. Its own look: paper, serif headings, warm
+  agent colours.
 - Session counts are main sessions only. Subagents and workflow agents used to
   be counted too, which is why a unit's number can be lower than before.
 - A home reached through a symlinked root matches sessions that recorded
