@@ -348,6 +348,49 @@ class TestFindCommand:
         result = runner.invoke(cli, ["find", "plan", "physics-priors"], env=cli_env)
         assert "01-testbed-Feb032026.md" not in result.output
 
+    def test_an_unknown_unit_is_refused_in_one_line(self, runner, cli_env):
+        result = runner.invoke(cli, ["find", "plan", "nosuchunit"], env=cli_env)
+        assert result.exit_code == 1
+        assert "No unit 'nosuchunit'" in result.output
+        assert "Traceback" not in result.output
+
+    def test_grep_matches_inside_files_and_shows_the_line(self, runner, cli_env, units_tree):
+        (units_tree / "projects" / "clipcompose" / "specs" / "agent-integration.md").write_text(
+            "# Agent Integration\n\nThe lunar lander harness sorts worst-confidence first.\n")
+        result = runner.invoke(cli, ["find", "spec", "--grep", "Lunar Lander"], env=cli_env)
+        assert result.exit_code == 0, result.output
+        assert "agent-integration.md" in result.output
+        assert ":3" in result.output and "worst-confidence" in result.output
+        # A plan that does not mention it is not listed.
+        result = runner.invoke(cli, ["find", "plan", "--grep", "Lunar Lander"], env=cli_env)
+        assert "No plans" in result.output
+
+    def test_grep_on_a_directory_kind_searches_the_files_inside(self, runner, cli_env, units_tree):
+        (units_tree / "projects" / "clipcompose" / "articles" / "one-piece" / "draft.md").write_text(
+            "# draft\n\nan observation about sort direction\n")
+        result = runner.invoke(cli, ["find", "article", "--grep", "sort direction"], env=cli_env)
+        assert "one-piece" in result.output
+        assert "draft.md:3" in result.output
+
+    def test_in_scopes_to_a_directory_name_the_grammar_does_not_know(self, runner, cli_env, units_tree):
+        extra = units_tree / "projects" / "clipcompose" / "specs2"
+        extra.mkdir()
+        (extra / "fresh.md").write_text("# fresh\n")
+        result = runner.invoke(cli, ["find", "doc", "clipcompose", "--in", "specs2"], env=cli_env)
+        assert result.exit_code == 0, result.output
+        assert "fresh.md" in result.output
+        assert "agent-integration.md" not in result.output
+
+    def test_json_carries_path_kind_unit_and_matches(self, runner, cli_env, units_tree):
+        import json
+        (units_tree / "projects" / "clipcompose" / "specs" / "agent-integration.md").write_text(
+            "# Agent Integration\n\nmentions lunar\n")
+        result = runner.invoke(cli, ["find", "spec", "--grep", "lunar", "--json"], env=cli_env)
+        [row] = json.loads(result.output)
+        assert row["kind"] == "spec" and row["unit"] == "clipcompose"
+        assert row["path"].endswith("specs/agent-integration.md")
+        assert row["matches"] == [{"file": row["path"], "line": 3, "text": "mentions lunar"}]
+
     def test_find_specs(self, runner, cli_env):
         result = runner.invoke(cli, ["find", "spec", "clipcompose"], env=cli_env)
         assert result.exit_code == 0

@@ -26,6 +26,9 @@ class Document:
     kind: str
     path: Path
     unit: str
+    #: What a matcher found, when one ran: {"file", "line", "text"} each.
+    #: Empty when `find` was only scoped, never matched.
+    matches: tuple[dict, ...] = ()
 
 
 def _claimed_by(registry: Registry, unit: Unit) -> list[Path]:
@@ -98,7 +101,10 @@ def _dirs_under(home: Path) -> tuple[Path, ...]:
 
 
 def find(
-    registry: Registry, kind: str, unit: Unit | str | None = None
+    registry: Registry,
+    kind: str,
+    unit: Unit | str | None = None,
+    within: str | None = None,
 ) -> list[Document]:
     """Documents of a kind, at any depth under a unit's homes.
 
@@ -130,6 +136,10 @@ def find(
     """
     artifact = registry.grammar.artifact_types[kind]
     pattern = artifact.pattern
+    # `within` is the tree's word where the grammar has none: any directory
+    # of that name, at any depth, scopes the search instead of the kind's
+    # own container. The kind still says what is matched inside it.
+    container_name = within if within is not None else artifact.directory
     if unit is None:
         units = registry.units()
     elif isinstance(unit, Unit):
@@ -142,7 +152,7 @@ def find(
         excluded = _claimed_by(registry, one)
         seen: set[Path] = set()
         for home in one.paths:
-            for container in _containers(home, artifact.directory):
+            for container in _containers(home, container_name):
                 # A directory kind is the container's children themselves;
                 # a file kind is every matching file at any depth beneath.
                 if artifact.is_directory:
@@ -200,3 +210,46 @@ def _entries(home: Path) -> list[Path]:
         return list(home.iterdir())
     except OSError:
         return []
+
+
+
+# ── matchers ─────────────────────────────────────────────────────────────
+#
+# `find` scopes: which paths, from the grammar and the declarations. A
+# matcher narrows the scoped list and says why each survivor did. Text is
+# the first; anything that takes documents and returns documents — a date,
+# a gate, an index of embeddings, a link graph — is the same shape and
+# composes the same way.
+
+
+def _files_of(found: Document) -> list[Path]:
+    """What a matcher reads: the file, or every markdown file in the
+    directory when the artifact is one."""
+    if found.path.is_dir():
+        return sorted(p for p in found.path.rglob("*.md")
+                      if p.is_file() and not any(part.startswith(".") for part in p.relative_to(found.path).parts))
+    return [found.path]
+
+
+def grep(found: list[Document], pattern: str) -> list[Document]:
+    """The documents whose text contains `pattern`, case-insensitively, with
+    the matching lines attached. A regular expression when it is one."""
+    import re
+    try:
+        rx = re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        rx = re.compile(re.escape(pattern), re.IGNORECASE)
+    out: list[Document] = []
+    for item in found:
+        hits: list[dict] = []
+        for file in _files_of(item):
+            try:
+                lines = file.read_text(errors="replace").splitlines()
+            except OSError:
+                continue
+            for number, text in enumerate(lines, start=1):
+                if rx.search(text):
+                    hits.append({"file": str(file), "line": number, "text": text.strip()})
+        if hits:
+            out.append(Document(item.name, item.kind, item.path, item.unit, tuple(hits)))
+    return out

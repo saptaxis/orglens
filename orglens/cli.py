@@ -306,14 +306,39 @@ def status():
 @cli.command()
 @click.argument("artifact_type")
 @click.argument("unit_name", required=False)
-def find(artifact_type: str, unit_name: str | None):
-    """Find documents by kind, optionally scoped to one unit."""
+@click.option("--in", "within", default=None, metavar="DIR",
+              help="Scope to directories of this name instead of the kind's own container.")
+@click.option("--grep", "pattern", default=None, metavar="TEXT",
+              help="Only documents whose text contains this; shows the matching lines.")
+@click.option("--json", "as_json", is_flag=True)
+def find(artifact_type: str, unit_name: str | None, within: str | None,
+         pattern: str | None, as_json: bool):
+    """Find documents by kind, optionally scoped to one unit.
+
+    The kind is the grammar's word for where to look; `--in` is the tree's
+    word for a directory the grammar has no name for yet. `--grep` reads the
+    documents found and keeps the ones that mention the text.
+    """
     registry, _ = _load_registry()
 
     if artifact_type not in registry.grammar.artifact_types:
         _unknown("document kind", artifact_type, registry.grammar.artifact_types)
 
-    found = documents.find(registry, artifact_type, unit_name)
+    try:
+        found = documents.find(registry, artifact_type, unit_name, within=within)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+    if pattern is not None:
+        found = documents.grep(found, pattern)
+
+    if as_json:
+        click.echo(json.dumps([
+            {"name": d.name, "kind": d.kind, "unit": d.unit, "path": str(d.path),
+             "matches": [*d.matches]}
+            for d in found
+        ]))
+        return
     if not found:
         click.echo(f"No {artifact_type}s found.")
         return
@@ -321,6 +346,11 @@ def find(artifact_type: str, unit_name: str | None):
     for item in found:
         shown = _relative(item.path, registry.roots)
         click.echo(f"  {item.name:<45} [{item.unit}]  {shown}")
+        for hit in item.matches[:5]:
+            where = Path(hit["file"]).name if item.path.is_dir() else ""
+            click.echo(f"      {where}:{hit['line']}  {hit['text'][:100]}")
+        if len(item.matches) > 5:
+            click.echo(f"      +{len(item.matches) - 5} more")
 
 
 def _write_declaration(proposal: Proposal, path: Path) -> None:
