@@ -293,3 +293,27 @@ def test_a_directory_kind_is_the_artifacts_own_directory_property(tmp_path):
     assert grammar.artifact_types["article"].pattern == "*"
     plan_grammar = _grammar_with(tmp_path, "  plan:\n    find: plans/*.md\n")
     assert plan_grammar.artifact_types["plan"].is_directory is False
+
+
+def test_a_kind_can_name_several_containers(tmp_path):
+    """`plans/` for history and `plans2/` for a fresh start are one kind;
+    the grammar says so with a list, and nothing is renamed."""
+    from orglens.grammar import Grammar
+    path = tmp_path / "g.yaml"
+    path.write_text(
+        "version: 2\ndriver: overview.md\nentities:\n  project: projects/*\n"
+        "artifacts:\n  plan:\n    find:\n      - plans/*.md\n      - plans2/*.md\n"
+    )
+    grammar = Grammar.from_yaml(path)
+    docs = tmp_path / "docs"
+    unit = docs / "projects" / "widget"
+    unit.mkdir(parents=True)
+    (unit / MARKER).write_text("unit: widget\nkind: project\n")
+    (unit / "plans").mkdir(); (unit / "plans2").mkdir()
+    (unit / "plans" / "01-old.md").write_text("#\n")
+    (unit / "plans2" / "01-new.md").write_text("#\n")
+
+    found = documents.find(Registry([docs], grammar), "plan", "widget")
+    assert sorted(d.name for d in found) == ["01-new.md", "01-old.md"]
+    assert grammar.artifact_types["plan"].directories == ("plans", "plans2")
+    assert grammar.artifact_types["plan"].find == "plans/*.md"

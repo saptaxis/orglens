@@ -43,6 +43,15 @@ class ArtifactType:
     name: str
     find: str
     means: str = ""
+    #: Every `find` the grammar gave, when it gave a list: one kind can live
+    #: in several containers — `plans/` kept as history beside a fresh
+    #: `plans2/` — without anything being renamed. `find` is the first.
+    finds: tuple[str, ...] = ()
+
+    @property
+    def directories(self) -> tuple[str, ...]:
+        """Every container this kind lives in, in the order declared."""
+        return tuple(f.rstrip("/").rpartition("/")[0] for f in (self.finds or (self.find,)))
 
     @property
     def is_directory(self) -> bool:
@@ -110,14 +119,16 @@ class Grammar:
             for name, pattern in (data.get("entities") or {}).items()
         }
 
-        artifact_types = {
-            name: ArtifactType(
+        artifact_types = {}
+        for name, body in (data.get("artifacts") or {}).items():
+            finds = body["find"]
+            finds = tuple(finds) if isinstance(finds, list) else (str(finds),)
+            artifact_types[name] = ArtifactType(
                 name=name,
-                find=body["find"],
+                find=finds[0],
                 means=" ".join((body.get("means") or "").split()),
+                finds=finds,
             )
-            for name, body in (data.get("artifacts") or {}).items()
-        }
 
         return cls(
             version=data.get("version", 2),

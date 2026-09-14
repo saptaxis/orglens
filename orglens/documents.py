@@ -139,7 +139,7 @@ def find(
     # `within` is the tree's word where the grammar has none: any directory
     # of that name, at any depth, scopes the search instead of the kind's
     # own container. The kind still says what is matched inside it.
-    container_name = within if within is not None else artifact.directory
+    container_names = (within,) if within is not None else artifact.directories
     if unit is None:
         units = registry.units()
     elif isinstance(unit, Unit):
@@ -152,7 +152,7 @@ def find(
         excluded = _claimed_by(registry, one)
         seen: set[Path] = set()
         for home in one.paths:
-            for container in _containers(home, container_name):
+            for container in [c for n in container_names for c in _containers(home, n)]:
                 # A directory kind is the container's children themselves;
                 # a file kind is every matching file at any depth beneath.
                 if artifact.is_directory:
