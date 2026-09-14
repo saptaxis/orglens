@@ -44,6 +44,15 @@ bound under the old names.
   10.6s: git is asked once per repository instead of three times per home,
   a checkout's remote is read from `.git/config`, and each home is walked
   once for every document kind.
+- A grammar `find` ending in `/` names directories, one artifact each; the
+  default grammar gains `article: articles/*/`. A `find` may be a list when
+  one kind lives in several containers.
+- `orglens find` takes `--grep TEXT` (keeps documents whose text matches, with
+  the lines), `--in DIR` (scopes to a directory the grammar has no name for),
+  `--since 2w`, `--waiting` (packets with a gate open) and `--json`. An
+  unknown unit is refused in one line.
+- `orglens check` reports folders holding three or more documents that no
+  kind's container and no entity's structure names.
 - `orglens snapshot --check` says whether the written snapshot is older than
   any declaration or driver document, and exits 1 if it is.
 - Everything orglens keeps on a machine is under `~/.orglens/`: `config.yaml`,

@@ -637,6 +637,13 @@ def check_cmd():
             f"`where` answers {shared.units[0]}"
         )
 
+    for row in report.undescribed:
+        shown = _relative(row.path, registry.roots)
+        click.echo(
+            f"{row.unit}: {shown} holds {_count(row.count, 'document')} the grammar "
+            "has no word for; they are found, without a kind"
+        )
+
     if not report:
         click.echo("No drift.")
 

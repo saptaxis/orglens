@@ -438,3 +438,41 @@ def test_a_home_declared_on_two_units_is_reported_with_the_unit_that_answers(
 
 def test_a_home_on_one_unit_is_not_reported_as_shared(registry):
     assert check.run(registry).shared == []
+
+
+def test_a_folder_of_documents_the_grammar_has_no_word_for_is_reported(declared_tree, grammar):
+    """`plans2/` holding nine documents is findable as `doc`, but nothing said
+    the grammar has no name for it. This does, so a folder that grows can be
+    given a kind, or knowingly left as `doc`."""
+    fresh = declared_tree / "projects" / "clipcompose" / "plans2"
+    fresh.mkdir()
+    for i in range(3):
+        (fresh / f"0{i}-x.md").write_text("#\n")
+
+    report = check.run(Registry([declared_tree], grammar))
+
+    [row] = report.undescribed
+    assert row.unit == "clipcompose"
+    assert row.path == fresh
+    assert row.count == 3
+
+
+def test_a_named_container_and_the_unit_root_are_not_undescribed(declared_tree, grammar):
+    report = check.run(Registry([declared_tree], grammar))
+    assert report.undescribed == []
+
+
+def test_a_folder_with_no_documents_is_not_undescribed(declared_tree, grammar):
+    (declared_tree / "projects" / "clipcompose" / "assets").mkdir()
+    (declared_tree / "projects" / "clipcompose" / "assets" / "x.png").write_bytes(b"")
+    report = check.run(Registry([declared_tree], grammar))
+    assert report.undescribed == []
+
+
+def test_a_package_with_one_readme_is_not_a_folder_of_documents(declared_tree, grammar):
+    pkg = declared_tree / "projects" / "clipcompose" / "src" / "widget"
+    pkg.mkdir(parents=True)
+    (pkg / "README.md").write_text("# widget\n")
+    (pkg / "NOTES.md").write_text("# notes\n")
+    report = check.run(Registry([declared_tree], grammar))
+    assert report.undescribed == []

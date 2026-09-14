@@ -86,6 +86,25 @@ class Shared:
     units: list[str] = field(default_factory=list)
 
 
+#: How many documents make a directory a folder of documents rather than a
+#: package with a README in it. On the real tree, 116 of 158 undescribed
+#: directories held one file and nine held two; the 42 at three or more
+#: were the ones worth a word.
+UNDESCRIBED_FLOOR = 3
+
+
+@dataclass(frozen=True)
+class Undescribed:
+    """A directory holding documents that no kind's container and no
+    entity's structure names. Everything in it is still found by the
+    catch-all kind, so nothing is lost; what is missing is a word. The grammar can grow one,
+    or the folder can knowingly stay `doc`. Either way, somebody decides.
+    """
+    unit: str
+    path: Path
+    count: int
+
+
 @dataclass(frozen=True)
 class Report:
     drifted: list[Drift] = field(default_factory=list)
@@ -116,6 +135,8 @@ class Report:
     collisions: list[Collision] = field(default_factory=list)
     #: Home names declared on more than one unit.
     shared: list[Shared] = field(default_factory=list)
+    #: Folders of documents the grammar has no word for.
+    undescribed: list[Undescribed] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(
@@ -126,6 +147,7 @@ class Report:
             or self.duplicates
             or self.collisions
             or self.shared
+            or self.undescribed
         )
 
 
@@ -267,6 +289,34 @@ def run(registry: Registry) -> Report:
         if len(names) > 1
     ]
 
+    # A directory is described when a kind's container or an entity's
+    # structure names it, or an ancestor of it — `plans/archive/` is inside
+    # `plans/`. The unit's own root is `doc`'s container and is left out;
+    # so is any directory a nested unit's home claims.
+    grammar = registry.grammar
+    named = {
+        name
+        for at in grammar.artifact_types.values()
+        for name in at.directories if name
+    } | {
+        key.rstrip("/")
+        for et in grammar.entity_types.values()
+        for key in et.directories
+    }
+    undescribed: list[Undescribed] = []
+    for unit in units:
+        claimed = documents._claimed_by(registry, unit)
+        for home in unit.paths:
+            for directory in documents._dirs_under(home):
+                rel = directory.relative_to(home)
+                if any(part in named for part in rel.parts):
+                    continue
+                if any(directory == c or c in directory.parents for c in claimed):
+                    continue
+                count = sum(1 for p in directory.glob("*.md") if p.is_file())
+                if count >= UNDESCRIBED_FLOOR:
+                    undescribed.append(Undescribed(unit=unit.name, path=directory, count=count))
+
     return Report(
         drifted=drifted,
         undeclared=registry.candidates(),
@@ -275,4 +325,5 @@ def run(registry: Registry) -> Report:
         duplicates=duplicates,
         collisions=collisions,
         shared=shared,
+        undescribed=sorted(undescribed, key=lambda u: (u.unit, u.path)),
     )
