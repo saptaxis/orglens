@@ -75,7 +75,18 @@ orglens status                        # where everything stands
 orglens find plan                     # documents of a kind
 orglens find plan <unit>              # scoped to just that unit — a nested
                                        # unit's own home is excluded, not included
+orglens find spec <unit> --grep "text" # the specs that mention it, with the lines
+orglens find doc <unit> --in notes     # a folder the grammar has no name for
+orglens find plan --since 2w           # touched in the last two weeks
+orglens find article --waiting         # packets with a gate open, and the question
+orglens find spec --grep "x" --json    # path, kind, unit, matches — for programs
 ```
+
+`find` is how you search. The kind says where to look, from the grammar;
+`--in` says where to look when the grammar has no word for a folder; `--grep`
+reads what was found. Fire several in one turn rather than scanning: `find
+spec --grep` and `find doc --in specs2 --grep` together cover a tree whose
+grammar has not caught up with it.
 
 **Creation:**
 
@@ -210,7 +221,7 @@ orglens snapshot                      # so the next session sees it
 ```bash
 orglens view                          # everything waiting, oldest first
 orglens sessions --none               # sessions nobody claimed
-orglens check                         # drift, weak homes, shared homes
+orglens check                         # drift, weak or shared homes, folders with no kind
 ```
 
 **Run one node of a workflow.** The packet is a directory; the workflow is its
