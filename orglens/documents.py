@@ -129,7 +129,7 @@ def find(
     order below.
     """
     artifact = registry.grammar.artifact_types[kind]
-    file_pattern = Path(artifact.find).name
+    pattern = artifact.pattern
     if unit is None:
         units = registry.units()
     elif isinstance(unit, Unit):
@@ -143,9 +143,13 @@ def find(
         seen: set[Path] = set()
         for home in one.paths:
             for container in _containers(home, artifact.directory):
-                for path in sorted(container.rglob(file_pattern)):
-                    if not path.is_file():
-                        continue
+                # A directory kind is the container's children themselves;
+                # a file kind is every matching file at any depth beneath.
+                if artifact.is_directory:
+                    matches = [p for p in sorted(container.glob(pattern)) if p.is_dir()]
+                else:
+                    matches = [p for p in sorted(container.rglob(pattern)) if p.is_file()]
+                for path in matches:
                     resolved = path.resolve()
                     if resolved in seen:
                         continue

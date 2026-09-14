@@ -45,8 +45,20 @@ class ArtifactType:
     means: str = ""
 
     @property
+    def is_directory(self) -> bool:
+        """A `find` ending in `/` names directories, one per artifact —
+        `articles/*/` is one piece per folder, never the files inside."""
+        return self.find.endswith("/")
+
+    @property
+    def pattern(self) -> str:
+        """What is matched inside the container: a file glob, or `*` for
+        the child directories themselves."""
+        return Path(self.find.rstrip("/")).name
+
+    @property
     def directory(self) -> str:
-        head, _, _ = self.find.rpartition("/")
+        head, _, _ = self.find.rstrip("/").rpartition("/")
         return head
 
 

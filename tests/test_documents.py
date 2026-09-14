@@ -251,3 +251,45 @@ def test_a_home_is_walked_once_however_many_kinds_are_asked_for(two_root_tree, g
     info = documents._dirs_under.cache_info()
     assert info.misses == len(unit.paths)
     assert info.hits >= len(two_root_tree.grammar.artifact_types) - 1
+
+
+def _grammar_with(tmp_path, artifacts: str):
+    from orglens.grammar import Grammar
+    path = tmp_path / "g.yaml"
+    path.write_text(
+        "version: 2\ndriver: overview.md\nentities:\n  project: projects/*\n"
+        f"artifacts:\n{artifacts}"
+    )
+    return Grammar.from_yaml(path)
+
+
+def test_a_find_ending_in_a_slash_yields_directories_not_files(tmp_path):
+    """`articles/*/`: the artifact is the directory. One per piece, at any
+    depth under a container named `articles`, never the files inside."""
+    grammar = _grammar_with(tmp_path, "  article:\n    find: articles/*/\n")
+    docs = tmp_path / "docs"
+    unit = docs / "projects" / "widget"
+    unit.mkdir(parents=True)
+    (unit / MARKER).write_text("unit: widget\nkind: project\n")
+    for name in ("one", "two"):
+        (unit / "articles" / name).mkdir(parents=True)
+        (unit / "articles" / name / "draft.md").write_text("# d\n")
+        (unit / "articles" / name / "brief.md").write_text("# b\n")
+    (unit / "articles" / "index.md").write_text("# not an article\n")
+    (unit / "articles" / ".hidden").mkdir()
+
+    found = documents.find(Registry([docs], grammar), "article", "widget")
+
+    assert [d.name for d in found] == ["one", "two"]
+    assert all(d.path.is_dir() for d in found)
+    assert all(d.kind == "article" for d in found)
+
+
+def test_a_directory_kind_is_the_artifacts_own_directory_property(tmp_path):
+    grammar = _grammar_with(tmp_path, "  article:\n    find: articles/*/\n")
+    a = grammar.artifact_types["article"]
+    assert a.directory == "articles"
+    assert a.is_directory is True
+    assert grammar.artifact_types["article"].pattern == "*"
+    plan_grammar = _grammar_with(tmp_path, "  plan:\n    find: plans/*.md\n")
+    assert plan_grammar.artifact_types["plan"].is_directory is False

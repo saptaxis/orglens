@@ -52,6 +52,8 @@ def docs_tree(tmp_path):
     )
     (proj / "plans" / "01-packaging-Feb252026.md").write_text("# 01 — Packaging\n")
     (proj / "specs" / "agent-integration.md").write_text("# Agent Integration\n")
+    (proj / "articles" / "one-piece").mkdir(parents=True)
+    (proj / "articles" / "one-piece" / "draft.md").write_text("# draft\n")
 
     # Another project (minimal)
     proj2 = docs / "projects" / "orglens"

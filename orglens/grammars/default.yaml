@@ -43,6 +43,20 @@ artifacts:
     means: >
       A durable design document — what a thing is and why, not when. Named for
       its topic. Outlives the plans that implement it.
+  article:
+    find: articles/*/
+    means: >
+      A piece of public writing, one directory each, named for its slug. The
+      directory is the packet the writing workflow runs over: brief, claims,
+      skeleton, draft, critique, audit. A trailing slash in `find` means the
+      artifact is the directory, not the files in it.
+  article:
+    find: articles/*/
+    means: >
+      A piece of public writing, one directory each, named for its slug. The
+      directory is the packet the writing workflow runs over: brief, claims,
+      skeleton, draft, critique, audit. A trailing slash in `find` means the
+      artifact is the directory, not the files in it.
 
 # What each part of an entity is for. Read when authoring and when creating;
 # never when discovering. Describing purpose is safe — asserting existence is

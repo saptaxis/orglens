@@ -56,6 +56,8 @@ def units_tree(tmp_path):
     (clipcompose / "overview.md").write_text("# Overview\n\n> **Status:** Active\n")
     (clipcompose / "plans" / "01-packaging-Feb252026.md").write_text("# 01 — Packaging\n")
     (clipcompose / "specs" / "agent-integration.md").write_text("# Agent Integration\n")
+    (clipcompose / "articles" / "one-piece").mkdir(parents=True)
+    (clipcompose / "articles" / "one-piece" / "draft.md").write_text("# draft\n")
 
     orglens = docs / "projects" / "orglens"
     _declare(orglens, "orglens", "project")
@@ -696,6 +698,8 @@ class TestCheckCommand:
         (proj / "logs" / "01-x-Feb252026-log.md").write_text("# Log\n")
         (proj / "specs").mkdir()
         (proj / "specs" / "x.md").write_text("# Spec\n")
+        (proj / "articles" / "one-piece").mkdir(parents=True)
+        (proj / "articles" / "one-piece" / "draft.md").write_text("# draft\n")
 
         result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [docs]))
 

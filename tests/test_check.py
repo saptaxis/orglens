@@ -45,6 +45,8 @@ def declared_tree(tmp_path, grammar):
     (clipcompose / "logs" / "01-packaging-Feb252026-log.md").write_text("# Log\n")
     (clipcompose / "specs").mkdir()
     (clipcompose / "specs" / "agent-integration.md").write_text("# Agent Integration\n")
+    (clipcompose / "articles" / "one-piece").mkdir(parents=True)
+    (clipcompose / "articles" / "one-piece" / "draft.md").write_text("# draft\n")
 
     orglens = docs / "projects" / "orglens"
     _declare(orglens, "orglens", "project")
