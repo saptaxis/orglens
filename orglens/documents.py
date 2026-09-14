@@ -253,3 +253,66 @@ def grep(found: list[Document], pattern: str) -> list[Document]:
         if hits:
             out.append(Document(item.name, item.kind, item.path, item.unit, tuple(hits)))
     return out
+
+
+def parse_window(text: str) -> int:
+    """`2w`, `90d`, `6h` as seconds. Raises ValueError on anything else."""
+    units = {"h": 3600, "d": 86400, "w": 7 * 86400, "m": 30 * 86400}
+    body, suffix = text[:-1], text[-1:]
+    if not body.isdigit() or suffix not in units:
+        raise ValueError(f"cannot read '{text}' as a window; use a number and h, d, w or m")
+    return int(body) * units[suffix]
+
+
+def _touched(found: Document) -> float:
+    """When the document was last edited: its mtime, or the newest file's
+    inside a directory artifact. A file, not git: an edit in flight counts."""
+    files = _files_of(found)
+    newest = 0.0
+    for file in files:
+        try:
+            newest = max(newest, file.stat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
+def since(found: list[Document], seconds: int, now: float | None = None) -> list[Document]:
+    """The documents touched within the last `seconds`."""
+    import time
+    cutoff = (now if now is not None else time.time()) - seconds
+    return [d for d in found if _touched(d) >= cutoff]
+
+
+def waiting(found: list[Document]) -> list[Document]:
+    """The directory artifacts that are packets with a gate open — a node
+    finished and asked, and nobody has answered. The question is attached
+    as the match."""
+    from orglens.workflow import session
+    from orglens.workflow.definition import WorkflowError, load_workflow
+    out: list[Document] = []
+    for item in found:
+        if not item.path.is_dir():
+            continue
+        facts = session.read(item.path)
+        if not facts:
+            continue
+        bound = session.workflow_path(facts)
+        workflow = None
+        if bound is not None:
+            try:
+                workflow = load_workflow(bound)
+            except WorkflowError:
+                workflow = None
+        if not session.gated(facts, workflow):
+            continue
+        question = None
+        if workflow is not None:
+            question = session.next_node(workflow, facts).question
+        else:
+            last = [f for f in facts if f["type"] in session.ROUTING][-1]
+            question = last.get("question")
+        hit = {"file": str(item.path / session.SESSION_FILE), "line": len(facts),
+               "text": question or "review"}
+        out.append(Document(item.name, item.kind, item.path, item.unit, (hit,)))
+    return out

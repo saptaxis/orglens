@@ -391,6 +391,36 @@ class TestFindCommand:
         assert row["path"].endswith("specs/agent-integration.md")
         assert row["matches"] == [{"file": row["path"], "line": 3, "text": "mentions lunar"}]
 
+    def test_since_keeps_documents_touched_within_the_window(self, runner, cli_env, units_tree):
+        import os, time
+        old = units_tree / "projects" / "clipcompose" / "specs" / "agent-integration.md"
+        ago = time.time() - 40 * 86400
+        os.utime(old, (ago, ago))
+        (units_tree / "projects" / "clipcompose" / "specs" / "new.md").write_text("# new\n")
+        result = runner.invoke(cli, ["find", "spec", "--since", "2w"], env=cli_env)
+        assert "new.md" in result.output and "agent-integration.md" not in result.output
+        result = runner.invoke(cli, ["find", "spec", "--since", "90d"], env=cli_env)
+        assert "agent-integration.md" in result.output
+
+    def test_since_refuses_a_window_it_cannot_read(self, runner, cli_env):
+        result = runner.invoke(cli, ["find", "spec", "--since", "soon"], env=cli_env)
+        assert result.exit_code == 1
+        assert "soon" in result.output
+
+    def test_waiting_keeps_the_packets_gated_on_a_human(self, runner, cli_env, units_tree):
+        from orglens.workflow import session
+        gated = units_tree / "projects" / "clipcompose" / "articles" / "one-piece"
+        quiet = units_tree / "projects" / "clipcompose" / "articles" / "another"
+        quiet.mkdir()
+        (quiet / "draft.md").write_text("# d\n")
+        for pkt in (gated, quiet):
+            session.bind(pkt, pkt / "WORKFLOW.yaml")
+        session.append(gated, {"type": "done", "node": "x", "agent": "a", "question": "which?"})
+        session.append(quiet, {"type": "done", "node": "x", "agent": "a"})
+        result = runner.invoke(cli, ["find", "article", "--waiting"], env=cli_env)
+        assert "one-piece" in result.output and "another" not in result.output
+        assert "which?" in result.output
+
     def test_find_specs(self, runner, cli_env):
         result = runner.invoke(cli, ["find", "spec", "clipcompose"], env=cli_env)
         assert result.exit_code == 0

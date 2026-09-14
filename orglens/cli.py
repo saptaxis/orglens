@@ -310,9 +310,13 @@ def status():
               help="Scope to directories of this name instead of the kind's own container.")
 @click.option("--grep", "pattern", default=None, metavar="TEXT",
               help="Only documents whose text contains this; shows the matching lines.")
+@click.option("--since", "window", default=None, metavar="WINDOW",
+              help="Only documents touched within this long: 2w, 90d, 6h.")
+@click.option("--waiting", is_flag=True,
+              help="Only packets with a gate open, with the question.")
 @click.option("--json", "as_json", is_flag=True)
 def find(artifact_type: str, unit_name: str | None, within: str | None,
-         pattern: str | None, as_json: bool):
+         pattern: str | None, window: str | None, waiting: bool, as_json: bool):
     """Find documents by kind, optionally scoped to one unit.
 
     The kind is the grammar's word for where to look; `--in` is the tree's
@@ -331,6 +335,14 @@ def find(artifact_type: str, unit_name: str | None, within: str | None,
         sys.exit(1)
     if pattern is not None:
         found = documents.grep(found, pattern)
+    if window is not None:
+        try:
+            found = documents.since(found, documents.parse_window(window))
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+    if waiting:
+        found = documents.waiting(found)
 
     if as_json:
         click.echo(json.dumps([
