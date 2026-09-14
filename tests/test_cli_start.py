@@ -211,11 +211,11 @@ def test_an_explicit_prompt_replaces_the_arrival(tmp_path, monkeypatch,
 
 
 def _attributed_elsewhere(tmp_path, monkeypatch):
-    """An index holding one session that ran above every home, and an event
-    attributing it to orglens. Only the event can make it orglens's."""
-    from tests.conftest import scad_index
-    index = scad_index(tmp_path, [("sess-abc", str(tmp_path), "nowhere")])
-    monkeypatch.setattr("orglens.activity.SCAD_INDEX", index)
+    """A scad export holding one session that ran above every home, and an
+    event attributing it to orglens. Only the event can make it orglens's."""
+    from tests.conftest import export_row, fake_scad
+    monkeypatch.setattr("orglens.sessions.run_scad",
+                        fake_scad([export_row("sess-abc", str(tmp_path))]))
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
     events.append(
         events.Event("attributed", "orglens", "sess-abc", 100, "test"),
@@ -224,7 +224,7 @@ def _attributed_elsewhere(tmp_path, monkeypatch):
 
 
 def _spy(calls):
-    def fake(paths, name, index=None, sessions=None):
+    def fake(paths, name, sessions=None, notes=None):
         calls[name] = sessions or []
         return activity.Activity()
     return fake

@@ -1,7 +1,5 @@
 """Shared test fixtures."""
 
-import sqlite3
-
 import pytest
 from pathlib import Path
 from orglens.declaration import MARKER
@@ -13,16 +11,14 @@ from orglens.units import Registry, Unit
 
 @pytest.fixture(autouse=True)
 def no_real_machine_state(tmp_path, monkeypatch):
-    """Keep `~/.scad/index.sqlite`, `~/.claude/sessions` and `~/.orglens/events`
-    out of every test.
+    """Keep the real `scad` and `~/.orglens/events` out of every test.
 
-    Both are read by commands that take no path argument, so without this a
-    test's session count depends on which machine runs it. A test that wants
-    an index or an event log builds one under `tmp_path` and points these at
-    it, which a later `monkeypatch.setattr` still does.
+    Sessions come from `scad session ls --json`; without this a test's count
+    depends on which machine runs it. A test that wants sessions hands
+    `fake_scad(rows)` to `orglens.sessions.run_scad`, which a later
+    `monkeypatch.setattr` still does.
     """
-    monkeypatch.setattr("orglens.activity.SCAD_INDEX", tmp_path / "no-index.sqlite")
-    monkeypatch.setattr("orglens.sessions.LIVE_REGISTRY", tmp_path / "no-live")
+    monkeypatch.setattr("orglens.sessions.run_scad", fake_scad())
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "no-events")
     # Per-process caches: one command is one process, but the suite is one
     # process running hundreds of trees.
@@ -260,43 +256,25 @@ def unit_with_clobbering_runtime(tmp_path):
     )
 
 
-def scad_index(tmp_path, rows):
-    """A scad index with the tables `_sessions` actually queries.
+def export_row(id, cwd, **extra) -> dict:
+    """One row as `scad session ls --json --kind main` emits it. Defaults are
+    a claude main session with one turn and nothing live."""
+    row = {"id": id, "kind": "main", "parent_session_id": None, "agent": "claude",
+           "cwd": cwd, "project": None, "name": None, "title": None,
+           "started": None, "ended": None, "n_turns": 1, "outcome": None,
+           "needs": None, "grade": "full", "harness_state": None,
+           "last_turn": None, "live": None}
+    row.update(extra)
+    return row
 
-    The auxiliary tables matter: a missing `turns` raises inside the query and
-    the bare `except sqlite3.Error` returns zeros, so every assertion would
-    pass or fail for the wrong reason.
-    """
-    db_path = tmp_path / "index.sqlite"
-    db = sqlite3.connect(db_path)
-    db.execute(
-        "create table sessions (id text primary key, kind text not null, "
-        "agent text not null, machine text not null, cwd text, project text, "
-        "title text, name text, started integer, ended integer, "
-        "n_turns integer not null default 0, grade text not null default '', "
-        "source text not null default '', outcome text, needs text)"
-    )
-    db.execute("create table turns (session_id text, ts integer, role text, text text)")
-    db.execute(
-        "create table notes (session_id text, idx integer, ts integer, topic text, "
-        "relation text, parent text, title text, tags text, entities text, "
-        "note_path text, kind text, project text)"
-    )
-    for row in rows:
-        # (id, cwd, project) as the attribution tests write it, or a dict
-        # naming any column, for tests about the rows themselves.
-        if isinstance(row, dict):
-            cols = ", ".join(row)
-            db.execute(
-                f"insert into sessions ({cols}) values ({', '.join('?' * len(row))})",
-                tuple(row.values()),
-            )
-        else:
-            db.execute(
-                "insert into sessions (id, kind, agent, machine, cwd, project, n_turns) "
-                "values (?, 'main', 'claude', 'test', ?, ?, 1)",
-                row,
-            )
-    db.commit()
-    db.close()
-    return db_path
+
+def fake_scad(sessions: list[dict] | None = None, notes: list[dict] | None = None):
+    """A stand-in for `sessions.run_scad`: answers `session ls` with `sessions`
+    (main rows only, as the real call is asked for) and `notes ls` with `notes`."""
+    def run(argv: list[str]) -> list[dict]:
+        if argv[:2] == ["session", "ls"]:
+            return [r for r in (sessions or []) if r.get("kind", "main") == "main"]
+        if argv[:2] == ["notes", "ls"]:
+            return list(notes or [])
+        return []
+    return run

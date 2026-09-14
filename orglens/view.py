@@ -5,9 +5,10 @@ project but knows nothing about the work — no plans, no packets, no documents.
 orglens knows the artifacts and nothing about the running. Neither is the
 question a human actually asks, which is *where does this project stand*.
 
-They join on `project`, which both resolve identically, and the join happens
-over scad's sqlite index rather than its Python: a database is a stable
-interface between two repos and an import is not.
+orglens asks scad for its sessions (`scad session ls --json`) and its notes
+(`scad notes ls --about`) and joins them to units itself; it never opens
+scad's index file. A command's output is a contract between two repos and a
+schema is not.
 
 Nothing here is stored. Every number is recomputed on render, so the page
 cannot go stale the way the hand-written status line it replaces did — the

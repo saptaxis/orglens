@@ -36,7 +36,7 @@ def test_touched_is_the_newest_commit_across_homes(tmp_path):
     _commit(docs, "2020-01-01T00:00:00")
     _commit(code, "2024-06-01T00:00:00")
 
-    act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
+    act = activity.read([docs, code], "unit")
 
     newer = int(
         __import__("datetime")
@@ -57,7 +57,7 @@ def test_plan_is_the_highest_numbered_plan_across_homes(tmp_path):
     (docs / "plans" / "03-thing-Feb032026.md").write_text("# 03\n")
     (code / "plans" / "07-thing-Feb072026.md").write_text("# 07\n")
 
-    act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
+    act = activity.read([docs, code], "unit")
 
     assert act.plan == "07"
 
@@ -82,7 +82,7 @@ def test_packets_are_summed_across_homes(tmp_path):
     (code / "old").mkdir()
     (code / "old" / "runs.jsonl").write_text("")
 
-    act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
+    act = activity.read([docs, code], "unit")
 
     assert act.packets == 2
 
@@ -94,7 +94,7 @@ def test_blocked_packets_are_the_ones_with_an_open_gate(tmp_path):
     _chain_packet(code / "packet-b", gate=True)
     _chain_packet(code / "packet-c", gate=False)
 
-    act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
+    act = activity.read([docs, code], "unit")
 
     assert act.packets == 3
     assert act.blocked == 2
@@ -111,7 +111,7 @@ class TestPeek:
         home.mkdir(parents=True)
         (home / "f.txt").write_text("x")
 
-        act = activity.peek([home], "widget", index=tmp_path / "absent.sqlite")
+        act = activity.peek([home], "widget")
 
         assert act.modified is not None
         # Never ran a git subprocess, so there is nothing to report here —
@@ -128,16 +128,16 @@ class TestPeek:
                      turns=1, label=None, outcome=None, live=False,
                      units=frozenset({"widget"}), how="containment")
 
-        act = activity.peek([home], "widget", index=tmp_path / "absent.sqlite", sessions=[s1])
+        act = activity.peek([home], "widget", sessions=[s1])
 
         assert act.sessions == 1
         assert act.last_session == 2
 
-    def test_no_index_and_no_files_is_ordinary_not_an_error(self, tmp_path):
+    def test_no_scad_and_no_files_is_ordinary_not_an_error(self, tmp_path):
         home = tmp_path / "ghost"
         home.mkdir()
 
-        act = activity.peek([home], "ghost", index=tmp_path / "absent.sqlite")
+        act = activity.peek([home], "ghost")
 
         assert act.sessions == 0
         assert act.last_session is None

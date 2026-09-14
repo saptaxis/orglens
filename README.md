@@ -9,9 +9,10 @@ A piece of work lives in several places at once: a folder of documents, a code r
 orglens is built alongside [scad](https://github.com/saptaxis/scoped-agent-dispatch),
 a lower-level tool that runs agent sessions and records what happened.
 
-scad is optional and not a dependency. `orglens start` shells out to it to launch
-a session, and session counts are read from its index when it is present. Every
-other command works without it.
+scad is optional and not a dependency. `orglens start` and `resume` shell out to
+it, and sessions and notes come from `scad session ls --json` and `scad notes ls
+--about` when it is present (scad 0.5 or later; an older scad or none means no
+sessions, which is ordinary). Every other command works without it.
 
 ## What it assumes
 
@@ -210,9 +211,9 @@ starting a session.
 
 `orglens config UNIT` renders a unit's homes into the `repos:` block of the
 config a container launcher reads. Homes absent from this machine are left out.
-This is the only command that writes under `~/.scad`; the others read
-`~/.scad/index.sqlite` and `~/.scad/launches/`. Launching on this machine needs
-no config.
+This is the only command that writes under `~/.scad`; nothing else in orglens
+touches that directory, and scad's index is never opened — sessions and notes
+come through scad's own commands. Launching on this machine needs no config.
 
 ## Demo
 

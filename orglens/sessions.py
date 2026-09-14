@@ -11,18 +11,19 @@ Everything that says how many sessions a unit has, or lists them, reads from
 here. `activity` used to encode the same rule as a SQL clause per unit, and a
 rule written twice is a rule that drifts.
 
-The index is scad's. orglens reads it and writes nothing to it; scad does not
-know orglens exists. The two file sessions under different keys — scad by the
-directory a marker sits in, orglens by a declared unit spanning several
-directories — and those keys are not made to match. Directory names are the
-input; the unit is the output.
+The sessions come from scad's export, `scad session ls --json`, never from
+its index file: the schema is scad's, and reading the file made it a contract
+nobody had written down. scad does not know orglens exists; orglens asks scad
+and joins the answer to units itself. The two file sessions under different
+keys — scad by the directory a marker sits in, orglens by a declared unit
+spanning several directories — and those keys are not made to match.
+Directory names are the input; the unit is the output.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,11 +34,24 @@ from orglens.units import Registry
 #: scad's own words for a session that can be picked back up.
 OPEN = frozenset({"awaiting-user", "awaiting-question", "in-flight"})
 
-#: Claude writes one file per running process here. It is the only source that
-#: knows a session is *live* rather than merely unfinished — the index records
-#: what a trace said when it was archived, which is a different question.
-#: Claude-only: codex and kimi keep no equivalent registry.
-LIVE_REGISTRY = Path.home() / ".claude" / "sessions"
+
+def run_scad(argv: list[str]) -> list[dict]:
+    """`scad <argv> --json`, parsed. No scad, an old scad, or a failure is an
+    empty answer, not an error: a machine without scad has no sessions to
+    show, which is ordinary. Tests replace this with a list."""
+    try:
+        done = subprocess.run(
+            ["scad", *argv, "--json"], capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if done.returncode != 0:
+        return []
+    try:
+        rows = json.loads(done.stdout)
+    except ValueError:
+        return []
+    return rows if isinstance(rows, list) else []
 
 
 @dataclass(frozen=True)
@@ -54,6 +68,10 @@ class Session:
     units: frozenset[str]
     #: "attributed" | "containment" | None
     how: str | None
+    #: The newest turn with text: {ts, role, text}, text clipped by scad.
+    last_turn: dict | None = None
+    #: An open question the session left, if any.
+    needs: str | None = None
 
     @property
     def open(self) -> bool:
@@ -63,59 +81,6 @@ class Session:
     def when(self) -> int | None:
         """The clock a listing sorts by: when it ended, else when it began."""
         return self.ended or self.started
-
-
-def _rows(index: Path) -> list[tuple]:
-    """Every main session, newest first. A missing or unreadable index is no
-    sessions, not an error — the machine may simply not have scad."""
-    if not index.exists():
-        return []
-    try:
-        db = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return []
-    try:
-        return db.execute(
-            "select id, agent, cwd, started, ended, coalesce(n_turns, 0), "
-            "coalesce(nullif(name, ''), nullif(title, '')), outcome "
-            "from sessions where kind = 'main' "
-            "order by coalesce(ended, started) desc, id"
-        ).fetchall()
-    except sqlite3.Error:
-        return []
-    finally:
-        db.close()
-
-
-def live_now() -> dict[str, dict]:
-    """session id -> {cwd, name}, for every session whose process is running.
-
-    Liveness is a `kill(pid, 0)` against the registry. A stale file whose
-    process is gone is skipped, not reported. The name is what the person
-    called the session, which the index learns only on the next reindex.
-    """
-    out: dict[str, dict] = {}
-    if not LIVE_REGISTRY.is_dir():
-        return out
-    for entry in sorted(LIVE_REGISTRY.glob("*.json")):
-        try:
-            data = json.loads(entry.read_text())
-            pid = int(data["pid"])
-            sid = str(data["sessionId"])
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            continue
-        # One session can have two files — a second process attached to the
-        # same id — and the newer one carries the name the person set.
-        updated = data.get("updatedAt") or 0
-        if sid in out and out[sid]["updated"] > updated:
-            continue
-        out[sid] = {"cwd": data.get("cwd"), "name": data.get("name") or None,
-                    "updated": updated}
-    return out
 
 
 def _spellings(path: Path, roots: list[Path]) -> list[str]:
@@ -157,17 +122,16 @@ def _under(cwd: str, prefix: str) -> bool:
     return cwd == prefix or cwd.startswith(prefix.rstrip("/") + "/")
 
 
-def all_sessions(registry: Registry, index: Path, events_root: Path) -> list[Session]:
-    """Every session scad knows about, plus any running now that the index
-    has not caught up with, each with the units it belongs to.
+def all_sessions(registry: Registry, events_root: Path) -> list[Session]:
+    """Every main session scad knows about, each with the units it belongs to.
 
     Zero-turn rows are included: a session scad indexed at launch has none
     until its first turn lands, and it is exactly the one that is live. A
-    listing hides them; a count and a live check must not.
+    listing hides them; a count and a live check must not. A session started
+    by hand in a terminal is not a row until scad's next reindex.
     """
     attributed = attributions(root=events_root)
     prefixes = _prefixes(registry)
-    live = live_now()
 
     def belongs(sid: str, cwd: str | None) -> tuple[frozenset[str], str | None]:
         if sid in attributed:
@@ -176,26 +140,25 @@ def all_sessions(registry: Registry, index: Path, events_root: Path) -> list[Ses
         return units, ("containment" if units else None)
 
     out: list[Session] = []
-    seen: set[str] = set()
-    for sid, agent, cwd, started, ended, turns, label, outcome in _rows(index):
-        seen.add(sid)
-        units, how = belongs(sid, cwd)
-        out.append(Session(
-            id=sid, agent=agent, cwd=cwd, started=started, ended=ended,
-            turns=turns, label=label or live.get(sid, {}).get("name"),
-            outcome=outcome, live=sid in live, units=units, how=how,
-        ))
-    # Running, in the registry, not yet indexed: a session started by hand
-    # reaches the index on the next reindex, and it is the unit's now.
-    for sid, entry in live.items():
-        if sid in seen:
+    for row in run_scad(["session", "ls", "--kind", "main", "--limit", "100000"]):
+        sid = str(row.get("id") or "")
+        if not sid:
             continue
-        units, how = belongs(sid, entry["cwd"])
+        cwd = row.get("cwd")
+        live = row.get("live") or None
+        units, how = belongs(sid, cwd)
+        # The name the person set reaches the registry at once and the index
+        # only on reindex, so a live session's name comes from `live`.
+        label = (live or {}).get("name") or row.get("name") or row.get("title") or None
         out.append(Session(
-            id=sid, agent="claude", cwd=entry["cwd"], started=None, ended=None,
-            turns=0, label=entry["name"], outcome=None, live=True,
+            id=sid, agent=str(row.get("agent") or ""), cwd=cwd,
+            started=row.get("started"), ended=row.get("ended"),
+            turns=int(row.get("n_turns") or 0), label=label,
+            outcome=row.get("outcome"), live=live is not None,
             units=units, how=how,
+            last_turn=row.get("last_turn") or None, needs=row.get("needs") or None,
         ))
+    out.sort(key=lambda s: (s.when or 0, s.id), reverse=True)
     return out
 
 

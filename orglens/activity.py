@@ -25,16 +25,15 @@ without scad, an entity with no plans are all ordinary.
 from __future__ import annotations
 
 import json
-import sqlite3
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
+from orglens import sessions as sessions_mod
 from orglens.sessions import Session
 
-SCAD_INDEX = Path.home() / ".scad" / "index.sqlite"
 
 
 
@@ -227,75 +226,32 @@ def _json_list(raw: str | None) -> list[str]:
     return [str(v) for v in value] if isinstance(value, list) else []
 
 
-_NOTHING: tuple = (None, [], [])
+def notes_about(name: str) -> list[dict]:
+    """Notes about the unit, from `scad notes ls --about NAME`.
 
-
-def _from_index(ids: list[str], name: str, index: Path) -> tuple:
-    """What the index holds about these sessions that `Session` does not
-    carry: the last thing said, open questions, and the notes about the unit.
-
-    Which sessions are the unit's was decided before this was called. The
-    queries take the ids and nothing else; no cwd is matched here.
+    A note is *about* a unit when its name is in the tags or entities, is
+    the topic, or is the project it was filed under — scad does that match.
+    A note about X is often written in Y, so `written_in` is carried. One
+    subprocess per unit; `cli` runs them concurrently across units.
     """
-    if not ids or not index.exists():
-        return _NOTHING
-    try:
-        db = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return _NOTHING
-    marks = ", ".join("?" * len(ids))
-    try:
-        # The exact last turn, not just when the session ended. It carries what
-        # was actually said, which answers "what was I doing" in a way no count
-        # does.
-        row = db.execute(
-            "select ts, role, substr(text, 1, 240) from turns "
-            f"where session_id in ({marks}) and text is not null and text != '' "
-            "order by ts desc limit 1",
-            ids,
-        ).fetchone()
-        last_turn = (
-            {"at": _epoch(row[0]), "role": row[1], "text": row[2]} if row else None
-        )
-        # `ended` is when the session stopped with the question outstanding,
-        # which is the date a human actually cares about — how long it has sat.
-        needs = [
-            {"question": q, "at": (int(at) // 1000 if at else None)}
-            for q, at in db.execute(
-                "select needs, coalesce(ended, started) from sessions "
-                f"where id in ({marks}) and needs is not null and needs != '' "
-                "order by coalesce(ended, started) desc",
-                ids,
-            )
-        ]
-        # A note is *about* an entity, which is not the same as being *written
-        # in* one. The field report on orglens was authored from a session in
-        # another project and cross-tagged; joining on the session's project
-        # alone found three of the eight notes that actually discuss orglens.
-        # The table is small, so match exactly in Python rather than with LIKE
-        # over JSON text.
-        notes = []
-        for topic, title, ts, tags, entities, project in db.execute(
-            "select n.topic, n.title, n.ts, n.tags, n.entities, s.project "
-            "from notes n join sessions s on s.id = n.session_id order by n.ts desc"
-        ):
-            named = name in _json_list(tags) or name in _json_list(entities)
-            if not (named or topic == name or project == name):
-                continue
-            notes.append(
-                {
-                    "topic": topic,
-                    "title": title,
-                    "at": _epoch(ts),
-                    "written_in": project,
-                    "about": named or topic == name,
-                }
-            )
-    except sqlite3.Error:
-        return _NOTHING
-    finally:
-        db.close()
-    return last_turn, needs, notes
+    out = []
+    # Looked up through the module so a test can replace it in one place.
+    for note in sessions_mod.run_scad(["notes", "ls", "--about", name]):
+        topic = note.get("topic")
+        out.append({
+            "topic": topic,
+            "title": note.get("title"),
+            "at": _epoch(note.get("ts")),
+            "written_in": note.get("project"),
+            "about": name in _json_list_or_list(note.get("tags")) or topic == name,
+        })
+    return out
+
+
+def _json_list_or_list(raw) -> list[str]:
+    if isinstance(raw, list):
+        return [str(v) for v in raw]
+    return _json_list(raw)
 
 
 def _from_sessions(sessions: list[Session]) -> dict:
@@ -303,11 +259,26 @@ def _from_sessions(sessions: list[Session]) -> dict:
     scad stores epoch milliseconds; `Activity` speaks seconds."""
     newest = sorted(sessions, key=lambda s: (s.when or 0, s.id), reverse=True)
     last = max((s.when or 0 for s in sessions), default=0)
+    # The exact last turn, not just when the session ended. It carries what
+    # was actually said, which answers "what was I doing" in a way no count
+    # does. scad clips the text; the newest across the unit's sessions wins.
+    turns_said = [s.last_turn for s in sessions if s.last_turn and s.last_turn.get("text")]
+    said = max(turns_said, key=lambda t: _epoch(t.get("ts")) or 0, default=None)
     return {
         "sessions": len(sessions),
         "last_session": (last // 1000) if last else None,
         "turns": sum(s.turns for s in sessions),
         "agents": sorted({s.agent for s in sessions if s.agent}),
+        "last_turn": (
+            {"at": _epoch(said.get("ts")), "role": said.get("role"), "text": said.get("text")}
+            if said else None
+        ),
+        # `ended` is when the session stopped with the question outstanding,
+        # which is the date a human actually cares about — how long it has sat.
+        "needs": [
+            {"question": s.needs, "at": (s.when // 1000) if s.when else None}
+            for s in newest if s.needs
+        ],
         # The recent few, main sessions only — a `Session` already is one.
         "recent": [
             {
@@ -332,7 +303,6 @@ def _from_sessions(sessions: list[Session]) -> dict:
 def peek(
     paths: list[Path],
     name: str,
-    index: Path | None = None,
     sessions: list[Session] | None = None,
 ) -> Activity:
     """Just enough to sort and date a unit — what `list` needs, not what
@@ -363,20 +333,17 @@ def peek(
 def read(
     paths: list[Path],
     name: str,
-    index: Path | None = None,
     sessions: list[Session] | None = None,
+    notes: list[dict] | None = None,
 ) -> Activity:
     """Everything derivable about one unit. Never raises.
 
     `sessions` is the unit's, decided by `sessions.for_unit`; nothing here
-    asks which sessions belong. None given means none.
+    asks which sessions belong. None given means none. `notes` is what
+    `notes_about` returns, passed in when the caller fetched it already.
     """
     paths = [Path(p) for p in paths]
     sessions = sessions or []
-    # Resolved here, not in the signature: a default argument is bound at
-    # import, and `SCAD_INDEX` is what a test reassigns to keep the real
-    # `~/.scad` out of the suite.
-    index = SCAD_INDEX if index is None else index
     activity = Activity()
     if not paths:
         return activity
@@ -400,7 +367,5 @@ def read(
     activity.blocked = sum(blocked for _, blocked in packets)
     for key, value in _from_sessions(sessions).items():
         setattr(activity, key, value)
-    activity.last_turn, activity.needs, activity.notes = _from_index(
-        [s.id for s in sessions], name, index
-    )
+    activity.notes = notes_about(name) if notes is None else notes
     return activity

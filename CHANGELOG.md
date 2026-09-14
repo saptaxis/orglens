@@ -24,6 +24,12 @@ is `--workflow`, the session's binding fact is `{"type": "workflow", ...}`, and
 the loader is `orglens.workflow.definition.load_workflow`. No packet had been
 bound under the old names.
 
+- Sessions and notes come from `scad session ls --json` and `scad notes ls
+  --about`, never from scad's index file. The `sqlite3` dependency, the index
+  path and the reading of Claude's process registry are gone; scad 0.5 or
+  later is needed for the sessions face, and an older scad or none means no
+  sessions. A session started by hand in a terminal is not listed until
+  scad's next reindex.
 - `orglens sessions [UNIT]` lists a unit's sessions, or every unit's grouped,
   with how each is the unit's. `--none` lists the sessions belonging to no unit.
 - `orglens resume UNIT|SESSION-ID` hands a session, or a unit's newest open

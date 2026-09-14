@@ -11,21 +11,19 @@ from click.testing import CliRunner
 
 from orglens import events
 from orglens.cli import cli
-from tests.conftest import scad_index
+from tests.conftest import export_row, fake_scad
 
 
 def _row(id, cwd, **extra):
-    base = {"id": id, "kind": "main", "agent": "claude", "machine": "m",
-            "cwd": cwd, "n_turns": 4, "grade": "", "source": "", "started": 1000_000}
+    base = {"n_turns": 4, "started": 1000_000}
     base.update(extra)
-    return base
+    return export_row(id, cwd, **base)
 
 
 def _setup(tmp_path, monkeypatch, two_root_tree, rows):
-    """A fake index pointed at by `SCAD_INDEX`, an empty event log, and the
-    two-root tree's config. `orglens`'s code home is `code/orglens`."""
-    index = scad_index(tmp_path, rows)
-    monkeypatch.setattr("orglens.activity.SCAD_INDEX", index)
+    """A fake scad export, an empty event log, and the two-root tree's config.
+    `orglens`'s code home is `code/orglens`."""
+    monkeypatch.setattr("orglens.sessions.run_scad", fake_scad(rows))
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
     return tmp_path / "code" / "orglens"
 
@@ -107,17 +105,12 @@ class TestSessions:
     def test_a_running_session_is_listed_first_even_with_no_turns(
         self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
     ):
-        import json, os
         home = tmp_path / "code" / "orglens"
         _setup(tmp_path, monkeypatch, two_root_tree, [
             _row("dddd4444-done", str(home), ended=9000_000),
-            _row("eeee5555-live", str(home), n_turns=0, started=None),
+            _row("eeee5555-live", str(home), n_turns=0, started=None,
+                 live={"pid": 1, "name": None, "status": "busy", "waiting_for": ""}),
         ])
-        live = tmp_path / "live"
-        live.mkdir()
-        (live / "p.json").write_text(json.dumps(
-            {"pid": os.getpid(), "sessionId": "eeee5555-live", "cwd": str(home), "kind": "main"}))
-        monkeypatch.setattr("orglens.sessions.LIVE_REGISTRY", live)
 
         lines = [l for l in CliRunner().invoke(cli, ["sessions", "orglens"]).output.splitlines() if l.strip()]
         assert "eeee5555" in lines[0] and "live" in lines[0]

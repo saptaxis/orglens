@@ -139,15 +139,30 @@ def _dated(act: activity.Activity) -> list[str]:
 
 
 def _sessions_by_unit(registry: Registry) -> tuple[list, dict[str, list]]:
-    """Every session, and every unit's, from one pass over the index and
+    """Every session, and every unit's, from one pass over scad's export and
     the event log.
 
     One pass, not one per unit: `attributions` walks every shard and the
-    index is one query, so a loop over thirty units would do the same work
+    export is one call, so a loop over thirty units would do the same work
     thirty times for the same answer.
     """
-    every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
+    every = sessions.all_sessions(registry, EVENTS_DIR)
     return every, {unit.name: sessions.for_unit(every, unit.name) for unit in registry.units()}
+
+
+def _notes_by_unit(registry: Registry) -> dict[str, list[dict]]:
+    """Every unit's notes, fetched concurrently.
+
+    `scad notes ls --about` answers for one name, so this is one subprocess
+    per unit; run one after another they were 4s of a 10s `status`. They
+    are independent and mostly waiting on a process, so a small pool runs
+    them side by side.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    names = [unit.name for unit in registry.units()]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        found = pool.map(activity.notes_about, names)
+    return dict(zip(names, found))
 
 
 def _status_of(registry: Registry, unit):
@@ -248,8 +263,10 @@ def status():
     units = registry.units()
 
     every, by_unit = _sessions_by_unit(registry)
+    notes = _notes_by_unit(registry)
     acts = {
-        unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name])
+        unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name],
+                            notes=notes[unit.name])
         for unit in units
     }
 
@@ -797,6 +814,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
     ]
 
     every, by_unit = _sessions_by_unit(registry)
+    notes = _notes_by_unit(registry)
 
     groups = []
     for kind in sorted(by_kind):
@@ -810,6 +828,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
                     "why": status.text if status else None,
                     "activity": activity.read(
                         unit.paths, unit.name, sessions=by_unit[unit.name],
+                        notes=notes[unit.name],
                     ),
                     "artifacts": [
                         (heading, documents.find(registry, artifact_kind, unit))
@@ -894,7 +913,7 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
     shared by two units lists its sessions under both.
     """
     registry, _ = _load_registry()
-    every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
+    every = sessions.all_sessions(registry, EVENTS_DIR)
 
     if unit_name is not None and not only_none:
         try:
@@ -939,7 +958,7 @@ def resume(target: str, print_only: bool):
     ran; orglens does no working-directory work of its own.
     """
     registry, _ = _load_registry()
-    every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
+    every = sessions.all_sessions(registry, EVENTS_DIR)
 
     session, matches = _find_session(every, target)
     if session is None and matches:
@@ -978,7 +997,7 @@ def attribute(session_id: str, unit_name: str):
     two units is narrowed to one.
     """
     registry, _ = _load_registry()
-    every = sessions.all_sessions(registry, activity.SCAD_INDEX, EVENTS_DIR)
+    every = sessions.all_sessions(registry, EVENTS_DIR)
 
     session, matches = _find_session(every, session_id)
     if session is None:
