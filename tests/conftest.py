@@ -24,6 +24,8 @@ def no_real_machine_state(tmp_path, monkeypatch):
     # process running hundreds of trees.
     from orglens import activity, documents
     activity._status_lines.cache_clear()
+    activity._last_commit.cache_clear()
+    activity._newest_mtime.cache_clear()
     documents._dirs_under.cache_clear()
 
 

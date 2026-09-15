@@ -150,19 +150,32 @@ def _sessions_by_unit(registry: Registry) -> tuple[list, dict[str, list]]:
     return every, {unit.name: sessions.for_unit(every, unit.name) for unit in registry.units()}
 
 
-def _notes_by_unit(registry: Registry) -> dict[str, list[dict]]:
-    """Every unit's notes, fetched concurrently.
+def _git_paths(registry: Registry, units: list) -> list[Path]:
+    """Every path `status`/`view` will ask git about: each home, and each
+    document the status line may be read from."""
+    out: list[Path] = []
+    for unit in units:
+        out.extend(unit.paths)
+        for home in unit.paths:
+            out.extend(home / d for d in registry.grammar.documents_for(unit.kind))
+    return out
 
-    `scad notes ls --about` answers for one name, so this is one subprocess
-    per unit; run one after another they were 4s of a 10s `status`. They
-    are independent and mostly waiting on a process, so a small pool runs
-    them side by side.
+
+def _warm(registry: Registry, units: list) -> dict[str, list[dict]]:
+    """Everything `status` and `view` will ask a subprocess or a file walk
+    for, fetched at once: git per home and driver document, the newest
+    mtime per home, and `scad notes ls --about` per unit. Independent and
+    mostly waiting, so one pool runs them side by side; in series they were
+    most of a 10s `status`. Returns the notes by unit; the rest is cached.
     """
-    from concurrent.futures import ThreadPoolExecutor
-    names = [unit.name for unit in registry.units()]
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        found = pool.map(activity.notes_about, names)
-    return dict(zip(names, found))
+    notes: dict[str, list[dict]] = {}
+
+    def fetch(name: str) -> None:
+        notes[name] = activity.notes_about(name)
+
+    activity.prefetch(_git_paths(registry, units),
+                      extra=[(fetch, unit.name) for unit in units])
+    return notes
 
 
 def _status_of(registry: Registry, unit):
@@ -263,7 +276,7 @@ def status():
     units = registry.units()
 
     every, by_unit = _sessions_by_unit(registry)
-    notes = _notes_by_unit(registry)
+    notes = _warm(registry, units)
     acts = {
         unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name],
                             notes=notes[unit.name])
@@ -814,7 +827,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
     ]
 
     every, by_unit = _sessions_by_unit(registry)
-    notes = _notes_by_unit(registry)
+    notes = _warm(registry, [u for us in by_kind.values() for u in us])
 
     groups = []
     for kind in sorted(by_kind):

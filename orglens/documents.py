@@ -76,6 +76,11 @@ def _containers(home: Path, directory: str) -> list[Path]:
     return [d for d in _dirs_under(home) if d.name == directory]
 
 
+#: Build output and dependency folders: never documents, and the bulk of a
+#: code home's directory count.
+_SKIP = {"node_modules", "__pycache__", "venv", "dist", "build", "target", "site-packages"}
+
+
 @lru_cache(maxsize=None)
 def _dirs_under(home: Path) -> tuple[Path, ...]:
     """Every directory under a home, walked once per process and filtered
@@ -89,7 +94,7 @@ def _dirs_under(home: Path) -> tuple[Path, ...]:
         except OSError:
             continue
         for entry in entries:
-            if entry.name.startswith("."):
+            if entry.name.startswith(".") or entry.name in _SKIP:
                 continue
             try:
                 if entry.is_dir():
@@ -149,7 +154,12 @@ def find(
 
     found: list[Document] = []
     for one in units:
-        excluded = _claimed_by(registry, one)
+        # Once per unit per command, not once per kind: `find` runs for
+        # every kind on every unit, and this resolves every unit's paths.
+        cache = registry.__dict__.setdefault("_claimed", {})
+        if one.name not in cache:
+            cache[one.name] = _claimed_by(registry, one)
+        excluded = cache[one.name]
         seen: set[Path] = set()
         for home in one.paths:
             for container in [c for n in container_names for c in _containers(home, n)]:

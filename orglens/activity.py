@@ -109,9 +109,41 @@ def _repo_root(path: Path) -> Path | None:
     return None
 
 
+@lru_cache(maxsize=None)
 def _last_commit(root: Path, path: Path) -> int | None:
+    """When `path` last landed in `root`. Cached per process: a home is asked
+    for by `status` and again by the status line's `_last_edit`."""
     out = _git(["log", "-1", "--format=%ct", "--", str(path)], root).strip()
     return int(out) if out.isdigit() else None
+
+
+def prefetch(paths: list[Path], extra: list[tuple] = (), workers: int = 8) -> None:
+    """Warm the per-path git answers for every path at once.
+
+    `_last_commit` is one subprocess per home and per driver document —
+    ninety in series on a 25-unit tree, 2.5s of a 5s `view`. They do not
+    depend on each other, so a small pool runs them side by side and the
+    per-unit loop afterwards finds every answer cached. `extra` is more
+    (function, argument) pairs to run in the same pool — the notes fetch
+    per unit, which is one scad subprocess each.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(path: Path) -> None:
+        root = _repo_root(path)
+        if root is not None:
+            _last_commit(root, Path(path))
+            _status_lines(root)
+
+    def walk(path: Path) -> None:
+        _newest_mtime(Path(path))
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(one, p) for p in paths]
+        futures += [pool.submit(walk, p) for p in paths if Path(p).is_dir()]
+        futures += [pool.submit(fn, arg) for fn, arg in extra]
+        for f in futures:
+            f.result()
 
 
 @lru_cache(maxsize=None)
@@ -145,8 +177,10 @@ def _dirty(root: Path, path: Path) -> int:
 _SKIP = {".git", "node_modules", "__pycache__", ".venv"}
 
 
+@lru_cache(maxsize=None)
 def _newest_mtime(path: Path) -> int | None:
-    """When the tree was last edited, landed or not.
+    """When the tree was last edited, landed or not. Cached per process and
+    warmed by `prefetch`; it is a full file walk of the home.
 
     The last commit says what was published; this says what was touched. They
     diverge exactly when work is in flight, which is when you care.

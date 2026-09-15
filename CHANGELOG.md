@@ -63,10 +63,12 @@ bound under the old names.
   parent as a root.
 - `orglens check` reports a home declared on more than one unit, and which of
   them `where` answers inside it.
-- `status` runs in 5s and `view` in 4.4s on a 23-unit tree, from 12.4s and
+- `status` runs in 3s and `view` in 3s on a 25-unit tree, from 12.4s and
   10.6s: git is asked once per repository instead of three times per home,
-  a checkout's remote is read from `.git/config`, and each home is walked
-  once for every document kind.
+  a checkout's remote is read from `.git/config`, each home is walked once
+  for every document kind, and everything that waits on a subprocess or a
+  file walk — git per home and driver document, the newest mtime, the notes
+  per unit — is fetched in one pool before the per-unit loop.
 - A grammar `find` ending in `/` names directories, one artifact each; the
   default grammar gains `article: articles/*/`. A `find` may be a list when
   one kind lives in several containers.
