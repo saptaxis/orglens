@@ -64,7 +64,9 @@ EOF
 and wherever your repositories are checked out. A unit outside every root is
 un-met rather than invisible, and registers itself the first time you work in
 it. The sweep goes three directories below each root; a marker deeper than
-that is found by listing its parent as a root too. `grammar: /path/to/custom.yaml`
+that is found by listing its parent as a root too. A root that is itself a
+repository counts as a home candidate, so a checkout whose parent holds
+everything can be listed on its own. `grammar: /path/to/custom.yaml`
 replaces the bundled grammar.
 
 ## CLI Reference

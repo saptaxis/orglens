@@ -55,6 +55,9 @@ bound under the old names.
   be counted too, which is why a unit's number can be lower than before.
 - A home reached through a symlinked root matches sessions that recorded
   either spelling of the path.
+- A root that is itself a repository, or declares itself, is a home
+  candidate in its own right, so a checkout whose parent holds everything
+  can be listed as a root on its own.
 - A root listed inside another root is swept to its own depth, so a marker
   deeper than three directories below the outer root is found by listing its
   parent as a root.

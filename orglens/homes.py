@@ -142,7 +142,21 @@ def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candid
         # candidate paths that match none of them — and match failure is
         # silent, because a lookup returns empty rather than raising.
         # Resolving once at the root means every path downstream is resolved.
-        walk(Path(root).expanduser().resolve(), 1)
+        top = Path(root).expanduser().resolve()
+        # A root that is itself a repository, or declares itself, is a
+        # candidate in its own right: a checkout whose parent holds
+        # everything has no narrower root to list. A plain directory is a
+        # container and stays out, or its basename could answer for a home
+        # by coincidence.
+        if top not in seen and ((top / ".git").exists() or read_marker(top)):
+            marker = read_marker(top)
+            found.append(Candidate(
+                path=top, name=top.name,
+                marker_home=marker.home if marker else None,
+                remote=_remote_of(top) if (top / ".git").exists() else None,
+            ))
+            seen[top] = 0
+        walk(top, 1)
     return found
 
 

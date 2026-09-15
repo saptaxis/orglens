@@ -227,3 +227,23 @@ def test_a_checkout_without_an_origin_has_no_remote(tmp_path):
     (d / ".git").mkdir(parents=True)
     (d / ".git" / "config").write_text("[core]\n\tbare = false\n")
     assert homes._remote_of(d) is None
+
+
+def test_a_root_that_is_itself_a_repository_is_a_candidate(tmp_path):
+    # `~/Dropbox/dotfiles` has no useful parent to list as a root — its
+    # parent holds everything. Listing the checkout itself must work.
+    repo = tmp_path / "dotfiles"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "config").write_text('[remote "origin"]\n\turl = git@github.com:me/dotfiles.git\n')
+    candidates = scan_roots([repo])
+    home = resolve_home("dotfiles", candidates)
+    assert home.path == repo
+    assert home.how == "remote"
+
+
+def test_a_root_that_is_a_plain_directory_is_not_its_own_candidate(tmp_path):
+    # A documents root is a container, not a home; making it a candidate
+    # would let its own basename answer for a home by coincidence.
+    docs = tmp_path / "docs"
+    (docs / "projects").mkdir(parents=True)
+    assert all(c.path != docs for c in scan_roots([docs]))
