@@ -161,3 +161,18 @@ def test_a_cwd_recorded_through_a_symlinked_root_still_matches(tmp_path, monkeyp
         export_row("s-linked", str(link / "alpha-repo" / "src")),
     ], tmp_path)}
     assert got == {"s-resolved": frozenset({"alpha"}), "s-linked": frozenset({"alpha"})}
+
+
+def test_short_ids_are_the_shortest_unique_prefix_at_least_eight():
+    # codex thread ids are UUIDv7: the first eight hex characters are a
+    # timestamp, so two threads started in one minute share them.
+    from orglens.sessions import short_ids
+    a = export_row("019f7f9d-f67f-7c01-b8bb-d945811b5d1a", "/x")
+    b = export_row("019f7f9d-09a8-7df3-a730-74a15cb4a0d1", "/x")
+    c = export_row("2061e734-f80a-4a9a-88d7-b734265a7882", "/x")
+    ids = [r["id"] for r in (a, b, c)]
+    short = short_ids(ids)
+    assert short["2061e734-f80a-4a9a-88d7-b734265a7882"] == "2061e734"
+    assert short[a["id"]] == "019f7f9d-f"
+    assert short[b["id"]] == "019f7f9d-0"
+    assert len(set(short.values())) == 3

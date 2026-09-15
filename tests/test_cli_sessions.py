@@ -93,6 +93,28 @@ class TestSessions:
         out = CliRunner().invoke(cli, ["sessions", "--none"]).output
         assert "0000aaaa" in out and "ffff6666" not in out
 
+    def test_unattributed_rows_carry_where_and_what_was_last_said(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "somewhere" / "deep"), name="stray",
+                 last_turn={"ts": 1, "role": "user", "text": "fix the login bug next"}),
+        ])
+        out = CliRunner().invoke(cli, ["sessions", "--none"]).output
+        assert "somewhere/deep" in out
+        assert "fix the login bug next" in out
+
+    def test_two_ids_sharing_eight_characters_are_told_apart(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("019f7f9d-f67f-7c01-b8bb-d945811b5d1a", str(home), agent="codex"),
+            _row("019f7f9d-09a8-7df3-a730-74a15cb4a0d1", str(home), agent="codex"),
+        ])
+        out = CliRunner().invoke(cli, ["sessions", "orglens"]).output
+        assert "019f7f9d-f" in out and "019f7f9d-0" in out
+
     def test_a_unit_with_no_sessions_says_so(
         self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
     ):

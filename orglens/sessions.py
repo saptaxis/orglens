@@ -179,3 +179,26 @@ def listed(sessions: list[Session], everything: bool = False) -> list[Session]:
     """
     shown = [s for s in sessions if everything or s.turns or s.live]
     return sorted(shown, key=lambda s: (s.live, s.when or 0, s.id), reverse=True)
+
+
+def short_ids(ids: list[str], floor: int = 8) -> dict[str, str]:
+    """The shortest prefix of each id that no other id shares, at least
+    `floor` characters. Eight is enough for a random UUID; codex threads are
+    UUIDv7, whose first eight hex characters are a timestamp, so two threads
+    started in one minute need a ninth or tenth to tell apart."""
+    out: dict[str, str] = {}
+    for sid in ids:
+        n = floor
+        while n < len(sid) and any(o != sid and o.startswith(sid[:n]) for o in ids):
+            n += 1
+        out[sid] = sid[:n]
+    return out
+
+
+def where(cwd: str | None) -> str:
+    """A cwd short enough to read in a row: home-relative, tail-clipped."""
+    if not cwd:
+        return "—"
+    home = str(Path.home())
+    shown = "~" + cwd[len(home):] if cwd.startswith(home) else cwd
+    return shown if len(shown) <= 64 else "…" + shown[-63:]

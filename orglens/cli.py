@@ -885,8 +885,9 @@ def _find_session(every: list, prefix: str):
     return None, matches
 
 
-def _session_line(s, show_how: bool = True) -> str:
+def _session_line(s, show_how: bool = True, short: dict | None = None) -> str:
     when = _ago(s.when // 1000) + " ago" if s.when else "—"
+    sid = (short or {}).get(s.id, s.id[:8])
     if s.live:
         state = "● live"
     elif s.open:
@@ -895,9 +896,20 @@ def _session_line(s, show_how: bool = True) -> str:
         state = ""
     how = (s.how or "") if show_how else ""
     return (
-        f"  {s.id[:8]}  {s.agent:<6} {when:>8} {_count(s.turns, 'turn'):>10}  "
+        f"  {sid:<10} {s.agent:<6} {when:>8} {_count(s.turns, 'turn'):>10}  "
         f"{how:<12} {state:<10} {s.label or ''}"
     )
+
+
+def _session_detail(s) -> str:
+    """A second line for a session nobody has claimed: where it ran and
+    the last thing said, which is what deciding whose it is needs."""
+    said = (s.last_turn or {}).get("text") or ""
+    said = " ".join(said.split())[:110]
+    line = f"{'':<13}{sessions.where(s.cwd)}"
+    if said:
+        line += f"  ·  {said}"
+    return line
 
 
 @cli.command(name="sessions")
@@ -915,6 +927,7 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
     """
     registry, _ = _load_registry()
     every = sessions.all_sessions(registry, EVENTS_DIR)
+    short = sessions.short_ids([s.id for s in every])
 
     if unit_name is not None and not only_none:
         try:
@@ -927,7 +940,7 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
             click.echo(f"{unit.name}: no sessions")
             return
         for s in rows:
-            click.echo(_session_line(s))
+            click.echo(_session_line(s, short=short))
         return
 
     groups: list[tuple[str, list]] = []
@@ -945,7 +958,10 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
     for label, rows in groups:
         click.echo(f"\n{label}:")
         for s in rows:
-            click.echo(_session_line(s, show_how=label != "unattributed"))
+            loose = label == "unattributed"
+            click.echo(_session_line(s, show_how=not loose, short=short))
+            if loose:
+                click.echo(_session_detail(s))
 
 
 @cli.command()

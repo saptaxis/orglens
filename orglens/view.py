@@ -109,6 +109,9 @@ h2.grp .n { color:var(--dim); font-weight:400; font-size:.78rem; margin-left:.4r
 .notes { margin-top:.5rem; font-size:.8rem; color:var(--dim) }
 .notes b { color:var(--fg); font-weight:500 }
 .gate { color:var(--warn); font-weight:600 }
+ol.loose li { margin:.45rem 0 }
+.sid { font-family:ui-monospace,Menlo,monospace; font-size:.78rem; color:var(--dim) }
+.where { color:var(--dim); font-size:.78rem; font-family:ui-monospace,Menlo,monospace }
 ul { margin:0; padding-left:1.1rem }
 footer { margin-top:2.5rem; color:var(--dim); font-size:.75rem }
 """
@@ -331,17 +334,26 @@ def _card(name: str, why: str | None, a: Activity) -> str:
 def _unattributed(loose: list) -> str:
     """Sessions belonging to no unit, newest first, each with the command
     that resumes it. The copy affordance takes any text, not only a path."""
-    out = [f"<h2 class='grp'>Unattributed ({len(loose)})</h2><ol class='list'>"]
+    from orglens.sessions import short_ids, where
+    short = short_ids([s.id for s in loose])
+    out = [f"<h2 class='grp'>Unattributed<span class='n'>{len(loose)}</span></h2>"
+           "<ol class='list loose'>"]
     for s in loose:
-        mark = " class='open'" if s.open else (" class='live'" if s.live else "")
+        mark = " open" if s.open else (" live" if s.live else "")
         cmd = f"scad session resume {s.id} --print"
         when = ago(s.when // 1000) if s.when else "—"
+        said = " ".join(((s.last_turn or {}).get("text") or "").split())[:160]
+        label = s.label or short[s.id]
         out.append(
-            f"<li{mark}>{html.escape(str(s.label or s.id))[:70]}"
-            f"<span class='when'> · {html.escape(s.agent)} · {s.turns:,} turns · {when}"
-            f" · {html.escape(str(s.cwd or '')[-46:])}</span>"
+            f"<li class='{mark.strip()}' data-agent='{html.escape(s.agent)}'>"
+            f"<span class='sid'>{html.escape(short[s.id])}</span> "
+            f"{html.escape(str(label))[:70]}"
+            f"<span class='when'> · {html.escape(s.agent)} · {s.turns:,} turns · {when}</span>"
             f"<span class='cp' data-path='{html.escape(cmd)}' title='copy resume command'>"
-            "&#x2398;</span></li>"
+            "&#x2398;</span>"
+            f"<div class='where'>{html.escape(where(s.cwd))}</div>"
+            + (f"<div class='said'>{html.escape(said)}</div>" if said else "")
+            + "</li>"
         )
     out.append("</ol>")
     return "".join(out)

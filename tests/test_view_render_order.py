@@ -73,9 +73,9 @@ def test_unattributed_sessions_render_in_their_own_section_at_the_end():
                      ended=2000_000, turns=9, label="stray work", outcome="awaiting-user",
                      live=False, units=frozenset(), how=None)]
     page = render([("Projects", [_row("a", Activity())])], CTX, unattributed=loose)
-    assert "Unattributed (1)" in page
+    assert "Unattributed<span class='n'>1</span>" in page
     assert "stray work" in page
-    assert page.index("Unattributed (1)") > page.index("Projects")
+    assert page.index("Unattributed<span") > page.index("Projects")
     assert "scad session resume deadbeef-1 --print" in page
 
 
@@ -149,3 +149,14 @@ def test_groups_are_led_by_the_one_with_the_newest_member():
     page = render([("Clients", [_row_with("c", quiet, kind="client")]),
                    ("Projects", [_row_with("p", busy)])], CTX)
     assert page.index("data-group='Projects'") < page.index("data-group='Clients'")
+
+
+def test_unattributed_rows_in_the_view_show_the_last_thing_said():
+    from orglens.sessions import Session
+    loose = [Session(id="deadbeef-1", agent="codex", cwd="/Users/x/somewhere/deep", started=1000_000,
+                     ended=2000_000, turns=9, label=None, outcome="awaiting-user",
+                     live=False, units=frozenset(), how=None,
+                     last_turn={"ts": 1, "role": "assistant", "text": "I renamed the module"})]
+    page = render([("Projects", [_row("a", Activity())])], CTX, unattributed=loose)
+    assert "I renamed the module" in page
+    assert "somewhere/deep" in page

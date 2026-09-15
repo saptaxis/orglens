@@ -37,6 +37,13 @@ bound under the old names.
 - `orglens attribute SESSION-ID UNIT` records an attribution after the fact.
 - `view` shows how each recent session is the unit's, and ends with the
   unattributed sessions, each with its resume command.
+- Session ids are shown as the shortest prefix that is unique across the
+  list, at least eight characters. codex thread ids are UUIDv7, so two threads
+  started in one minute share their first eight; they read as duplicates and
+  `resume` could not tell them apart.
+- Unattributed sessions, in `sessions --none` and at the end of `view`, show
+  where they ran and the last thing said, which is what deciding whose they
+  are needs.
 - `view` has a filter bar: a tab per top-level unit (most recently active
   first, with its session count and how much is waiting; a programme's tab
   holds its experiments), agent chips, and a find box over unit names,
