@@ -3,8 +3,8 @@
 An entity's `overview.md` carries a hand-written status line. It drifts, because
 nothing forces anyone to update it: orglens' own said "v1 core implemented"
 while plan 07 was merged. That is a stored status field — the shape the workflow
-face refuses outright, where `runs.jsonl` rejects the keys `status`, `state`,
-`pending`, `current_state` and `next_node` for exactly this reason.
+engine refuses outright: a packet's `session.jsonl` holds facts about the past
+and its position is derived from them, never written down.
 
 So the position is computed and only the reasoning stays written down. A
 sentence that says *"the draft is dead pending a literature refresh"* is a
@@ -15,7 +15,7 @@ Four sources, none of which reads a document body:
 
     git         when the directory was last committed to, and what is unstaged
     filenames   the highest-numbered plan
-    runs.jsonl  workflow packets, and which are waiting on a human
+    session.jsonl  workflow packets, and which are waiting on a human
     scad index  sessions attributed to this entity, and their open questions
 
 Every one degrades to empty rather than raising: a tree outside git, a machine
@@ -25,20 +25,16 @@ without scad, an entity with no plans are all ordinary.
 from __future__ import annotations
 
 import json
-import os
-import sqlite3
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
-SCAD_INDEX = Path.home() / ".scad" / "index.sqlite"
+from orglens import sessions as sessions_mod
+from orglens.sessions import Session
 
-#: Claude writes one file per running process here. It is the only source that
-#: knows a session is *live* rather than merely unfinished — the index records
-#: what a trace said when it was archived, which is a different question.
-LIVE_REGISTRY = Path.home() / ".claude" / "sessions"
+
 
 
 @dataclass
@@ -100,25 +96,91 @@ def _git(args: list[str], cwd: Path) -> str:
 
 
 def _repo_root(path: Path) -> Path | None:
-    out = _git(["rev-parse", "--show-toplevel"], path)
-    return Path(out.strip()) if out.strip() else None
+    """The repository holding `path`: the nearest ancestor with a `.git`.
+
+    A directory or a file — a worktree's `.git` is a file naming the real
+    one. Walked in Python rather than asked of git: `rev-parse` per home
+    was sixty subprocesses per `status`.
+    """
+    here = Path(path).resolve()
+    for directory in (here, *here.parents):
+        if (directory / ".git").exists():
+            return directory
+    return None
 
 
+@lru_cache(maxsize=None)
 def _last_commit(root: Path, path: Path) -> int | None:
+    """When `path` last landed in `root`. Cached per process: a home is asked
+    for by `status` and again by the status line's `_last_edit`."""
     out = _git(["log", "-1", "--format=%ct", "--", str(path)], root).strip()
     return int(out) if out.isdigit() else None
 
 
+def prefetch(paths: list[Path], extra: list[tuple] = (), workers: int = 8) -> None:
+    """Warm the per-path git answers for every path at once.
+
+    `_last_commit` is one subprocess per home and per driver document —
+    ninety in series on a 25-unit tree, 2.5s of a 5s `view`. They do not
+    depend on each other, so a small pool runs them side by side and the
+    per-unit loop afterwards finds every answer cached. `extra` is more
+    (function, argument) pairs to run in the same pool — the notes fetch
+    per unit, which is one scad subprocess each.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(path: Path) -> None:
+        root = _repo_root(path)
+        if root is not None:
+            _last_commit(root, Path(path))
+            _status_lines(root)
+
+    def walk(path: Path) -> None:
+        _newest_mtime(Path(path))
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(one, p) for p in paths]
+        futures += [pool.submit(walk, p) for p in paths if Path(p).is_dir()]
+        futures += [pool.submit(fn, arg) for fn, arg in extra]
+        for f in futures:
+            f.result()
+
+
+@lru_cache(maxsize=None)
+def _status_lines(root: Path) -> tuple[str, ...]:
+    """`git status --porcelain` for a whole repository, once per process.
+
+    Several homes sit in one repository, and each used to run its own
+    status. The paths come back repository-relative.
+    """
+    out = _git(["status", "--porcelain", "--untracked-files=all"], root)
+    return tuple(line for line in out.splitlines() if line.strip())
+
+
 def _dirty(root: Path, path: Path) -> int:
-    out = _git(["status", "--porcelain", "--", str(path)], root)
-    return sum(1 for line in out.splitlines() if line.strip())
+    """Uncommitted paths under `path`, from the repository's one status."""
+    try:
+        rel = Path(path).resolve().relative_to(Path(root).resolve())
+    except ValueError:
+        return 0
+    prefix = "" if str(rel) == "." else str(rel).rstrip("/") + "/"
+    count = 0
+    for line in _status_lines(Path(root).resolve()):
+        # Porcelain: two status columns, a space, then the path; a rename
+        # is `old -> new` and the new path is what exists.
+        entry = line[3:].split(" -> ")[-1].strip('"')
+        if entry.startswith(prefix):
+            count += 1
+    return count
 
 
 _SKIP = {".git", "node_modules", "__pycache__", ".venv"}
 
 
+@lru_cache(maxsize=None)
 def _newest_mtime(path: Path) -> int | None:
-    """When the tree was last edited, landed or not.
+    """When the tree was last edited, landed or not. Cached per process and
+    warmed by `prefetch`; it is a full file walk of the home.
 
     The last commit says what was published; this says what was touched. They
     diverge exactly when work is in flight, which is when you care.
@@ -150,108 +212,29 @@ def _latest_plan(path: Path) -> str | None:
 
 
 def _packets(path: Path) -> tuple[int, int]:
-    """Workflow packets beneath the entity, and how many hold a question."""
-    from orglens.workflow.runstate import read_entries, unresolved_needs_human
+    """Workflow packets beneath the entity, and how many are waiting on a human.
+
+    A packet is a directory holding a `session.jsonl`. The workflow is loaded
+    when it can be, so `review` gates count; where it cannot — not checked
+    out on this machine — only a `done` with a question counts.
+    """
+    from orglens.workflow import session
+    from orglens.workflow.definition import WorkflowError, load_workflow
 
     total = blocked = 0
-    for log in path.rglob("runs.jsonl"):
+    for found in path.rglob(session.SESSION_FILE):
         total += 1
-        try:
-            if unresolved_needs_human(read_entries(log.parent)) is not None:
-                blocked += 1
-        except (ValueError, OSError):
-            pass
+        facts = session.read(found.parent)
+        bound = session.workflow_path(facts)
+        workflow = None
+        if bound is not None:
+            try:
+                workflow = load_workflow(bound)
+            except WorkflowError:
+                workflow = None
+        if session.gated(facts, workflow):
+            blocked += 1
     return total, blocked
-
-
-@lru_cache(maxsize=1)
-def _live_entries(index: Path) -> list[dict]:
-    """Every session whose process is still running right now, unfiled by
-    project — grouping by scad's `project` column is exactly the coincidence
-    this module exists to delete. `_live_for` does the actual filing, by cwd.
-
-    Liveness is a `kill(pid, 0)` against the registry Claude maintains.
-    Claude-only — codex and kimi keep no equivalent registry, so their live
-    work is invisible here.
-    """
-    out: list[dict] = []
-    if not LIVE_REGISTRY.is_dir():
-        return out
-    db = None
-    if index.exists():
-        try:
-            db = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
-        except sqlite3.Error:
-            db = None
-    for entry in sorted(LIVE_REGISTRY.glob("*.json")):
-        try:
-            data = json.loads(entry.read_text())
-            pid = int(data["pid"])
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            continue
-        label = None
-        if db is not None:
-            row = db.execute(
-                "select coalesce(nullif(name,''), nullif(title,'')) "
-                "from sessions where id = ?",
-                (data.get("sessionId"),),
-            ).fetchone()
-            label = row[0] if row else None
-        out.append(
-            {
-                "pid": pid,
-                "session": data.get("sessionId"),
-                "cwd": data.get("cwd"),
-                "kind": data.get("kind"),
-                "name": label,
-            }
-        )
-    if db is not None:
-        db.close()
-    return out
-
-
-def _live_for(
-    paths: list[Path],
-    home_names: list[str],
-    index: Path,
-    mine: list[str] | None = None,
-) -> list[dict]:
-    """Live sessions whose cwd is under one of this unit's homes, plus any
-    explicitly attributed to it regardless of cwd.
-
-    Matches by cwd, the same evidence `_sessions` joins on — not scad's
-    `project` column, which is the exact coincidence this branch exists to
-    delete. A live session running in a unit's docs home used to be filed
-    under the docs repository's own project name and never show as running
-    against the unit at all.
-
-    An attributed session counts even when its cwd is empty or above every
-    home — the containment guard cannot be allowed to exclude an explicit
-    assertion, the whole reason attribution exists. Each entry appears once:
-    `_live_entries` is one row per running process, so containment and
-    attribution matching the same entry just both pass, not double-add it.
-    """
-    resolved = [str(Path(p).resolve()) for p in paths]
-    containers = [f"/workspace/{name.split('/')[0]}" for name in home_names]
-    mine_ids = set(mine or [])
-
-    def under(cwd: str, prefixes: list[str]) -> bool:
-        return any(cwd == p or cwd.startswith(p + "/") for p in prefixes)
-
-    return [
-        entry
-        for entry in _live_entries(index)
-        if entry.get("session") in mine_ids
-        or (
-            entry.get("cwd")
-            and (under(entry["cwd"], resolved) or under(entry["cwd"], containers))
-        )
-    ]
 
 
 def _epoch(ts) -> int | None:
@@ -277,215 +260,87 @@ def _json_list(raw: str | None) -> list[str]:
     return [str(v) for v in value] if isinstance(value, list) else []
 
 
-#: Outcomes that mean the conversation stopped without finishing — the ones
-#: you can pick back up. scad's own viewer treats the first two the same way.
-_OPEN = {"awaiting-user", "awaiting-question", "in-flight"}
+def notes_about(name: str) -> list[dict]:
+    """Notes about the unit, from `scad notes ls --about NAME`.
 
-_EMPTY: tuple = (0, None, 0, None, [], [], [], [])
-
-
-def _home_clause(
-    paths: list[Path], names: list[str], sessions: list[str] | None = None
-) -> tuple[str, list[str]]:
-    """SQL matching sessions that ran in, or under, any of these homes — plus
-    any explicitly attributed to this unit.
-
-    The join used to be `where project = <entity name>`, which worked only
-    while a repository happened to be named after the work. neuronal-degeneracy
-    is one unit with 1,281 sessions that split into two buckets under that
-    rule — 682 under its own name, 599 under `traitful-docs`.
-
-    Paths are resolved because `~/Dropbox` is a symlink to
-    `~/Library/CloudStorage/Dropbox` and 1,547 of 1,667 sessions record the
-    resolved form. An unresolved home matches nothing, and says so by
-    reporting zero rather than by failing.
-
-    Container paths are matched by name because a dispatched session's cwd is
-    `/workspace/<repo>`, which no host path can match — 37 sessions, 35 of
-    them orglens's own. That is scad's mounting convention, not a guess.
-
-    Containment answers for work done *inside* a home. It cannot answer for
-    work done *above* one: measured 2026-09-09, 108 sessions have a cwd of the
-    documents repository root, which sits above every unit's home. Those are
-    attributed by assertion or not at all.
-
-    Parenthesised as one group because callers append `and ...` to it, and
-    `AND` binds tighter than `OR` — an unparenthesised chain silently let
-    excluded rows back in.
+    A note is *about* a unit when its name is in the tags or entities, is
+    the topic, or is the project it was filed under — scad does that match.
+    A note about X is often written in Y, so `written_in` is carried. One
+    subprocess per unit; `cli` runs them concurrently across units.
     """
-    clauses: list[str] = []
-    params: list[str] = []
-    for path in paths:
-        resolved = str(Path(path).resolve())
-        clauses.append("(cwd = ? or cwd like ?)")
-        params += [resolved, resolved + "/%"]
-    for name in names:
-        repo = name.split("/")[0]
-        clauses.append("(cwd = ? or cwd like ?)")
-        params += [f"/workspace/{repo}", f"/workspace/{repo}/%"]
-    for session in sessions or []:
-        clauses.append("id = ?")
-        params.append(session)
-    if not clauses:
-        return "0", []
-    return "(" + " or ".join(clauses) + ")", params
+    out = []
+    # Looked up through the module so a test can replace it in one place.
+    for note in sessions_mod.run_scad(["notes", "ls", "--about", name]):
+        topic = note.get("topic")
+        out.append({
+            "topic": topic,
+            "title": note.get("title"),
+            "at": _epoch(note.get("ts")),
+            "written_in": note.get("project"),
+            "about": name in _json_list_or_list(note.get("tags")) or topic == name,
+        })
+    return out
 
 
-def _sessions(
-    paths: list[Path],
-    name: str,
-    index: Path,
-    home_names: list[str] | None = None,
-    mine: list[str] | None = None,
-) -> tuple:
-    """Sessions scad attributed to this unit, and their open questions."""
-    if not index.exists():
-        return _EMPTY
-    try:
-        db = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return _EMPTY
-    try:
-        clause, params = _home_clause(paths, home_names or [], mine)
-        count, last, turns = db.execute(
-            "select count(*), max(coalesce(ended, started)), "
-            f"sum(coalesce(n_turns, 0)) from sessions where {clause}",
-            params,
-        ).fetchone()
-        agents = [
-            row[0]
-            for row in db.execute(
-                f"select distinct agent from sessions where {clause} "
-                "and agent is not null order by agent",
-                params,
-            )
-        ]
-        # A note is *about* an entity, which is not the same as being *written
-        # in* one. The field report on orglens was authored from a session in
-        # another project and cross-tagged; joining on the session's project
-        # alone found three of the eight notes that actually discuss orglens.
-        # The table is small, so match exactly in Python rather than with LIKE
-        # over JSON text.
-        # The exact last turn, not just when the session ended. It carries what
-        # was actually said, which answers "what was I doing" in a way no count
-        # does. Costs a few hundred ms across the whole tree — the render
-        # already spends more than that in git.
-        row = db.execute(
-            "select t.ts, t.role, substr(t.text, 1, 240) from turns t "
-            "join sessions s on s.id = t.session_id "
-            f"where {clause} and t.text is not null and t.text != '' "
-            "order by t.ts desc limit 1",
-            params,
-        ).fetchone()
-        last_turn = (
-            {"at": _epoch(row[0]), "role": row[1], "text": row[2]} if row else None
-        )
+def _json_list_or_list(raw) -> list[str]:
+    if isinstance(raw, list):
+        return [str(v) for v in raw]
+    return _json_list(raw)
 
-        # Only `main` sessions. The store is 1264 workflow-agents against 232
-        # mains, and a subagent is an implementation detail of a session that
-        # is already listed.
-        recent = [
-            {
-                "at": _epoch(at),
-                "agent": agent,
-                "outcome": outcome,
-                "name": row_name or title,
-                "turns": n_turns or 0,
-                "open": outcome in _OPEN,
-            }
-            for at, agent, outcome, row_name, title, n_turns in db.execute(
-                "select coalesce(ended, started), agent, outcome, name, title, "
-                f"n_turns from sessions where {clause} and kind = 'main' "
-                "order by coalesce(ended, started) desc limit 8",
-                params,
-            )
-        ]
 
-        notes = []
-        for topic, title, ts, tags, entities, project in db.execute(
-            "select n.topic, n.title, n.ts, n.tags, n.entities, s.project "
-            "from notes n join sessions s on s.id = n.session_id order by n.ts desc"
-        ):
-            named = name in _json_list(tags) or name in _json_list(entities)
-            if not (named or topic == name or project == name):
-                continue
-            notes.append(
-                {
-                    "topic": topic,
-                    "title": title,
-                    "at": _epoch(ts),
-                    "written_in": project,
-                    "about": named or topic == name,
-                }
-            )
+def _from_sessions(sessions: list[Session]) -> dict:
+    """The facts the `Session` list already carries, in `Activity`'s shape.
+    scad stores epoch milliseconds; `Activity` speaks seconds."""
+    newest = sorted(sessions, key=lambda s: (s.when or 0, s.id), reverse=True)
+    last = max((s.when or 0 for s in sessions), default=0)
+    # The exact last turn, not just when the session ended. It carries what
+    # was actually said, which answers "what was I doing" in a way no count
+    # does. scad clips the text; the newest across the unit's sessions wins.
+    turns_said = [s.last_turn for s in sessions if s.last_turn and s.last_turn.get("text")]
+    said = max(turns_said, key=lambda t: _epoch(t.get("ts")) or 0, default=None)
+    return {
+        "sessions": len(sessions),
+        "last_session": (last // 1000) if last else None,
+        "turns": sum(s.turns for s in sessions),
+        "agents": sorted({s.agent for s in sessions if s.agent}),
+        "last_turn": (
+            {"at": _epoch(said.get("ts")), "role": said.get("role"), "text": said.get("text")}
+            if said else None
+        ),
         # `ended` is when the session stopped with the question outstanding,
         # which is the date a human actually cares about — how long it has sat.
-        needs = [
-            {"question": q, "at": (int(at) // 1000 if at else None)}
-            for q, at in db.execute(
-                "select needs, coalesce(ended, started) from sessions "
-                f"where {clause} and needs is not null and needs != '' "
-                "order by coalesce(ended, started) desc",
-                params,
-            )
-        ]
-    except sqlite3.Error:
-        return _EMPTY
-    finally:
-        db.close()
-    # scad stores epoch milliseconds.
-    return (
-        count or 0,
-        (int(last) // 1000 if last else None),
-        turns or 0,
-        last_turn,
-        recent,
-        agents,
-        needs,
-        notes,
-    )
-
-
-def _session_clock(
-    paths: list[Path],
-    index: Path,
-    home_names: list[str],
-    mine: list[str] | None = None,
-) -> tuple[int, int | None]:
-    """Count and last-active time — measured against the real scad index (not
-    a synthetic one) to matter here. A first cut also joined `turns` for the
-    exact last-said text, mirroring `_sessions`; on this machine's index
-    (74k turns, no index on `session_id` or `ts`) that one join cost 1.6s
-    across 16 units — 85% of `peek`'s entire time and enough on its own to
-    erase the git-subprocess saving this function exists for. `sessions.ended`
-    already answers "when did a session last touch this unit" without it.
-    """
-    if not index.exists():
-        return 0, None
-    try:
-        db = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return 0, None
-    try:
-        clause, params = _home_clause(paths, home_names or [], mine)
-        count, last = db.execute(
-            f"select count(*), max(coalesce(ended, started)) from sessions "
-            f"where {clause}",
-            params,
-        ).fetchone()
-    except sqlite3.Error:
-        return 0, None
-    finally:
-        db.close()
-    return count or 0, (int(last) // 1000 if last else None)
+        "needs": [
+            {"question": s.needs, "at": (s.when // 1000) if s.when else None}
+            for s in newest if s.needs
+        ],
+        # The recent few, main sessions only — a `Session` already is one.
+        "recent": [
+            {
+                "id": s.id,
+                "at": (s.when // 1000) if s.when else None,
+                "agent": s.agent,
+                "outcome": s.outcome,
+                "name": s.label,
+                "turns": s.turns,
+                "open": s.open,
+                "how": s.how,
+            }
+            for s in newest[:8]
+        ],
+        # `spoke` is when the session last said anything; a pane that is
+        # open but has not spoken for a day is idle, not work in progress.
+        "live": [
+            {"session": s.id, "name": s.label, "cwd": s.cwd,
+             "spoke": _epoch((s.last_turn or {}).get("ts")) or ((s.when // 1000) if s.when else None)}
+            for s in newest if s.live
+        ],
+    }
 
 
 def peek(
     paths: list[Path],
     name: str,
-    index: Path = SCAD_INDEX,
-    home_names: list[str] | None = None,
-    attributed: dict[str, str] | None = None,
+    sessions: list[Session] | None = None,
 ) -> Activity:
     """Just enough to sort and date a unit — what `list` needs, not what
     `status` shows in full.
@@ -503,28 +358,29 @@ def peek(
     session outside every home would show up in one and not the other.
     """
     paths = [Path(p) for p in paths]
-    home_names = home_names or []
-    mine = [s for s, u in (attributed or {}).items() if u == name]
     a = Activity()
     if not paths:
         return a
     a.modified = max((_newest_mtime(p) or 0) for p in paths) or None
-    a.live = _live_for(paths, home_names, index, mine)
-    a.sessions, a.last_session = _session_clock(paths, index, home_names, mine)
+    facts = _from_sessions(sessions or [])
+    a.sessions, a.last_session, a.live = facts["sessions"], facts["last_session"], facts["live"]
     return a
 
 
 def read(
     paths: list[Path],
     name: str,
-    index: Path = SCAD_INDEX,
-    home_names: list[str] | None = None,
-    attributed: dict[str, str] | None = None,
+    sessions: list[Session] | None = None,
+    notes: list[dict] | None = None,
 ) -> Activity:
-    """Everything derivable about one unit. Never raises."""
+    """Everything derivable about one unit. Never raises.
+
+    `sessions` is the unit's, decided by `sessions.for_unit`; nothing here
+    asks which sessions belong. None given means none. `notes` is what
+    `notes_about` returns, passed in when the caller fetched it already.
+    """
     paths = [Path(p) for p in paths]
-    home_names = home_names or []
-    mine = [s for s, u in (attributed or {}).items() if u == name]
+    sessions = sessions or []
     activity = Activity()
     if not paths:
         return activity
@@ -541,20 +397,12 @@ def read(
     activity.dirty = sum(_dirty(r or p, p) for p, r in roots)
     activity.modified = max((_newest_mtime(p) or 0) for p in paths) or None
 
-    activity.live = _live_for(paths, home_names, index, mine)
     plans = [p for path in paths if (p := _latest_plan(path)) is not None]
     activity.plan = max(plans) if plans else None
     packets = [_packets(p) for p in paths]
     activity.packets = sum(total for total, _ in packets)
     activity.blocked = sum(blocked for _, blocked in packets)
-    (
-        activity.sessions,
-        activity.last_session,
-        activity.turns,
-        activity.last_turn,
-        activity.recent,
-        activity.agents,
-        activity.needs,
-        activity.notes,
-    ) = _sessions(paths, name, index, home_names, mine)
+    for key, value in _from_sessions(sessions).items():
+        setattr(activity, key, value)
+    activity.notes = notes_about(name) if notes is None else notes
     return activity

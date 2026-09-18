@@ -1,313 +1,161 @@
-"""CLI for the workflow face.
+"""`orglens workflow <verb> <packet>`: next, done, note, goto.
 
-`derive` is what a role card checks to confirm its own next step before
-exiting, so --json is the primary interface.
+The packet is a directory. The workflow comes from the log's `workflow` line;
+`--workflow` overrides it and, on a packet with no log yet, writes that line.
+
+Exit codes: 0 for `next` on a runnable node, complete, or waiting; 1 for a
+log naming a node the workflow no longer has; 2 for a bad workflow or a refused
+write. Programs and dispatchers read `--json`; humans read the text.
 """
 
 from __future__ import annotations
 
-import json as json_module
-import subprocess
-import uuid
-from datetime import datetime
+import json
+import sys
 from pathlib import Path
 
 import click
 
-from orglens.workflow import blocking, orchestrator
-from orglens.workflow.definition import load_workflow
-from orglens.workflow.derive import derive_next_node
-from orglens.workflow.job import resolve_job
-from orglens.workflow.result import Outcome
-from orglens.workflow.runstate import (
-    append_fact,
-    read_entries,
-    unresolved_needs_human,
-)
-from orglens.workflow.validate import validate_definition
-
-FAILING = {Outcome.AMBIGUOUS, Outcome.UNKNOWN}
-
-DEFAULT_MAX_TURNS = 200
+from orglens.workflow import session
+from orglens.workflow.definition import Workflow, WorkflowError, load_workflow
+from orglens.workflow.session import Position, State
 
 
-def _load_workflow_or_exit(workflow_path: str) -> dict:
-    """Read and validate a workflow definition, or exit with a clean message.
+def _fail(message: str, code: int = 2) -> None:
+    click.echo(message, err=True)
+    sys.exit(code)
 
-    Shared by every command that derives against a definition: a missing
-    file or a definition that names an unknown predicate must be reported,
-    never crash the caller with a raw traceback (a definition problem like
-    that is exactly what `validate_definition` exists to catch).
-    """
+
+def _load(packet: Path, workflow_opt: str | None) -> tuple[Workflow, list[dict]]:
+    """The workflow and the log. Binds the packet when `--workflow` names a workflow it
+    has none of; refuses a second, different binding."""
+    facts = session.read(packet)
+    bound = session.workflow_path(facts)
+    if workflow_opt is not None:
+        given = Path(workflow_opt).expanduser().resolve()
+        if bound is None:
+            session.bind(packet, given)
+            facts = session.read(packet)
+        elif bound.resolve() != given:
+            _fail(f"{packet} is bound to {bound}; --workflow names {given}")
+        path = given
+    elif bound is not None:
+        path = bound
+    else:
+        _fail("no workflow bound: pass --workflow once to bind this packet")
     try:
-        definition = load_workflow(Path(workflow_path))
-    except FileNotFoundError as exc:
-        click.echo(str(exc))
-        raise SystemExit(2)
+        return load_workflow(path), facts
+    except WorkflowError as exc:
+        _fail(str(exc))
+    raise AssertionError("unreachable")
 
-    problems = validate_definition(definition)
-    if problems:
-        click.echo(f"{workflow_path} has problems:")
-        for problem in problems:
-            click.echo(f"  {problem}")
-        raise SystemExit(2)
 
-    return definition
+def _describe(packet: Path, pos: Position) -> dict:
+    return {
+        "state": pos.state.value,
+        "node": pos.node.name if pos.node else None,
+        "program": str(pos.node.program) if pos.node else None,
+        "write": str(packet / pos.node.writes) if pos.node else None,
+        "note": pos.note,
+    }
 
 
 @click.group()
 def workflow():
-    """Derive and validate filesystem-native workflows."""
+    """A line of nodes over one packet, with a human between."""
 
 
-@workflow.command()
-@click.argument("packet", type=click.Path(exists=True, file_okay=False))
-@click.option("--workflow", "workflow_path", required=True,
-              help="Path to the workflow definition.")
-@click.option("--json", "as_json", is_flag=True, help="Emit the full result as JSON.")
-def derive(packet: str, workflow_path: str, as_json: bool):
-    """Report which node runs next for PACKET."""
-    definition = _load_workflow_or_exit(workflow_path)
-
-    result = derive_next_node(Path(packet), definition)
-
-    block = blocking.check(Path(packet))
-    payload = result.to_dict()
-    payload["blocked"] = block is not None
-    payload["block"] = (
-        {
-            "question": block.question,
-            "node": block.node,
-            "raised_by": block.raised_by,
-            "event_id": block.event_id,
-        }
-        if block
-        else None
-    )
-
-    if as_json:
-        click.echo(json_module.dumps(payload, indent=2))
-    else:
-        click.echo(f"{result.outcome}: {result.node or '-'}")
-        click.echo(f"  {result.reason}")
-        if block:
-            click.echo(f"  blocked on {block.node}: {block.question}")
-
-    raise SystemExit(1 if result.outcome in FAILING else 0)
-
-
-@workflow.command()
-@click.option("--workflow", "workflow_path", required=True,
-              help="Path to the workflow definition.")
-def check(workflow_path: str):
-    """Validate a workflow definition's structure."""
-    try:
-        definition = load_workflow(Path(workflow_path))
-    except FileNotFoundError as exc:
-        click.echo(str(exc))
-        raise SystemExit(2)
-
-    problems = validate_definition(definition)
-    if not problems:
-        click.echo("no problems found")
-        raise SystemExit(0)
-
-    for problem in problems:
-        click.echo(f"  {problem}")
-    raise SystemExit(1)
-
-
-@workflow.command()
-@click.argument("packet", type=click.Path(exists=True, file_okay=False))
-@click.option("--workflow", "workflow_path", required=True,
-              help="Path to the workflow definition.")
-@click.option("--deck", required=True, help="Deck root, for role and read resolution.")
-@click.option("--node", required=True, help="The node that just ran.")
-@click.option("--agent", default=None, help="Which family performed the pass.")
-@click.option("--session", default=None, help="Session id of the performer.")
-@click.option("--question", default=None,
-              help="Raise a gate after recording — how a stuck pass blocks itself.")
-def record(packet: str, workflow_path: str, deck: str, node: str, agent: str | None,
-           session: str | None, question: str | None):
-    """Record a completed pass.
-
-    Invoked after a pass that already ran outside this loop's view, once it
-    is done writing. Writes the completion fact — what it wrote, and what it
-    read — then raises exactly one gate: `--question` if given, otherwise
-    the node's declared review gate, never both.
-
-    Unlike `step`, which resolves a job's reads before dispatching it, this
-    command has no "before" to resolve against — it only runs after the
-    pass is already done. Its "read" is therefore resolved against the
-    directory as it stands right now, at record time, which can include
-    something the pass itself just wrote, not a snapshot of what the pass
-    actually had in front of it when it ran.
-    """
-    definition = _load_workflow_or_exit(workflow_path)
-
-    if node not in definition.get("nodes", {}):
-        click.echo(f"no node {node!r} in this workflow")
-        raise SystemExit(2)
-
-    resolved = resolve_job(Path(packet), Path(deck), definition, node)
-    result = orchestrator.record(
-        Path(packet), definition, Path(workflow_path), resolved,
-        agent=agent, by=session, question=question,
-    )
-
-    click.echo(f"recorded {result.node}")
-    if result.gate == "question":
-        click.echo(f"raised a gate: {question}")
-    elif result.gate == "declaration":
-        click.echo("raised the declared review gate")
-
-    raise SystemExit(0)
-
-
-@workflow.command()
-@click.argument("packet", type=click.Path(exists=True, file_okay=False))
-@click.option("--workflow", "workflow_path", required=True,
-              help="Path to the workflow definition.")
-@click.option("--node", required=True, help="Where the cursor moves to.")
-@click.option("--note", required=True, help="Why a human moved it. Free text.")
-def goto(packet: str, workflow_path: str, node: str, note: str):
-    """Move the cursor by hand — jump forward, skip a stage, or redo one.
-
-    Appends a `resumed_at` fact naming NODE as the new cursor. The only
-    thing this refuses is a target that is not declared; moving backwards to
-    redo a stage is ordinary use, not a special case. The only thing this
-    forbids outright is moving without a reason, which is why --note is
-    required.
-    """
-    definition = _load_workflow_or_exit(workflow_path)
-
-    if node not in definition.get("nodes", {}):
-        click.echo(f"no node {node!r} in this workflow")
-        raise SystemExit(2)
-
-    append_fact(Path(packet), {"type": "resumed_at", "node": node, "note": note})
-    click.echo(f"cursor moved to {node}: {note}")
-    raise SystemExit(0)
-
-
-@workflow.command()
-@click.argument("packet", type=click.Path(exists=True, file_okay=False))
-@click.option("--workflow", "workflow_path", required=True)
-@click.option("--deck", required=True, help="Deck root, for role and read resolution.")
-@click.option("--dispatch", "dispatch_cmd", default=None,
-              help="Command receiving the job as JSON on stdin. Omit to print and stop.")
-@click.option("--once", is_flag=True, help="One turn, then exit.")
-@click.option("--max-turns", "max_turns", default=DEFAULT_MAX_TURNS, show_default=True,
-              help="Stop after this many turns rather than loop forever.")
-def run(packet: str, workflow_path: str, deck: str, dispatch_cmd: str | None, once: bool,
-        max_turns: int):
-    """Drive the loop until it stops. The driver holds nothing."""
-    definition = _load_workflow_or_exit(workflow_path)
-
-    if dispatch_cmd is None:
-        result = derive_next_node(Path(packet), definition)
-        if result.outcome != Outcome.RUNNABLE:
-            click.echo(f"{result.outcome}: {result.reason}")
-            raise SystemExit(0)
-        resolved = resolve_job(Path(packet), Path(deck), definition, result.node)
-        click.echo(json_module.dumps(resolved.to_dict(), indent=2))
-        click.echo("no dispatcher configured; pass --dispatch to execute")
-        raise SystemExit(0)
-
-    def dispatch(job):
-        subprocess.run(
-            [dispatch_cmd],
-            input=json_module.dumps(job.to_dict()),
-            text=True,
-            check=True,
-        )
-
-    turns = 0
-    while True:
-        turns += 1
-        if turns > max_turns:
-            click.echo(
-                f"stopped after {max_turns} turns without completing; a guard that "
-                "never changes under its own node's completion would otherwise "
-                "dispatch forever unattended. Pass --max-turns to raise the bound."
-            )
-            raise SystemExit(1)
-
-        outcome = orchestrator.step(
-            Path(packet), Path(deck), definition, Path(workflow_path), dispatch
-        )
-        click.echo(f"{outcome.status}: {outcome.node or '-'}  {outcome.detail}")
-        if outcome.status != "completed" or once:
-            raise SystemExit(0 if outcome.status in ("completed", "terminal", "blocked") else 1)
-
-
-@workflow.command()
-@click.argument("packet", type=click.Path(exists=True, file_okay=False))
-@click.option("--workflow", "workflow_path", required=True)
-@click.option("--deck", required=True, help="Deck root, for role and read resolution.")
-@click.option("--node", default=None, help="Override; otherwise derive.")
+@workflow.command(name="next")
+@click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
+@click.option("--workflow", "workflow_opt", default=None, help="Bind or override the workflow.")
 @click.option("--json", "as_json", is_flag=True)
-def job(packet: str, workflow_path: str, deck: str, node: str | None, as_json: bool):
-    """Emit a fully resolved job for PACKET — absolute paths, no templates."""
-    definition = _load_workflow_or_exit(workflow_path)
-    chosen = node
-    if chosen is None:
-        result = derive_next_node(Path(packet), definition)
-        if result.outcome != Outcome.RUNNABLE:
-            click.echo(f"{result.outcome}: {result.reason}")
-            raise SystemExit(1)
-        chosen = result.node
-    elif chosen not in definition.get("nodes", {}):
-        click.echo(f"no node {chosen!r} in this workflow")
-        raise SystemExit(2)
+def next_cmd(packet: Path, workflow_opt: str | None, as_json: bool):
+    """What to run next, or why nothing can run."""
+    workflow, facts = _load(packet, workflow_opt)
+    pos = session.next_node(workflow, facts)
 
-    resolved = resolve_job(Path(packet), Path(deck), definition, chosen)
     if as_json:
-        click.echo(json_module.dumps(resolved.to_dict(), indent=2))
-        raise SystemExit(0)
+        out = _describe(packet, pos)
+        if pos.state == State.WAITING:
+            out["question"] = pos.question
+        click.echo(json.dumps(out))
+        sys.exit(1 if pos.state == State.UNKNOWN else 0)
 
-    click.echo(f"node:   {resolved.node}")
-    click.echo(f"role:   {resolved.role}")
-
-    # Every declared glob's outcome, reported against `Job.unmatched` — the
-    # same verdict `resolve_job` already reached — rather than a second,
-    # independent match computed here. A glob that resolved is re-listed
-    # through the identical call `resolve_job` made (`Path.glob`, not a
-    # basename comparison), so a glob naming a subdirectory reports
-    # correctly instead of always missing.
-    declared_reads = definition.get("nodes", {}).get(chosen, {}).get("reads") or []
-    packet_path = Path(packet)
-    for glob in declared_reads:
-        if glob in resolved.unmatched:
-            click.echo(f"read:   {glob} (no match)")
-            continue
-        for path in sorted(str(p.resolve()) for p in packet_path.glob(glob)):
-            click.echo(f"read:   {glob} -> {path}")
-
-    for path in resolved.writes:
-        click.echo(f"write:  {path}")
-    raise SystemExit(0)
+    if pos.state == State.RUNNABLE:
+        click.echo(f"node: {pos.node.name}")
+        click.echo(f"program: {pos.node.program}")
+        click.echo(f"write: {packet / pos.node.writes}")
+        if pos.note:
+            click.echo(f"note:  {json.dumps(pos.note)}")
+    elif pos.state == State.WAITING:
+        click.echo(f"waiting on: {pos.question}            (after node {pos.after})")
+    elif pos.state == State.COMPLETE:
+        click.echo("complete")
+    else:
+        _fail(f"unknown node in session: {pos.after}", code=1)
 
 
 @workflow.command()
-@click.argument("packet", type=click.Path(exists=True, file_okay=False))
-@click.option("--note", required=True, help="What you decided. Free text.")
-def resolve(packet: str, note: str):
-    """Clear the outstanding question with a free-text note."""
-    outstanding = unresolved_needs_human(read_entries(Path(packet)))
-    if outstanding is None:
-        click.echo("nothing outstanding to resolve")
-        raise SystemExit(1)
+@click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
+@click.option("--node", required=True)
+@click.option("--agent", required=True, help="Who performed the program: claude, codex, ...")
+@click.option("--question", default=None, help="Ask the human before the next node.")
+@click.option("--workflow", "workflow_opt", default=None)
+@click.option("--force", is_flag=True, help="Finish a node the workflow is not on.")
+def done(packet: Path, node: str, agent: str, question: str | None,
+         workflow_opt: str | None, force: bool):
+    """Record that a node finished. Refuses a node the workflow is not on."""
+    workflow, facts = _load(packet, workflow_opt)
+    target = workflow.node(node)
+    if target is None:
+        _fail(f"'{node}' is not a node of {workflow.name}: "
+              + ", ".join(s.name for s in workflow.nodes))
+    pos = session.next_node(workflow, facts)
+    if not force:
+        if pos.state == State.WAITING:
+            _fail(f"waiting on: {pos.question} (after node {pos.after}); "
+                  "answer it with `note`, or move with `goto`")
+        if pos.state == State.COMPLETE:
+            _fail(f"{workflow.name} is complete; `goto` a node to run it again")
+        if pos.node is None or pos.node.name != node:
+            on = pos.node.name if pos.node else pos.after
+            _fail(f"the workflow is on {on}, not {node}; --force records it anyway")
 
-    append_fact(
-        Path(packet),
-        {
-            "type": "human_resolved",
-            "event_id": uuid.uuid4().hex[:12],
-            "at": datetime.now().astimezone().isoformat(timespec="seconds"),
-            "resolves": outstanding.get("event_id"),
-            "note": note,
-        },
-    )
-    click.echo(f"resolved {outstanding.get('event_id')}")
-    raise SystemExit(0)
+    fact = {"type": "done", "node": node, "agent": agent,
+            "wrote": [target.writes] if (packet / target.writes).exists() else []}
+    if question:
+        fact["question"] = question
+    if force:
+        fact["forced"] = True
+    session.append(packet, fact)
+    click.echo(f"done: {node}" + (f" (asks: {question})" if question else ""))
+
+
+@workflow.command()
+@click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
+@click.argument("text")
+def note(packet: Path, text: str):
+    """Answer the open gate. The text is handed to the next program verbatim."""
+    workflow, facts = _load(packet, None)
+    pos = session.next_node(workflow, facts)
+    if pos.state != State.WAITING:
+        _fail("no gate is open")
+    last = [f for f in facts if f["type"] in session.ROUTING][-1]
+    session.append(packet, {"type": "note", "resolves": last["id"], "text": text})
+    click.echo(f"noted; next: {pos.node.name if pos.node else 'complete'}")
+
+
+@workflow.command()
+@click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
+@click.option("--node", required=True, help="The node to run next.")
+@click.option("--why", required=True)
+@click.option("--workflow", "workflow_opt", default=None)
+def goto(packet: Path, node: str, why: str, workflow_opt: str | None):
+    """Point the workflow at a node. Clears any open gate; `why` is the note."""
+    workflow, _ = _load(packet, workflow_opt)
+    if workflow.node(node) is None:
+        _fail(f"'{node}' is not a node of {workflow.name}: "
+              + ", ".join(s.name for s in workflow.nodes))
+    session.append(packet, {"type": "goto", "node": node, "why": why})
+    click.echo(f"next: {node}")
+

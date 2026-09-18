@@ -1,6 +1,6 @@
-# capabilities — the deck bank
+# capabilities
 
-A bank of **decks**, each a self-contained bundle of operators and skills for
+A tree of **capabilities**, each a self-contained bundle of programs and skills for
 one purpose.
 
 | Tool | Owns |
@@ -9,8 +9,8 @@ one purpose.
 | [`orglens`](https://github.com/saptaxis/orglens) | what exists, how it is filed, what state it is in |
 | `capabilities/` (here) | what you *do* with those — method, glued to the tools |
 
-**The dependency arrow points one way: decks → the tools, never the reverse.**
-The orglens engine has no reference to `capabilities/` at all, so a deck is
+**The dependency arrow points one way: capabilities → the tools, never the reverse.**
+The orglens engine has no reference to `capabilities/` at all, so a capability is
 invoked *through* the tools and stays independently discardable.
 
 This tree is **orglens-governed content** — the same relationship a documents
@@ -18,46 +18,40 @@ tree has with orglens. The engine reads this tree's grammar
 (`.orglens-grammar.yml`) and content. A **grammar** describes an entire tree; a
 **declaration** (`.orglens.yml`) describes one unit within it.
 
-## The model: bank → deck → card
+## The model: capability → program
 
-- **Bank** — this directory. All decks under one roof, one grammar.
-- **Deck** — a themed, self-contained bundle: operators and/or skills for a
-  purpose, plus the packs and state they need. Two kinds:
-  - **Method decks** (general, cross-domain) — inception / verification /
-    communication operators. Domain-agnostic; the packs carry the taste.
-  - **Domain decks** (one recurring real task) — a full workflow with its own
-    vocabulary and state.
-- **Card** — a single operator or skill you deal out: a `SKILL.md`, an operator
-  prompt, a named agent.
+- **Capability** — a self-contained bundle for one purpose: programs, skills,
+  what they read, and a workflow if the programs run in order.
+- **Program** — what one node of a workflow runs. One file, one pass, one
+  file written, performed by whoever is at the packet.
+- **Skill** — a `SKILL.md` a harness loads on its own triggers. A capability can be
+  skills alone, with no workflow.
 
-New decks accrete over time. A deck is just a directory — port one in or out
-freely. See [`CONVENTIONS.md`](CONVENTIONS.md) for the anatomy, and the caveat
-that it was reverse-engineered from one deck rather than designed.
+New capabilities accrete over time. A capability is just a directory — port one in or out
+freely. See [`CONVENTIONS.md`](CONVENTIONS.md) for the anatomy.
 
-**Both kinds are only illustrated here, not shipped.** The decks that carried
-personal method moved to `orglens-extras` — see *Private decks* below. What
-remains is `tutorial`, and it is not a stand-in: it is the check that the
-engine is generic.
+The capabilities that carry personal method live in `orglens-extras` — see *Private
+capabilities* below. What ships here is `tutorial`, and it is not a stand-in: it is
+the check that the engine is generic.
 
 ## Layout
 
 ```
 orglens/
-  bootstrap                # install the tool, route every deck's skills
+  bootstrap                # install the tool, route every capability's skills
   capabilities/
-    .orglens-grammar.yml   # grammar: deck, operator, pack, agent as artifact types
-    CONVENTIONS.md         # what a deck is — the anatomy to copy when adding one
-    decks/
-      tutorial/            # a three-node loop, run in five minutes
-        DECK.md
-        roles/             reproduce / fix / verify
-        WORKFLOW.yaml
-      <next deck>/         # the bank grows here
+    .orglens-grammar.yml   # grammar: capability as the unit; program, skill, reference as artifacts
+    CONVENTIONS.md         # what a capability is — the anatomy to copy when adding one
+    tutorial/              # a three-node workflow, run in five minutes
+      README.md
+      WORKFLOW.yaml
+      programs/            reproduce / fix / verify
+    <next capability>/     # the tree grows here
 ```
 
-`tutorial` is the only deck this repo ships. It is a bug-triage loop and shares no vocabulary with any writing deck, so it tests that the engine carries none of its own. Decks about work that cannot be published live in `orglens-extras`.
+`tutorial` is the only capability this repo ships. It is a bug-triage workflow and shares no vocabulary with any writing capability, so it tests that the engine carries none of its own. The engine is `orglens workflow`: a workflow is an ordered list of nodes in `WORKFLOW.yaml`, each naming a program and the one file it writes; a packet is a directory; its `session.jsonl` is an append-only record of what finished, what was asked, and what was answered. Capabilities about work that cannot be published live in `orglens-extras`.
 
-Canonical prompts live here once. `bootstrap` routes each deck's cards out with `npx skills add`, which walks a repo and owns the harness path table — a wrong skills path fails silently, so the tool decides it rather than a list here. Cards install as **copies**, not symlinks, so re-run `bootstrap` after editing one.
+`bootstrap` routes each capability's skills out with `npx skills add`, which walks a repo and owns the harness path table — a wrong skills path fails silently, so the tool decides it rather than a list here. Skills install as **copies**, not symlinks, so re-run `bootstrap` after editing one.
 
 ## Install
 
@@ -66,10 +60,10 @@ From the repo root — installs orglens into its own venv and routes the skills 
 ```bash
 ./bootstrap                                    # editable, for co-developing
 ./bootstrap --pinned                           # a clean machine
-./bootstrap --extras ~/code/orglens-extras     # include the private decks
+./bootstrap --extras ~/code/orglens-extras     # include the private capabilities
 ```
 
-A repo without a `pyproject.toml` is a deck repo: its skills are routed and nothing is pip-installed. scad installs itself from its own repo — the dependency runs one way, and `bootstrap` says so rather than reaching across.
+A repo without a `pyproject.toml` is a capability repo: its skills are routed and nothing is pip-installed. scad installs itself from its own repo — the dependency runs one way, and `bootstrap` says so rather than reaching across.
 
 To undo it:
 
@@ -84,16 +78,18 @@ It prints what it would remove and confirms once before doing any of it. `~/.age
 
 ## Status
 
-Scaffold. Structure defined; **decks and operators harvested as they prove themselves on real problems — not designed up front.** The first domain deck was built before the pattern was named, and moved to `orglens-extras` when this repo went public — the anatomy it demonstrated is what stayed.
+Structure defined; capabilities harvested as they prove themselves on real problems,
+not designed up front. The first working capability was built before the pattern was
+named and moved to `orglens-extras` when this repo went public.
 
-## Private decks
+## Private capabilities
 
-Decks about work that cannot be published live in a second repo, `orglens-extras`, with the same `capabilities/decks/` shape. Which repo a deck sits in *is* the public/private line — there is no list here, no flag in the engine, and nothing for orglens to read: the engine has no reference to `capabilities/` at all.
+Capabilities about work that cannot be published live in a second repo, `orglens-extras`, with the same `capabilities/` shape. Which repo a capability sits in *is* the public/private line — there is no list here, no flag in the engine, and nothing for orglens to read: the engine has no reference to `capabilities/` at all.
 
-Installing a second deck repo needs no extra machinery, because skills install by walking a repo:
+Installing a second capability repo needs no extra machinery, because skills install by walking a repo:
 
 ```bash
 ./bootstrap --extras ~/code/orglens-extras
 ```
 
-which is the same `npx skills add . -g -a '*' -y --full-depth`, run once per repo. There is nothing to configure and nothing that remembers the answer.
+which is the same `npx skills add . -g -a '*' -y --full-depth`, run once per repo.

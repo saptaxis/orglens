@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# orglens bootstrap — set a machine up for orglens and its decks.
+# orglens bootstrap — set a machine up for orglens and its capabilities.
 #
 # Usage:
 #   ./bootstrap                              # editable install, plus this repo's skills
 #   ./bootstrap --pinned                     # non-editable, for a clean machine
-#   ./bootstrap --extras ~/code/orglens-extras   # include a private deck repo
+#   ./bootstrap --extras ~/code/orglens-extras   # include a private capabilities repo
 #   ./bootstrap --no-skills                  # install the tool, route no skills
 #   ./bootstrap --dry-run                    # print the commands, run nothing
 #   ./bootstrap --uninstall                  # remove the tool and its skills, keep data
@@ -28,7 +28,7 @@ set -euo pipefail
 #   symlink `configs/*` into `~/.scad`, `~/.config/orglens` and `~/.claude`.
 #   Those directories only ever held a `.gitkeep`.
 #
-# A repo without a `pyproject.toml` is a deck repo: its skills are routed and
+# A repo without a `pyproject.toml` is a capabilities repo: its skills are routed and
 # nothing is pip-installed. That is how `orglens-extras` works today, and it
 # keeps working unchanged the day it grows a package.
 
@@ -64,7 +64,7 @@ install_package() {
     # two never share a dependency resolution.
     local repo="$1" name="$2" venv="$SHARE_DIR/$2/venv"
     if [ ! -f "$repo/pyproject.toml" ]; then
-        echo "  $name: no pyproject.toml — deck repo, nothing to install"
+        echo "  $name: no pyproject.toml — capabilities repo, nothing to install"
         return
     fi
     echo "  $name: installing into $venv$([ "$EDITABLE" = true ] && echo ' (editable)')"
@@ -107,7 +107,7 @@ route_skills() {
 # list and asks first: a name collision would otherwise remove someone else's
 # skill silently.
 #
-# It never touches `~/.orglens` or `~/.config/orglens`. The event log there is
+# It never touches `~/.orglens`. The event log there is
 # the one thing in this system that cannot be recomputed — an attribution
 # exists because a person said so, not because the filesystem could answer —
 # so removing it is a deliberate act, not a flag on an installer.
@@ -162,8 +162,8 @@ if [ "$UNINSTALL" = true ]; then
     fi
     echo
     echo "kept, and not this script's to delete:"
-    echo "  ~/.orglens/events/      attributions — cannot be recomputed"
-    echo "  ~/.config/orglens/      your config"
+    echo "  ~/.orglens/             your config, the snapshot cache, and"
+    echo "                          the attributions, which cannot be recomputed"
     echo
 
     # One prompt for the whole operation. An uninstall that half-runs without

@@ -41,6 +41,16 @@ class Home:
     how: str  # marker | remote | name | absent | declaring
 
 
+def repo_of(name: str) -> str:
+    """The repository segment of a home name.
+
+    A home is named `<repo>` or `<repo>/<path within it>`. Everything that
+    keys by repository — a scad mount, a container cwd, the remote and
+    directory-name rungs below — wants the first segment and nothing else.
+    """
+    return name.partition("/")[0]
+
+
 def normalise_remote(url: str) -> str | None:
     """The owner/repo tail of a git remote, host and alias discarded."""
     if not url:
@@ -56,6 +66,28 @@ def normalise_remote(url: str) -> str | None:
 
 
 def _remote_of(path: Path) -> str | None:
+    """The origin remote, read from `.git/config`.
+
+    A file read, not a subprocess: the sweep visits every checkout under the
+    roots on every command, and `git remote get-url` per checkout was 1.4s
+    of a 9s `status`. A worktree's `.git` is a file pointing elsewhere; that
+    one case still asks git.
+    """
+    dot_git = path / ".git"
+    if dot_git.is_dir():
+        try:
+            text = (dot_git / "config").read_text()
+        except OSError:
+            return None
+        section = None
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("["):
+                section = stripped
+            elif section == '[remote "origin"]' and stripped.startswith("url"):
+                _, _, url = stripped.partition("=")
+                return normalise_remote(url.strip())
+        return None
     try:
         result = subprocess.run(
             ["git", "-C", str(path), "remote", "get-url", "origin"],
@@ -71,7 +103,12 @@ def _remote_of(path: Path) -> str | None:
 def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candidate]:
     """Every directory under the roots that could be a home, with its evidence."""
     found: list[Candidate] = []
-    seen: set[Path] = set()
+    # The depth each directory was reached at. Roots may overlap — `docs`
+    # and `docs/research/prog` both listed — and the nested one exists to
+    # reach deeper than the outer one's bound allows. So a directory already
+    # reported is walked again when a later root reaches it with more depth
+    # to spend, but reported only once.
+    seen: dict[Path, int] = {}
 
     def walk(base: Path, depth: int) -> None:
         if depth > max_depth:
@@ -83,18 +120,19 @@ def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candid
         for child in children:
             if child.name.startswith("."):
                 continue
-            if child in seen:
+            if child in seen and seen[child] <= depth:
                 continue
-            seen.add(child)
-            marker = read_marker(child)
-            found.append(
-                Candidate(
-                    path=child,
-                    name=child.name,
-                    marker_home=marker.home if marker else None,
-                    remote=_remote_of(child) if (child / ".git").exists() else None,
+            if child not in seen:
+                marker = read_marker(child)
+                found.append(
+                    Candidate(
+                        path=child,
+                        name=child.name,
+                        marker_home=marker.home if marker else None,
+                        remote=_remote_of(child) if (child / ".git").exists() else None,
+                    )
                 )
-            )
+            seen[child] = depth
             walk(child, depth + 1)
 
     for root in roots:
@@ -104,7 +142,21 @@ def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candid
         # candidate paths that match none of them — and match failure is
         # silent, because a lookup returns empty rather than raising.
         # Resolving once at the root means every path downstream is resolved.
-        walk(Path(root).expanduser().resolve(), 1)
+        top = Path(root).expanduser().resolve()
+        # A root that is itself a repository, or declares itself, is a
+        # candidate in its own right: a checkout whose parent holds
+        # everything has no narrower root to list. A plain directory is a
+        # container and stays out, or its basename could answer for a home
+        # by coincidence.
+        if top not in seen and ((top / ".git").exists() or read_marker(top)):
+            marker = read_marker(top)
+            found.append(Candidate(
+                path=top, name=top.name,
+                marker_home=marker.home if marker else None,
+                remote=_remote_of(top) if (top / ".git").exists() else None,
+            ))
+            seen[top] = 0
+        walk(top, 1)
     return found
 
 
@@ -116,7 +168,8 @@ def _rungs(name: str, candidates: list[Candidate]):
     `candidates_for`, which wants every pair at that same rung — the
     difference between "the answer" and "everyone who could have answered".
     """
-    repo, _, subpath = name.partition("/")
+    repo = repo_of(name)
+    subpath = name.partition("/")[2]
 
     def spoken_for(c: Candidate) -> bool:
         # A directory carrying a marker has already answered what home it is.

@@ -36,7 +36,7 @@ def test_touched_is_the_newest_commit_across_homes(tmp_path):
     _commit(docs, "2020-01-01T00:00:00")
     _commit(code, "2024-06-01T00:00:00")
 
-    act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
+    act = activity.read([docs, code], "unit")
 
     newer = int(
         __import__("datetime")
@@ -57,134 +57,47 @@ def test_plan_is_the_highest_numbered_plan_across_homes(tmp_path):
     (docs / "plans" / "03-thing-Feb032026.md").write_text("# 03\n")
     (code / "plans" / "07-thing-Feb072026.md").write_text("# 07\n")
 
-    act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
+    act = activity.read([docs, code], "unit")
 
     assert act.plan == "07"
 
 
+def _chain_packet(directory, gate: bool):
+    """A workflow packet: a session log, with an unanswered question if `gate`."""
+    from orglens.workflow import session
+    directory.mkdir(parents=True)
+    session.bind(directory, directory / "WORKFLOW.yaml")
+    fact = {"type": "done", "node": "one", "agent": "claude"}
+    if gate:
+        fact["question"] = "which way?"
+    session.append(directory, fact)
+
+
 def test_packets_are_summed_across_homes(tmp_path):
-    """A workflow packet in the code home must not go uncounted because the
-    docs home happened to be listed first and holds none.
-    """
     docs = tmp_path / "docs"
     code = tmp_path / "code"
-    (docs / "packet-a").mkdir(parents=True)
-    (code / "packet-b").mkdir(parents=True)
-    (docs / "packet-a" / "runs.jsonl").write_text("")
-    (code / "packet-b" / "runs.jsonl").write_text("")
+    _chain_packet(docs / "packet-a", gate=False)
+    _chain_packet(code / "packet-b", gate=False)
+    # The old engine's log is not a packet any more.
+    (code / "old").mkdir()
+    (code / "old" / "runs.jsonl").write_text("")
 
-    act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
+    act = activity.read([docs, code], "unit")
 
     assert act.packets == 2
 
 
-def test_blocked_packets_are_summed_across_homes(tmp_path):
+def test_blocked_packets_are_the_ones_with_an_open_gate(tmp_path):
     docs = tmp_path / "docs"
     code = tmp_path / "code"
-    (docs / "packet-a").mkdir(parents=True)
-    (code / "packet-b").mkdir(parents=True)
-    (docs / "packet-a" / "runs.jsonl").write_text(
-        json.dumps({"type": "needs_human", "event_id": "e1"}) + "\n"
-    )
-    (code / "packet-b" / "runs.jsonl").write_text(
-        json.dumps({"type": "needs_human", "event_id": "e2"}) + "\n"
-    )
+    _chain_packet(docs / "packet-a", gate=True)
+    _chain_packet(code / "packet-b", gate=True)
+    _chain_packet(code / "packet-c", gate=False)
 
-    act = activity.read([docs, code], "unit", index=tmp_path / "absent.sqlite")
+    act = activity.read([docs, code], "unit")
 
+    assert act.packets == 3
     assert act.blocked == 2
-
-
-class TestLivenessJoinsByCwd:
-    """A live session is joined to a unit by where its process is actually
-    running, the same evidence `_sessions` uses — not by scad's `project`
-    column, which is exactly the coincidence this branch exists to delete.
-    """
-
-    def _registry(self, tmp_path, sessions):
-        registry = tmp_path / "sessions"
-        registry.mkdir()
-        for i, (session_id, cwd) in enumerate(sessions):
-            (registry / f"proc-{i}.json").write_text(
-                json.dumps({"pid": __import__("os").getpid(), "sessionId": session_id, "cwd": cwd})
-            )
-        return registry
-
-    def test_a_live_session_in_the_units_home_is_seen(self, tmp_path, monkeypatch):
-        home = tmp_path / "code" / "orglens"
-        home.mkdir(parents=True)
-        registry = self._registry(tmp_path, [("s1", str(home))])
-        monkeypatch.setattr(activity, "LIVE_REGISTRY", registry)
-        activity._live_entries.cache_clear()
-
-        act = activity.read([home], "orglens", index=tmp_path / "absent.sqlite")
-
-        assert act.live_sessions == 1
-
-    def test_a_live_session_filed_under_a_different_project_by_scad_is_still_seen(
-        self, tmp_path, monkeypatch
-    ):
-        """The reproduction: a live session running in a unit's docs home,
-        which scad's index files under the docs repository's own project
-        name (`traitful-docs`, say) rather than the unit's name. Joining on
-        `project` misses it entirely; joining on cwd does not.
-        """
-        docs_home = tmp_path / "traitful-docs" / "docs" / "projects" / "widget"
-        docs_home.mkdir(parents=True)
-        index = tmp_path / "index.sqlite"
-        import sqlite3
-
-        db = sqlite3.connect(index)
-        db.execute(
-            "create table sessions (id text primary key, kind text not null, "
-            "agent text not null, machine text not null, cwd text, project text, "
-            "title text, name text, started integer, ended integer, "
-            "n_turns integer not null default 0, grade text not null default '', "
-            "source text not null default '', needs text, outcome text)"
-        )
-        db.execute(
-            "insert into sessions (id, kind, agent, machine, cwd, project, n_turns) "
-            "values ('s1', 'main', 'claude', 'test', ?, 'traitful-docs', 0)",
-            (str(docs_home),),
-        )
-        db.commit()
-        db.close()
-
-        registry = self._registry(tmp_path, [("s1", str(docs_home))])
-        monkeypatch.setattr(activity, "LIVE_REGISTRY", registry)
-        activity._live_entries.cache_clear()
-
-        act = activity.read([docs_home], "widget", index=index)
-
-        assert act.live_sessions == 1
-
-    def test_a_live_session_elsewhere_is_not_seen(self, tmp_path, monkeypatch):
-        home = tmp_path / "code" / "orglens"
-        other = tmp_path / "code" / "something-else"
-        home.mkdir(parents=True)
-        other.mkdir(parents=True)
-        registry = self._registry(tmp_path, [("s1", str(other))])
-        monkeypatch.setattr(activity, "LIVE_REGISTRY", registry)
-        activity._live_entries.cache_clear()
-
-        act = activity.read([home], "orglens", index=tmp_path / "absent.sqlite")
-
-        assert act.live_sessions == 0
-
-    def test_a_live_session_matches_a_container_cwd_by_home_name(
-        self, tmp_path, monkeypatch
-    ):
-        home = tmp_path / "code" / "orglens"
-        home.mkdir(parents=True)
-        registry = self._registry(tmp_path, [("s1", "/workspace/orglens")])
-        monkeypatch.setattr(activity, "LIVE_REGISTRY", registry)
-        activity._live_entries.cache_clear()
-
-        act = activity.read(
-            [home], "orglens", index=tmp_path / "absent.sqlite", home_names=["orglens"]
-        )
-
-        assert act.live_sessions == 1
 
 
 class TestPeek:
@@ -198,7 +111,7 @@ class TestPeek:
         home.mkdir(parents=True)
         (home / "f.txt").write_text("x")
 
-        act = activity.peek([home], "widget", index=tmp_path / "absent.sqlite")
+        act = activity.peek([home], "widget")
 
         assert act.modified is not None
         # Never ran a git subprocess, so there is nothing to report here —
@@ -207,38 +120,67 @@ class TestPeek:
         assert act.dirty == 0
 
     def test_it_reports_the_last_session_time(self, tmp_path):
-        import sqlite3
+        from orglens.sessions import Session
 
         home = tmp_path / "code" / "widget"
         home.mkdir(parents=True)
-        db_path = tmp_path / "index.sqlite"
-        db = sqlite3.connect(db_path)
-        db.execute(
-            "create table sessions (id text primary key, kind text not null, "
-            "agent text not null, machine text not null, cwd text, project text, "
-            "title text, name text, started integer, ended integer, "
-            "n_turns integer not null default 0, grade text not null default '', "
-            "source text not null default '', needs text, outcome text)"
-        )
-        db.execute("create table turns (session_id text, ts text, role text, text text)")
-        db.execute(
-            "insert into sessions (id, kind, agent, machine, cwd, started, ended) "
-            "values ('s1', 'main', 'claude', 'test', ?, 1000, 2000)",
-            (str(home),),
-        )
-        db.commit()
-        db.close()
+        s1 = Session(id="s1", agent="claude", cwd=str(home), started=1000, ended=2000,
+                     turns=1, label=None, outcome=None, live=False,
+                     units=frozenset({"widget"}), how="containment")
 
-        act = activity.peek([home], "widget", index=db_path)
+        act = activity.peek([home], "widget", sessions=[s1])
 
         assert act.sessions == 1
         assert act.last_session == 2
 
-    def test_no_index_and_no_files_is_ordinary_not_an_error(self, tmp_path):
+    def test_no_scad_and_no_files_is_ordinary_not_an_error(self, tmp_path):
         home = tmp_path / "ghost"
         home.mkdir()
 
-        act = activity.peek([home], "ghost", index=tmp_path / "absent.sqlite")
+        act = activity.peek([home], "ghost")
 
         assert act.sessions == 0
         assert act.last_session is None
+
+
+class TestGitCostsOncePerRepo:
+    """`status` used to run three git subprocesses per home. The root is
+    found by walking up to `.git`, and `git status` runs once per repository
+    however many homes it holds."""
+
+    def test_repo_root_is_found_without_running_git(self, tmp_path, monkeypatch):
+        import subprocess as sp
+        repo = tmp_path / "repo"
+        deep = repo / "docs" / "projects" / "x"
+        deep.mkdir(parents=True)
+        (repo / ".git").mkdir()
+        monkeypatch.setattr(sp, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("git was run")))
+
+        assert activity._repo_root(deep) == repo
+        assert activity._repo_root(tmp_path / "nowhere") is None
+
+    def test_a_worktree_git_file_counts_as_a_root(self, tmp_path):
+        repo = tmp_path / "wt"
+        (repo / "sub").mkdir(parents=True)
+        (repo / ".git").write_text("gitdir: /elsewhere/.git/worktrees/wt\n")
+        assert activity._repo_root(repo / "sub") == repo
+
+    def test_dirty_runs_git_status_once_per_repo(self, tmp_path, monkeypatch):
+        import subprocess as sp
+        repo = tmp_path / "repo"
+        a, b = repo / "a", repo / "b"
+        a.mkdir(parents=True); b.mkdir()
+        sp.run(["git", "init", "-q"], cwd=repo, check=True)
+        (a / "one.txt").write_text("x"); (a / "two.txt").write_text("y")
+        (b / "three.txt").write_text("z")
+
+        calls = []
+        real = activity._git
+        def spy(args, cwd):
+            calls.append(args[0]); return real(args, cwd)
+        monkeypatch.setattr(activity, "_git", spy)
+        activity._status_lines.cache_clear()
+
+        assert activity._dirty(repo, a) == 2
+        assert activity._dirty(repo, b) == 1
+        assert calls.count("status") == 1

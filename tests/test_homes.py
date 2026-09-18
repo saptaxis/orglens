@@ -6,6 +6,7 @@ from orglens.homes import (
     Candidate,
     candidates_for,
     normalise_remote,
+    repo_of,
     resolve_home,
     scan_roots,
 )
@@ -168,3 +169,81 @@ def test_a_root_reached_through_a_symlink_yields_resolved_paths(tmp_path):
     home = resolve_home("world-model-ladder", scan_roots([link]))
     assert home.path == (real / "world-model-ladder").resolve()
     assert "via-symlink" not in home.path.parts
+
+
+def test_a_nested_root_reaches_past_the_outer_root_depth_bound(tmp_path):
+    # With `docs` and `docs/research/prog` both listed, a marker at
+    # `docs/research/prog/articles/piece` is depth 4 from the first root and
+    # depth 2 from the second. It has to be found: the setup note prescribes
+    # adding the nested root as the remedy for anything past the bound.
+    docs = tmp_path / "docs"
+    prog = docs / "research" / "prog"
+    piece = prog / "articles" / "piece"
+    piece.mkdir(parents=True)
+    (piece / MARKER).write_text("home: piece\n")
+
+    candidates = scan_roots([docs, prog])
+    assert resolve_home("piece", candidates).how == "marker"
+
+
+def test_overlapping_roots_report_each_directory_once(tmp_path):
+    docs = tmp_path / "docs"
+    prog = docs / "research" / "prog"
+    prog.mkdir(parents=True)
+
+    candidates = scan_roots([docs, prog])
+    paths = [c.path for c in candidates]
+    assert len(paths) == len(set(paths))
+
+
+def test_repo_of_is_the_first_segment_of_a_home_name():
+    # `traitful-docs/docs/projects/orglens` is a subpath inside the
+    # `traitful-docs` repository; a bare name is its own repository.
+    assert repo_of("traitful-docs/docs/projects/orglens") == "traitful-docs"
+    assert repo_of("orglens") == "orglens"
+
+
+def test_a_remote_is_read_from_git_config_without_running_git(tmp_path, monkeypatch):
+    # The sweep runs once per command over every checkout under the roots;
+    # a subprocess per checkout was 1.4s of a 9s `status`. The URL is in
+    # `.git/config`, which is a file.
+    import subprocess as sp
+    from orglens import homes
+    d = tmp_path / "some-checkout"
+    (d / ".git").mkdir(parents=True)
+    (d / ".git" / "config").write_text(
+        "[core]\n\trepositoryformatversion = 0\n"
+        "[remote \"origin\"]\n\turl = git@github.com:saptaxis/world-model-ladder.git\n"
+        "\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+    )
+    monkeypatch.setattr(sp, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("git was run")))
+
+    assert homes._remote_of(d) == "saptaxis/world-model-ladder"
+
+
+def test_a_checkout_without_an_origin_has_no_remote(tmp_path):
+    from orglens import homes
+    d = tmp_path / "local-only"
+    (d / ".git").mkdir(parents=True)
+    (d / ".git" / "config").write_text("[core]\n\tbare = false\n")
+    assert homes._remote_of(d) is None
+
+
+def test_a_root_that_is_itself_a_repository_is_a_candidate(tmp_path):
+    # `~/Dropbox/dotfiles` has no useful parent to list as a root — its
+    # parent holds everything. Listing the checkout itself must work.
+    repo = tmp_path / "dotfiles"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "config").write_text('[remote "origin"]\n\turl = git@github.com:me/dotfiles.git\n')
+    candidates = scan_roots([repo])
+    home = resolve_home("dotfiles", candidates)
+    assert home.path == repo
+    assert home.how == "remote"
+
+
+def test_a_root_that_is_a_plain_directory_is_not_its_own_candidate(tmp_path):
+    # A documents root is a container, not a home; making it a candidate
+    # would let its own basename answer for a home by coincidence.
+    docs = tmp_path / "docs"
+    (docs / "projects").mkdir(parents=True)
+    assert all(c.path != docs for c in scan_roots([docs]))

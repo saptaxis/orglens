@@ -61,7 +61,7 @@ def render(grammar: Grammar) -> str:
     ]
     for name, artifact_type in grammar.artifact_types.items():
         lines.append(
-            f"| `{name}` | `{artifact_type.find}` | {artifact_type.means} |"
+            f"| `{name}` | {', '.join(f'`{f}`' for f in artifact_type.finds)} | {artifact_type.means} |"
         )
 
     lines += [

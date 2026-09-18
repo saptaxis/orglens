@@ -45,6 +45,8 @@ def declared_tree(tmp_path, grammar):
     (clipcompose / "logs" / "01-packaging-Feb252026-log.md").write_text("# Log\n")
     (clipcompose / "specs").mkdir()
     (clipcompose / "specs" / "agent-integration.md").write_text("# Agent Integration\n")
+    (clipcompose / "articles" / "one-piece").mkdir(parents=True)
+    (clipcompose / "articles" / "one-piece" / "draft.md").write_text("# draft\n")
 
     orglens = docs / "projects" / "orglens"
     _declare(orglens, "orglens", "project")
@@ -157,7 +159,7 @@ class TestSilentFailure:
         """The real bank declares three kinds it holds none of.
 
         A glob at the wrong depth looks exactly like this, which is how the
-        capabilities grammar came to point `operators/*.md` at documents that
+        capabilities grammar once pointed a pattern at documents that
         actually live one directory lower. `candidates()` only ever iterates
         `entity_types`, so this failure mode is not the one `undeclared`
         superseded — it needs its own field.
@@ -407,3 +409,104 @@ def test_a_synthetic_declaring_home_is_never_reported_as_a_collision(tmp_path, g
     report = check.run(Registry([docs_root, code_root], grammar))
 
     assert not any(c.home == "eps" for c in report.collisions)
+
+
+def test_a_home_declared_on_two_units_is_reported_with_the_unit_that_answers(
+    tmp_path, grammar
+):
+    """Sharing is documented and intended, but `where` inside the shared
+    directory answers one unit and nothing said which. `at` takes the first
+    unit by name, so the report carries the units in that order.
+    """
+    docs_root = tmp_path / "docs-root"
+    code_root = tmp_path / "code-root"
+    (code_root / "sharedrepo").mkdir(parents=True)
+    for name in ("zeta", "alpha"):
+        unit_dir = docs_root / "projects" / name
+        unit_dir.mkdir(parents=True)
+        (unit_dir / MARKER).write_text(
+            f"unit: {name}\nkind: project\nhomes:\n  - sharedrepo\n"
+        )
+
+    registry = Registry([docs_root, code_root], grammar)
+    report = check.run(registry)
+
+    shared = next(s for s in report.shared if s.home == "sharedrepo")
+    assert shared.units == ["alpha", "zeta"]
+    assert registry.at(code_root / "sharedrepo").name == "alpha"
+
+
+def test_a_home_on_one_unit_is_not_reported_as_shared(registry):
+    assert check.run(registry).shared == []
+
+
+def test_a_folder_of_documents_the_grammar_has_no_word_for_is_reported(declared_tree, grammar):
+    """`plans2/` holding nine documents is findable as `doc`, but nothing said
+    the grammar has no name for it. This does, so a folder that grows can be
+    given a kind, or knowingly left as `doc`."""
+    fresh = declared_tree / "projects" / "clipcompose" / "plans2"
+    fresh.mkdir()
+    for i in range(3):
+        (fresh / f"0{i}-x.md").write_text("#\n")
+
+    report = check.run(Registry([declared_tree], grammar))
+
+    [row] = report.undescribed
+    assert row.unit == "clipcompose"
+    assert row.path == fresh
+    assert row.count == 3
+
+
+def test_a_named_container_and_the_unit_root_are_not_undescribed(declared_tree, grammar):
+    report = check.run(Registry([declared_tree], grammar))
+    assert report.undescribed == []
+
+
+def test_a_folder_with_no_documents_is_not_undescribed(declared_tree, grammar):
+    (declared_tree / "projects" / "clipcompose" / "assets").mkdir()
+    (declared_tree / "projects" / "clipcompose" / "assets" / "x.png").write_bytes(b"")
+    report = check.run(Registry([declared_tree], grammar))
+    assert report.undescribed == []
+
+
+def test_a_package_with_one_readme_is_not_a_folder_of_documents(declared_tree, grammar):
+    pkg = declared_tree / "projects" / "clipcompose" / "src" / "widget"
+    pkg.mkdir(parents=True)
+    (pkg / "README.md").write_text("# widget\n")
+    (pkg / "NOTES.md").write_text("# notes\n")
+    report = check.run(Registry([declared_tree], grammar))
+    assert report.undescribed == []
+
+
+def test_a_unit_missing_from_an_explicit_parent_nav_is_reported(declared_tree, grammar):
+    nav = declared_tree / "projects" / ".nav.yml"
+    nav.write_text("title: Projects\nnav:\n  - clipcompose\n")
+    report = check.run(Registry([declared_tree], grammar))
+    [row] = report.unlisted
+    assert row.unit == "orglens" and row.nav == nav
+
+
+def test_a_parent_nav_with_a_glob_lists_everything(declared_tree, grammar):
+    (declared_tree / "projects" / ".nav.yml").write_text("title: Projects\nnav:\n  - '*'\n")
+    assert check.run(Registry([declared_tree], grammar)).unlisted == []
+
+
+def test_no_parent_nav_means_nothing_to_report(declared_tree, grammar):
+    assert check.run(Registry([declared_tree], grammar)).unlisted == []
+
+
+def test_a_status_line_older_than_the_tree_by_a_week_is_reported(declared_tree, grammar, monkeypatch):
+    import os, time
+    overview = declared_tree / "projects" / "clipcompose" / "overview.md"
+    overview.write_text("# Overview\n\n> **Status:** v1 done\n")
+    old = time.time() - 30 * 86400
+    os.utime(overview, (old, old))
+    (declared_tree / "projects" / "clipcompose" / "plans" / "02-new-Sep182026.md").write_text("# 02\n")
+
+    report = check.run(Registry([declared_tree], grammar))
+    [row] = report.stale
+    assert row.unit == "clipcompose" and row.days >= 29
+
+
+def test_a_status_line_as_fresh_as_the_tree_is_not_reported(declared_tree, grammar):
+    assert check.run(Registry([declared_tree], grammar)).stale == []

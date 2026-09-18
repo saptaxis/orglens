@@ -1,8 +1,9 @@
 """CLI — click commands for orglens.
 
 Every command asks the grammar what kinds exist. None of them knows a noun:
-that is what `orglens list --type deck` used to fail on, raising `KeyError`
-because four modules carried their own copy of the type list.
+`orglens list --type <kind>` used to raise `KeyError` for any kind the grammar
+declared but the code did not, because four modules carried their own copy of
+the type list.
 
 Every command also speaks in units now, not folder position. A unit is
 whatever has declared itself — via a marker, resolved through `Registry` —
@@ -21,11 +22,11 @@ from pathlib import Path
 
 import click
 
-from orglens import activity, check as check_module, documents, reference, view
-from orglens.config import Config
+from orglens import activity, check as check_module, documents, reference, sessions, view
+from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
-from orglens.events import EVENTS_DIR, Event, append, attributions, this_machine
-from orglens.homes import Home
+from orglens.events import EVENTS_DIR, Event, append, this_machine
+from orglens.homes import Home, repo_of
 from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot
@@ -115,7 +116,7 @@ def _dated(act: activity.Activity) -> list[str]:
 
     A bare `26d ago` never says which clock it is — commit, edit, or session
     — and printing two labels for the same moment is noise, not information.
-    Mirrors the reasoning in `view.py`'s card: a clock within an hour of one
+    Mirrors the reasoning in `view.py`'s program: a clock within an hour of one
     already shown adds nothing.
     """
     clocks = []
@@ -134,6 +135,47 @@ def _dated(act: activity.Activity) -> list[str]:
         shown.append((label, ts))
         out.append(f"{label} {_ago(ts)} ago")
     return out
+
+
+
+def _sessions_by_unit(registry: Registry) -> tuple[list, dict[str, list]]:
+    """Every session, and every unit's, from one pass over scad's export and
+    the event log.
+
+    One pass, not one per unit: `attributions` walks every shard and the
+    export is one call, so a loop over thirty units would do the same work
+    thirty times for the same answer.
+    """
+    every = sessions.all_sessions(registry, EVENTS_DIR)
+    return every, {unit.name: sessions.for_unit(every, unit.name) for unit in registry.units()}
+
+
+def _git_paths(registry: Registry, units: list) -> list[Path]:
+    """Every path `status`/`view` will ask git about: each home, and each
+    document the status line may be read from."""
+    out: list[Path] = []
+    for unit in units:
+        out.extend(unit.paths)
+        for home in unit.paths:
+            out.extend(home / d for d in registry.grammar.documents_for(unit.kind))
+    return out
+
+
+def _warm(registry: Registry, units: list) -> dict[str, list[dict]]:
+    """Everything `status` and `view` will ask a subprocess or a file walk
+    for, fetched at once: git per home and driver document, the newest
+    mtime per home, and `scad notes ls --about` per unit. Independent and
+    mostly waiting, so one pool runs them side by side; in series they were
+    most of a 10s `status`. Returns the notes by unit; the rest is cached.
+    """
+    notes: dict[str, list[dict]] = {}
+
+    def fetch(name: str) -> None:
+        notes[name] = activity.notes_about(name)
+
+    activity.prefetch(_git_paths(registry, units),
+                      extra=[(fetch, unit.name) for unit in units])
+    return notes
 
 
 def _status_of(registry: Registry, unit):
@@ -206,17 +248,13 @@ def list(kind_filter: str | None):
         click.echo("Nothing found.")
         return
 
-    # Read once, not once per unit: `attributions` walks every shard, and a
-    # loop over thirty units would re-read the whole log thirty times for the
-    # same answer.
-    attributed = attributions(root=EVENTS_DIR)
+    every, by_unit = _sessions_by_unit(registry)
 
     # `peek`, not `read`: the per-home git calls `read` makes for the last
     # commit and the dirty count are the entire gap between `list` at 1.9s
     # and `status` at 5.5s on the real tree, and sorting needs neither.
     acts = {
-        unit: activity.peek(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
-                             attributed=attributed)
+        unit: activity.peek(unit.paths, unit.name, sessions=by_unit[unit.name])
         for unit in units
     }
 
@@ -237,14 +275,11 @@ def status():
     registry, _ = _load_registry()
     units = registry.units()
 
-    # Read once, not once per unit: `attributions` walks every shard, and a
-    # loop over thirty units would re-read the whole log thirty times for the
-    # same answer.
-    attributed = attributions(root=EVENTS_DIR)
-
+    every, by_unit = _sessions_by_unit(registry)
+    notes = _warm(registry, units)
     acts = {
-        unit: activity.read(unit.paths, unit.name, home_names=[h.name for h in unit.homes],
-                             attributed=attributed)
+        unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name],
+                            notes=notes[unit.name])
         for unit in units
     }
 
@@ -301,14 +336,51 @@ def status():
 @cli.command()
 @click.argument("artifact_type")
 @click.argument("unit_name", required=False)
-def find(artifact_type: str, unit_name: str | None):
-    """Find documents by kind, optionally scoped to one unit."""
+@click.option("--in", "within", default=None, metavar="DIR",
+              help="Scope to directories of this name instead of the kind's own container.")
+@click.option("--grep", "pattern", default=None, metavar="TEXT",
+              help="Only documents whose text contains this; shows the matching lines.")
+@click.option("--since", "window", default=None, metavar="WINDOW",
+              help="Only documents touched within this long: 2w, 90d, 6h.")
+@click.option("--waiting", is_flag=True,
+              help="Only packets with a gate open, with the question.")
+@click.option("--json", "as_json", is_flag=True)
+def find(artifact_type: str, unit_name: str | None, within: str | None,
+         pattern: str | None, window: str | None, waiting: bool, as_json: bool):
+    """Find documents by kind, optionally scoped to one unit.
+
+    The kind is the grammar's word for where to look; `--in` is the tree's
+    word for a directory the grammar has no name for yet. `--grep` reads the
+    documents found and keeps the ones that mention the text.
+    """
     registry, _ = _load_registry()
 
     if artifact_type not in registry.grammar.artifact_types:
         _unknown("document kind", artifact_type, registry.grammar.artifact_types)
 
-    found = documents.find(registry, artifact_type, unit_name)
+    try:
+        found = documents.find(registry, artifact_type, unit_name, within=within)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+    if pattern is not None:
+        found = documents.grep(found, pattern)
+    if window is not None:
+        try:
+            found = documents.since(found, documents.parse_window(window))
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+    if waiting:
+        found = documents.waiting(found)
+
+    if as_json:
+        click.echo(json.dumps([
+            {"name": d.name, "kind": d.kind, "unit": d.unit, "path": str(d.path),
+             "matches": [*d.matches]}
+            for d in found
+        ]))
+        return
     if not found:
         click.echo(f"No {artifact_type}s found.")
         return
@@ -316,6 +388,11 @@ def find(artifact_type: str, unit_name: str | None):
     for item in found:
         shown = _relative(item.path, registry.roots)
         click.echo(f"  {item.name:<45} [{item.unit}]  {shown}")
+        for hit in item.matches[:5]:
+            where = Path(hit["file"]).name if item.path.is_dir() else ""
+            click.echo(f"      {where}:{hit['line']}  {hit['text'][:100]}")
+        if len(item.matches) > 5:
+            click.echo(f"      +{len(item.matches) - 5} more")
 
 
 def _write_declaration(proposal: Proposal, path: Path) -> None:
@@ -437,13 +514,23 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     homes = (mine,) + tuple(h for h in extra_homes if h != mine)
     _write_marker(target, home=mine, unit=target.name, kind=kind,
                   part_of=part_of, homes=homes)
+    driver = target / registry.grammar.driver
+    driver.write_text(_driver_stub(target.name, kind).replace(
+        "{title}", driver.stem.replace("-", " ").capitalize()))
+    registered = _register_in_nav(target)
 
     click.echo(f"Created {kind or 'unit'}: {target}")
+    click.echo("next:")
+    click.echo(f"  write {driver.name}: the status line, what it is, where its state lives")
+    if registered is not None:
+        click.echo(f"  added to {registered}" if registered else
+                   "  the parent .nav.yml lists children by name; add this one")
+    click.echo(f"  orglens start {target.name}   # a session on it, attributed before its first turn")
     if not _under_a_root(target, registry.roots):
         # Warn, don't refuse: a unit outside every root is allowed to exist,
         # it is simply un-met until a root is added or someone works in it —
         # `Registry.at` reads a marker directly on the way up, roots or not.
-        source = os.environ.get("ORGLENS_CONFIG") or "~/.config/orglens/config.yaml"
+        source = os.environ.get("ORGLENS_CONFIG") or str(ORGLENS_HOME / "config.yaml")
         click.echo(
             "note: this is under none of your configured roots, so `list`, "
             "`status`, `snapshot`, and `check` will not see it. Add its root "
@@ -451,6 +538,51 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
             "standing inside it."
         )
     _refresh_snapshot(registry, config)
+
+
+def _driver_stub(name: str, kind: str | None) -> str:
+    """The driver document, with the shape a person fills in: the status
+    line `status` reads, and the two headings every real one carries. The
+    title is the document's own name, as the grammar declares it. Written
+    once by `new`; never touched again by anything."""
+    return (
+        "# {title}\n\n"
+        f"> **Status:** Opened {time.strftime('%Y-%m-%d')}. Nothing done yet.\n\n"
+        "## What it is\n\n"
+        f"What {name} is for, in a paragraph.\n\n"
+        "## State tracking\n\n"
+        "Where its state is written, and what to read to know where it stands.\n"
+    )
+
+
+def _register_in_nav(target: Path) -> str | bool | None:
+    """Add the unit to a parent `.nav.yml` that lists children by name.
+
+    mkdocs-awesome-nav: a parent nav with an explicit list has no glob, so
+    a new unit is invisible to the site until it is added, and nothing said
+    so. Returns the nav's path when the line was added, False when the nav
+    is explicit but could not be edited safely, None when there is no such
+    nav or it carries a glob and needs nothing.
+    """
+    nav = target.parent / ".nav.yml"
+    if not nav.is_file():
+        return None
+    try:
+        text = nav.read_text()
+    except OSError:
+        return None
+    lines = text.splitlines(keepends=True)
+    items = [l for l in lines if l.startswith("  - ")]
+    if not items or any("*" in l for l in items):
+        return None
+    if any(l.strip() == f"- {target.name}" for l in items):
+        return None
+    if not all(l.rstrip("\n").startswith("  - ") and ":" not in l for l in items):
+        return False
+    last = max(i for i, l in enumerate(lines) if l.startswith("  - "))
+    lines.insert(last + 1, f"  - {target.name}\n")
+    nav.write_text("".join(lines))
+    return str(nav)
 
 
 def _home_line(home) -> str:
@@ -490,7 +622,7 @@ def where_cmd(name: str | None):
     """
     registry, _ = _load_registry()
 
-    source = os.environ.get("ORGLENS_CONFIG") or "~/.config/orglens/config.yaml"
+    source = os.environ.get("ORGLENS_CONFIG") or str(ORGLENS_HOME / "config.yaml")
     click.echo(f"roots:  {registry.roots[0]}  (config: {source})")
     for extra in registry.roots[1:]:
         click.echo(f"        {extra}")
@@ -583,22 +715,95 @@ def check_cmd():
             f"directory — {shown}"
         )
 
+    for shared in report.shared:
+        names = " and ".join([", ".join(shared.units[:-1]), shared.units[-1]])
+        click.echo(
+            f"home '{shared.home}' is declared on {names} — inside it, "
+            f"`where` answers {shared.units[0]}"
+        )
+
+    for row in report.unlisted:
+        click.echo(
+            f"{row.unit}: not in {_relative(row.nav, registry.roots)}, which lists "
+            "its siblings by name; the site will not show it"
+        )
+
+    for row in report.stale:
+        click.echo(
+            f"{row.unit}: the status line is {row.days} days older than the newest edit; "
+            "rewrite it if it is no longer true"
+        )
+
+    for row in report.undescribed:
+        shown = _relative(row.path, registry.roots)
+        click.echo(
+            f"{row.unit}: {shown} holds {_count(row.count, 'document')} the grammar "
+            "has no word for; they are found, without a kind"
+        )
+
     if not report:
         click.echo("No drift.")
 
 
 @cli.command()
 @click.option("--stdout", is_flag=True, help="Print instead of writing")
-def snapshot(stdout: bool):
-    """Generate a snapshot of what is in the tree."""
+@click.option("--check", is_flag=True,
+              help="Say whether the written snapshot is older than the tree; exit 1 if so.")
+@click.option("--type", "kind", default=None, help="Only units of this kind.")
+@click.option("--unit", "unit_name", default=None, help="Only this unit and its parts.")
+def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None):
+    """Generate a snapshot of what is in the tree.
+
+    `--type` and `--unit` narrow it; a narrowed snapshot goes to stdout,
+    never to the cache, which always holds the whole tree.
+    """
     registry, config = _load_registry()
 
-    if stdout:
-        click.echo(generate_snapshot(registry, config))
+    if check:
+        sys.exit(_snapshot_check(registry, config))
+    if kind is not None and kind not in {u.kind for u in registry.units()}:
+        _unknown("kind", kind, sorted({u.kind for u in registry.units()}))
+    if stdout or kind is not None or unit_name is not None:
+        try:
+            click.echo(generate_snapshot(registry, config, kind=kind, unit=unit_name))
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
         return
     output = config.snapshot_path
     generate_snapshot(registry, config, output_path=output)
     click.echo(f"Snapshot written to {output}")
+
+
+def _snapshot_check(registry: Registry, config: Config) -> int:
+    """Whether the snapshot predates any declaration or driver document.
+
+    Those are what the snapshot renders; a document deeper in a unit
+    changes nothing it shows. A missing snapshot is stale, not an error.
+    """
+    output = config.snapshot_path
+    if not output.exists():
+        click.echo(f"stale: no snapshot at {output}")
+        return 1
+    written = output.stat().st_mtime
+    newest: tuple[float, Path] | None = None
+    for unit in registry.units():
+        candidates = [unit.declared_at / MARKER]
+        candidates += [p / d for p in unit.paths
+                       for d in registry.grammar.documents_for(unit.kind)]
+        for path in candidates:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if newest is None or mtime > newest[0]:
+                newest = (mtime, path)
+    if newest is not None and newest[0] > written:
+        shown = _relative(newest[1], registry.roots)
+        click.echo(f"stale: {shown} changed after the snapshot was written")
+        return 1
+    click.echo(f"fresh: {output}")
+    return 0
 
 
 @cli.command(name="reference")
@@ -625,7 +830,7 @@ def _repo_keys(unit: Unit) -> list[str]:
     for home in unit.homes:
         if home.path is None:
             continue
-        key = home.name.split("/")[0]
+        key = repo_of(home.name)
         if key not in keys:
             keys.append(key)
     return keys
@@ -700,10 +905,8 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
     ]
 
-    # Read once, not once per unit: `attributions` walks every shard, and a
-    # loop over thirty units would re-read the whole log thirty times for the
-    # same answer.
-    attributed = attributions(root=EVENTS_DIR)
+    every, by_unit = _sessions_by_unit(registry)
+    notes = _warm(registry, [u for us in by_kind.values() for u in us])
 
     groups = []
     for kind in sorted(by_kind):
@@ -713,12 +916,14 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
             rows.append(
                 {
                     "name": unit.name,
+                    "kind": unit.kind,
+                    "part_of": unit.part_of,
                     "path": unit.declared_at,
                     "why": status.text if status else None,
+                    "why_edited": status.edited if status else None,
                     "activity": activity.read(
-                        unit.paths, unit.name,
-                        home_names=[h.name for h in unit.homes],
-                        attributed=attributed,
+                        unit.paths, unit.name, sessions=by_unit[unit.name],
+                        notes=notes[unit.name],
                     ),
                     "artifacts": [
                         (heading, documents.find(registry, artifact_kind, unit))
@@ -734,34 +939,219 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
             groups.append((_heading(kind), rows))
 
     ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url}
-    path = view.write(view.render(groups, ctx), Path(out))
+    page = view.render(groups, ctx, unattributed=sessions.unattributed(every))
+    path = view.write(page, Path(out))
     click.echo(f"wrote {path}")
     if do_open:
         os.system(f"open '{path}'")
 
 
-def _session_id_from(output: str) -> str | None:
-    """The id scad's own launch record names, or None.
+# ── sessions ─────────────────────────────────────────────────────────────
 
-    `--json` makes scad's own words the read: with the flag, its record's
+
+def _scad(argv: list[str]) -> int:
+    """Run scad with the terminal attached, and return its exit code.
+
+    Not captured: `session resume` attaches a tmux pane or execs the agent,
+    and either needs the tty. A missing scad is an ordinary failure here,
+    reported by exit code rather than raised.
+    """
+    try:
+        return subprocess.run(["scad", *argv]).returncode
+    except OSError:
+        click.echo("scad is not installed, or not on PATH.", err=True)
+        return 1
+
+
+def _find_session(every: list, prefix: str):
+    """The one session whose id is `prefix` or starts with it.
+
+    Returns `(session, [])` on a unique match, `(None, matches)` otherwise:
+    the caller says which ids matched, and refuses. Prefix matching is what
+    lets a human type the eight characters a listing shows.
+    """
+    exact = [s for s in every if s.id == prefix]
+    if exact:
+        return exact[0], []
+    matches = [s for s in every if s.id.startswith(prefix)]
+    if len(matches) == 1:
+        return matches[0], []
+    return None, matches
+
+
+def _session_line(s, show_how: bool = True, short: dict | None = None) -> str:
+    when = _ago(s.when // 1000) + " ago" if s.when else "—"
+    sid = (short or {}).get(s.id, s.id[:8])
+    if s.live:
+        state = "● live"
+    elif s.open:
+        state = "resumable"
+    else:
+        state = ""
+    how = (s.how or "") if show_how else ""
+    return (
+        f"  {sid:<10} {s.agent:<6} {when:>8} {_count(s.turns, 'turn'):>10}  "
+        f"{how:<12} {state:<10} {s.label or ''}"
+    )
+
+
+def _session_detail(s) -> str:
+    """A second line for a session nobody has claimed: where it ran and
+    the last thing said, which is what deciding whose it is needs."""
+    said = (s.last_turn or {}).get("text") or ""
+    said = " ".join(said.split())[:110]
+    line = f"{'':<13}{sessions.where(s.cwd)}"
+    if said:
+        line += f"  ·  {said}"
+    return line
+
+
+@cli.command(name="sessions")
+@click.argument("unit_name", required=False)
+@click.option("--none", "only_none", is_flag=True,
+              help="Only the sessions that belong to no unit.")
+@click.option("--all", "everything", is_flag=True,
+              help="Include sessions with no turns yet.")
+def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
+    """List a unit's sessions, or every unit's, newest first.
+
+    A session is a unit's because `orglens start` or `orglens attribute`
+    said so, or because it ran inside one of the unit's homes. A home
+    shared by two units lists its sessions under both.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, EVENTS_DIR)
+    short = sessions.short_ids([s.id for s in every])
+
+    if unit_name is not None and not only_none:
+        try:
+            unit = registry.resolve(unit_name)
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+        rows = sessions.listed(sessions.for_unit(every, unit.name), everything)
+        if not rows:
+            click.echo(f"{unit.name}: no sessions")
+            return
+        for s in rows:
+            click.echo(_session_line(s, short=short))
+        return
+
+    groups: list[tuple[str, list]] = []
+    if not only_none:
+        for unit in registry.units():
+            rows = sessions.listed(sessions.for_unit(every, unit.name), everything)
+            if rows:
+                groups.append((unit.name, rows))
+    loose = sessions.listed(sessions.unattributed(every), everything)
+    if loose:
+        groups.append(("unattributed", loose))
+    if not groups:
+        click.echo("no sessions")
+        return
+    for label, rows in groups:
+        click.echo(f"\n{label}:")
+        for s in rows:
+            loose = label == "unattributed"
+            click.echo(_session_line(s, show_how=not loose, short=short))
+            if loose:
+                click.echo(_session_detail(s))
+
+
+@cli.command()
+@click.argument("target")
+@click.option("--print", "print_only", is_flag=True,
+              help="Print the resume command instead of running it.")
+def resume(target: str, print_only: bool):
+    """Resume a session by id, or a unit's newest open session.
+
+    Hands the id to `scad session resume`, which knows where the session
+    ran; orglens does no working-directory work of its own.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, EVENTS_DIR)
+
+    session, matches = _find_session(every, target)
+    if session is None and matches:
+        click.echo(f"'{target}' matches more than one session:", err=True)
+        for s in matches:
+            click.echo(_session_line(s), err=True)
+        sys.exit(1)
+    if session is None:
+        try:
+            unit = registry.resolve(target)
+        except ValueError:
+            click.echo(f"'{target}' is neither a session id nor a unit.", err=True)
+            sys.exit(1)
+        mine = sessions.listed(sessions.for_unit(every, unit.name), everything=False)
+        open_ = [s for s in mine if s.open]
+        if not open_:
+            click.echo(f"{unit.name}: nothing open to resume. Newest:", err=True)
+            for s in mine[:3]:
+                click.echo(_session_line(s), err=True)
+            sys.exit(1)
+        session = open_[0]
+
+    argv = ["session", "resume", session.id] + (["--print"] if print_only else [])
+    sys.exit(_scad(argv))
+
+
+@cli.command()
+@click.argument("session_id")
+@click.argument("unit_name")
+def attribute(session_id: str, unit_name: str):
+    """Say which unit a session was for, after the fact.
+
+    The same event `start` writes before a session's first turn. A later
+    attribution of the same session replaces the earlier one when read,
+    and both stay on disk. This is also how a session in a home shared by
+    two units is narrowed to one.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, EVENTS_DIR)
+
+    session, matches = _find_session(every, session_id)
+    if session is None:
+        if matches:
+            click.echo(f"'{session_id}' matches more than one session:", err=True)
+            for s in matches:
+                click.echo(_session_line(s), err=True)
+        else:
+            click.echo(f"No session '{session_id}' in the index.", err=True)
+        sys.exit(1)
+    try:
+        unit = registry.resolve(unit_name)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+    append(Event(kind="attributed", unit=unit.name, session=session.id,
+                 at=int(time.time()), machine=this_machine()),
+           root=EVENTS_DIR)
+    click.echo(f"attributed session {session.id} to {unit.name}")
+
+
+def _launch_record(output: str) -> dict | None:
+    """scad's launch record, or None when there is no usable one.
+
+    `--json` makes scad's own words the read: with the flag, the record's
     `session_id` field is a contract it publishes, not prose we scrape a
-    line out of. The one thing orglens needs from scad is this id, and
-    reading it from the record makes the join exact — a newest-file scan of
-    `~/.scad/launches/` would be a guess, and this system does not guess
-    about attribution. A malformed or id-less record degrades to None here
-    rather than raising, same as every other derived source.
+    line out of. The pane (`tmux`) rides along, which is how `start` tells
+    the person the way back in. A malformed or id-less record degrades to
+    None rather than raising, same as every other derived source.
     """
     try:
         record = json.loads(output)
     except ValueError:
         return None
-    if not isinstance(record, dict):
+    if not isinstance(record, dict) or not record.get("session_id"):
         return None
-    return record.get("session_id") or None
+    return record
 
 
-def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
-    """Start a session through scad and return the id it minted. Never raises."""
+def _launch(cwd: Path, agent: str, prompt: str | None) -> dict | None:
+    """Start a session through scad and return its launch record — at least
+    `session_id`, and the `tmux` pane when scad names one. Never raises."""
     argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd), "--json"]
     if prompt:
         argv += ["--prompt", prompt]
@@ -779,10 +1169,7 @@ def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
     # inferred from an absent field.
     if done.returncode != 0:
         return None
-    try:
-        return _session_id_from(done.stdout)
-    except ValueError:
-        return None
+    return _launch_record(done.stdout)
 
 
 def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
@@ -879,17 +1266,32 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
             click.echo(f"  {h.name:<40} {h.path}")
         sys.exit(1)
 
+    first_turn = prompt or _arrival(unit, chosen, registry)
     if dry_run:
-        click.echo(f"would launch {agent} in {chosen.path} for {unit.name}")
+        click.echo(f"would launch {agent} in {chosen.path} for {unit.name}, "
+                   "detached in tmux via `scad session launch`; this command "
+                   "returns at once and leaves your terminal alone.")
+        click.echo("first turn:")
+        for line in first_turn.splitlines():
+            click.echo(f"  {line}")
         return
 
-    session = _launch(chosen.path, agent, prompt or _arrival(unit, chosen, registry))
-    if session is None:
+    record = _launch(chosen.path, agent, first_turn)
+    if record is None:
         click.echo("scad returned no session id — the session is not attributed. "
                    "Attribute it later, or start it again through orglens.")
         return
+    session = record["session_id"]
 
     append(Event(kind="attributed", unit=unit.name, session=session,
                  at=int(time.time()), machine=this_machine()),
            root=EVENTS_DIR)
     click.echo(f"attributed session {session} to {unit.name}")
+    # The session is running detached; say how to get back to it. scad
+    # printed the pane on stderr, which is easy to miss, and never said
+    # `orglens resume`, which it cannot know about.
+    pane = record.get("tmux")
+    click.echo(f"running detached in {pane or 'tmux'}; your terminal is free.")
+    if pane:
+        click.echo(f"  watch it:   tmux attach -t {pane.split(':')[0]}")
+    click.echo(f"  come back:  orglens resume {unit.name}")

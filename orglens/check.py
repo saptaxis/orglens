@@ -15,7 +15,7 @@ goes dark while the tree is half declared.
 
 A glob that matches nothing anywhere is a different silent failure again —
 not an undeclared directory, but a mistyped or misplaced pattern that quietly
-stops finding documents it should. `operators/*.md` once pointed one
+stops finding documents it should. A capabilities glob once pointed one
 directory too high and found nothing, and nothing said so. `unmatched` is
 what says so.
 """
@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 from difflib import get_close_matches
 from pathlib import Path
 
-from orglens import documents
+from orglens import activity, documents
+from orglens.state import read_status
 from orglens.homes import Candidate, candidates_for
 from orglens.units import Registry
 
@@ -75,6 +76,58 @@ class Collision:
 
 
 @dataclass(frozen=True)
+class Shared:
+    """A home declared on more than one unit. Sharing is intended — one
+    repository can be a home of two units when both work in it — but `where`
+    inside that directory answers one of them, and which one is a fact worth
+    seeing: `Registry.at` takes the first by unit name, and `units` is in
+    that order.
+    """
+    home: str
+    units: list[str] = field(default_factory=list)
+
+
+#: How many documents make a directory a folder of documents rather than a
+#: package with a README in it. On the real tree, 116 of 158 undescribed
+#: directories held one file and nine held two; the 42 at three or more
+#: were the ones worth a word.
+UNDESCRIBED_FLOOR = 3
+
+
+@dataclass(frozen=True)
+class Undescribed:
+    """A directory holding documents that no kind's container and no
+    entity's structure names. Everything in it is still found by the
+    catch-all kind, so nothing is lost; what is missing is a word. The grammar can grow one,
+    or the folder can knowingly stay `doc`. Either way, somebody decides.
+    """
+    unit: str
+    path: Path
+    count: int
+
+
+@dataclass(frozen=True)
+class Unlisted:
+    """A unit whose parent directory carries a `.nav.yml` listing children
+    by name, without this one. mkdocs-awesome-nav renders only what an
+    explicit list names, so the unit exists and the site does not show it.
+    One sibling file orglens knows about; a nav with a glob needs nothing.
+    """
+    unit: str
+    nav: Path
+
+
+@dataclass(frozen=True)
+class Stale:
+    """The unit's status line is older than its newest edit by more than a
+    week: the tree moved and the person's sentence did not. The line is the
+    one authored fact `status` and `view` show, so a stale one misleads
+    every reader until it is rewritten."""
+    unit: str
+    days: int
+
+
+@dataclass(frozen=True)
 class Report:
     drifted: list[Drift] = field(default_factory=list)
     #: Directories that look like work and have not declared themselves. The
@@ -102,6 +155,14 @@ class Report:
     duplicates: list[Duplicate] = field(default_factory=list)
     #: Home names more than one candidate directory could have satisfied.
     collisions: list[Collision] = field(default_factory=list)
+    #: Home names declared on more than one unit.
+    shared: list[Shared] = field(default_factory=list)
+    #: Folders of documents the grammar has no word for.
+    undescribed: list[Undescribed] = field(default_factory=list)
+    #: Units an explicit parent nav does not list.
+    unlisted: list[Unlisted] = field(default_factory=list)
+    #: Status lines older than the unit's newest edit by more than a week.
+    stale: list[Stale] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(
@@ -111,6 +172,10 @@ class Report:
             or self.unmatched
             or self.duplicates
             or self.collisions
+            or self.shared
+            or self.undescribed
+            or self.unlisted
+            or self.stale
         )
 
 
@@ -237,6 +302,68 @@ def run(registry: Registry) -> Report:
                     )
                 )
 
+    # `units` is sorted by name, so the first unit listed under a home is
+    # the one `at` answers with inside it.
+    units_by_home: dict[str, list[str]] = {}
+    for unit in units:
+        for home in unit.homes:
+            if home.how == "declaring":
+                continue
+            if unit.name not in units_by_home.setdefault(home.name, []):
+                units_by_home[home.name].append(unit.name)
+    shared = [
+        Shared(home=name, units=names)
+        for name, names in sorted(units_by_home.items())
+        if len(names) > 1
+    ]
+
+    # A directory is described when a kind's container or an entity's
+    # structure names it, or an ancestor of it — `plans/archive/` is inside
+    # `plans/`. The unit's own root is `doc`'s container and is left out;
+    # so is any directory a nested unit's home claims.
+    grammar = registry.grammar
+    named = {
+        name
+        for at in grammar.artifact_types.values()
+        for name in at.directories if name
+    } | {
+        key.rstrip("/")
+        for et in grammar.entity_types.values()
+        for key in et.directories
+    }
+    undescribed: list[Undescribed] = []
+    for unit in units:
+        claimed = documents._claimed_by(registry, unit)
+        for home in unit.paths:
+            for directory in documents._dirs_under(home):
+                rel = directory.relative_to(home)
+                if any(part in named for part in rel.parts):
+                    continue
+                if any(directory == c or c in directory.parents for c in claimed):
+                    continue
+                count = sum(1 for p in directory.glob("*.md") if p.is_file())
+                if count >= UNDESCRIBED_FLOOR:
+                    undescribed.append(Undescribed(unit=unit.name, path=directory, count=count))
+
+    unlisted = [
+        Unlisted(unit=unit.name, nav=unit.declared_at.parent / ".nav.yml")
+        for unit in units
+        if _nav_omits(unit.declared_at.parent / ".nav.yml", unit.declared_at.name)
+    ]
+
+    stale: list[Stale] = []
+    for unit in units:
+        status = None
+        for home in unit.paths:
+            status = read_status(home, grammar.documents_for(unit.kind))
+            if status:
+                break
+        if status is None or not status.edited:
+            continue
+        newest = max((activity._newest_mtime(p) or 0) for p in unit.paths)
+        if newest - status.edited > 7 * 86400:
+            stale.append(Stale(unit=unit.name, days=int((newest - status.edited) // 86400)))
+
     return Report(
         drifted=drifted,
         undeclared=registry.candidates(),
@@ -244,4 +371,22 @@ def run(registry: Registry) -> Report:
         unmatched=unmatched,
         duplicates=duplicates,
         collisions=collisions,
+        shared=shared,
+        undescribed=sorted(undescribed, key=lambda u: (u.unit, u.path)),
+        unlisted=unlisted,
+        stale=stale,
     )
+
+
+def _nav_omits(nav: Path, name: str) -> bool:
+    """Whether `nav` is an explicit list that leaves `name` out."""
+    if not nav.is_file():
+        return False
+    try:
+        items = [l.strip()[2:] for l in nav.read_text().splitlines() if l.startswith("  - ")]
+    except OSError:
+        return False
+    if not items or any("*" in item for item in items):
+        return False
+    listed = {item.split(":")[-1].strip().strip("'\"") for item in items} | {item.strip("'\"") for item in items}
+    return name not in listed

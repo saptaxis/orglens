@@ -18,7 +18,9 @@ entities:
 
 # Where documents live, and what to call a new one. `find` is the truth; `means`
 # is prose for whoever writes the next file. Nothing parses a filename, so no
-# filename can be wrong.
+# filename can be wrong. `find` may be a list when one kind lives in several
+# containers — `plans/` kept as history beside a fresh `plans2/`. A `find`
+# ending in `/` names directories rather than the files in them.
 artifacts:
   plan:
     find: plans/*.md
@@ -43,6 +45,20 @@ artifacts:
     means: >
       A durable design document — what a thing is and why, not when. Named for
       its topic. Outlives the plans that implement it.
+  article:
+    find: articles/*/
+    means: >
+      A piece of public writing, one directory each, named for its slug. The
+      directory is the packet the writing workflow runs over: brief, claims,
+      skeleton, draft, critique, audit. A trailing slash in `find` means the
+      artifact is the directory, not the files in it.
+  article:
+    find: articles/*/
+    means: >
+      A piece of public writing, one directory each, named for its slug. The
+      directory is the packet the writing workflow runs over: brief, claims,
+      skeleton, draft, critique, audit. A trailing slash in `find` means the
+      artifact is the directory, not the files in it.
 
 # What each part of an entity is for. Read when authoring and when creating;
 # never when discovering. Describing purpose is safe — asserting existence is

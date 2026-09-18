@@ -1,4 +1,9 @@
-"""Config loading and management."""
+"""Config loading, and the one directory orglens keeps on a machine.
+
+`~/.orglens/` holds the config, the snapshot cache, and the event log. The
+config and the cache can be rebuilt; the event log cannot, which is why
+`bootstrap --uninstall` never touches this directory.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,8 @@ from pathlib import Path
 import yaml
 
 from orglens.grammar import Grammar
+
+ORGLENS_HOME = Path.home() / ".orglens"
 
 
 @dataclass
@@ -44,13 +51,13 @@ class Config:
     @classmethod
     def load(cls) -> Config:
         """Load config from the default location."""
-        config_path = Path("~/.config/orglens/config.yaml").expanduser()
+        config_path = ORGLENS_HOME / "config.yaml"
         if not config_path.exists():
             raise FileNotFoundError(
                 f"No config found at {config_path}. "
                 "Create it with:\n\n"
-                "  mkdir -p ~/.config/orglens\n"
-                "  echo 'docs_root: ~/path/to/your/docs' > ~/.config/orglens/config.yaml\n"
+                f"  mkdir -p {ORGLENS_HOME}\n"
+                f"  echo 'roots: [~/path/to/your/docs]' > {config_path}\n"
             )
         return cls.from_yaml(config_path)
 
@@ -65,7 +72,7 @@ class Config:
     @property
     def snapshot_path(self) -> Path:
         """Path where the topology snapshot is written."""
-        config_dir = self._config_dir or Path("~/.config/orglens").expanduser()
+        config_dir = self._config_dir or ORGLENS_HOME
         cache_dir = config_dir / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir / "snapshot.md"

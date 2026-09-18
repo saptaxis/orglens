@@ -14,6 +14,7 @@ documents follow, with nothing renamed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from orglens.units import Registry, Unit
@@ -25,6 +26,9 @@ class Document:
     kind: str
     path: Path
     unit: str
+    #: What a matcher found, when one ran: {"file", "line", "text"} each.
+    #: Empty when `find` was only scoped, never matched.
+    matches: tuple[dict, ...] = ()
 
 
 def _claimed_by(registry: Registry, unit: Unit) -> list[Path]:
@@ -69,11 +73,43 @@ def _containers(home: Path, directory: str) -> list[Path]:
     """
     if not directory:
         return [home]
-    return sorted(d for d in home.rglob(directory) if d.is_dir())
+    return [d for d in _dirs_under(home) if d.name == directory]
+
+
+#: Build output and dependency folders: never documents, and the bulk of a
+#: code home's directory count.
+_SKIP = {"node_modules", "__pycache__", "venv", "dist", "build", "target", "site-packages"}
+
+
+@lru_cache(maxsize=None)
+def _dirs_under(home: Path) -> tuple[Path, ...]:
+    """Every directory under a home, walked once per process and filtered
+    per kind. `find` runs once per unit per kind, and a walk per call was
+    92 walks over the same directories for 23 units."""
+    found: list[Path] = []
+    stack = [home]
+    while stack:
+        try:
+            entries = sorted(stack.pop().iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name.startswith(".") or entry.name in _SKIP:
+                continue
+            try:
+                if entry.is_dir():
+                    found.append(entry)
+                    stack.append(entry)
+            except OSError:
+                continue
+    return tuple(sorted(found))
 
 
 def find(
-    registry: Registry, kind: str, unit: Unit | str | None = None
+    registry: Registry,
+    kind: str,
+    unit: Unit | str | None = None,
+    within: str | None = None,
 ) -> list[Document]:
     """Documents of a kind, at any depth under a unit's homes.
 
@@ -104,7 +140,11 @@ def find(
     order below.
     """
     artifact = registry.grammar.artifact_types[kind]
-    file_pattern = Path(artifact.find).name
+    pattern = artifact.pattern
+    # `within` is the tree's word where the grammar has none: any directory
+    # of that name, at any depth, scopes the search instead of the kind's
+    # own container. The kind still says what is matched inside it.
+    container_names = (within,) if within is not None else artifact.directories
     if unit is None:
         units = registry.units()
     elif isinstance(unit, Unit):
@@ -114,13 +154,22 @@ def find(
 
     found: list[Document] = []
     for one in units:
-        excluded = _claimed_by(registry, one)
+        # Once per unit per command, not once per kind: `find` runs for
+        # every kind on every unit, and this resolves every unit's paths.
+        cache = registry.__dict__.setdefault("_claimed", {})
+        if one.name not in cache:
+            cache[one.name] = _claimed_by(registry, one)
+        excluded = cache[one.name]
         seen: set[Path] = set()
         for home in one.paths:
-            for container in _containers(home, artifact.directory):
-                for path in sorted(container.rglob(file_pattern)):
-                    if not path.is_file():
-                        continue
+            for container in [c for n in container_names for c in _containers(home, n)]:
+                # A directory kind is the container's children themselves;
+                # a file kind is every matching file at any depth beneath.
+                if artifact.is_directory:
+                    matches = [p for p in sorted(container.glob(pattern)) if p.is_dir()]
+                else:
+                    matches = [p for p in sorted(container.rglob(pattern)) if p.is_file()]
+                for path in matches:
                     resolved = path.resolve()
                     if resolved in seen:
                         continue
@@ -171,3 +220,109 @@ def _entries(home: Path) -> list[Path]:
         return list(home.iterdir())
     except OSError:
         return []
+
+
+
+# ── matchers ─────────────────────────────────────────────────────────────
+#
+# `find` scopes: which paths, from the grammar and the declarations. A
+# matcher narrows the scoped list and says why each survivor did. Text is
+# the first; anything that takes documents and returns documents — a date,
+# a gate, an index of embeddings, a link graph — is the same shape and
+# composes the same way.
+
+
+def _files_of(found: Document) -> list[Path]:
+    """What a matcher reads: the file, or every markdown file in the
+    directory when the artifact is one."""
+    if found.path.is_dir():
+        return sorted(p for p in found.path.rglob("*.md")
+                      if p.is_file() and not any(part.startswith(".") for part in p.relative_to(found.path).parts))
+    return [found.path]
+
+
+def grep(found: list[Document], pattern: str) -> list[Document]:
+    """The documents whose text contains `pattern`, case-insensitively, with
+    the matching lines attached. A regular expression when it is one."""
+    import re
+    try:
+        rx = re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        rx = re.compile(re.escape(pattern), re.IGNORECASE)
+    out: list[Document] = []
+    for item in found:
+        hits: list[dict] = []
+        for file in _files_of(item):
+            try:
+                lines = file.read_text(errors="replace").splitlines()
+            except OSError:
+                continue
+            for number, text in enumerate(lines, start=1):
+                if rx.search(text):
+                    hits.append({"file": str(file), "line": number, "text": text.strip()})
+        if hits:
+            out.append(Document(item.name, item.kind, item.path, item.unit, tuple(hits)))
+    return out
+
+
+def parse_window(text: str) -> int:
+    """`2w`, `90d`, `6h` as seconds. Raises ValueError on anything else."""
+    units = {"h": 3600, "d": 86400, "w": 7 * 86400, "m": 30 * 86400}
+    body, suffix = text[:-1], text[-1:]
+    if not body.isdigit() or suffix not in units:
+        raise ValueError(f"cannot read '{text}' as a window; use a number and h, d, w or m")
+    return int(body) * units[suffix]
+
+
+def _touched(found: Document) -> float:
+    """When the document was last edited: its mtime, or the newest file's
+    inside a directory artifact. A file, not git: an edit in flight counts."""
+    files = _files_of(found)
+    newest = 0.0
+    for file in files:
+        try:
+            newest = max(newest, file.stat().st_mtime)
+        except OSError:
+            continue
+    return newest
+
+
+def since(found: list[Document], seconds: int, now: float | None = None) -> list[Document]:
+    """The documents touched within the last `seconds`."""
+    import time
+    cutoff = (now if now is not None else time.time()) - seconds
+    return [d for d in found if _touched(d) >= cutoff]
+
+
+def waiting(found: list[Document]) -> list[Document]:
+    """The directory artifacts that are packets with a gate open — a node
+    finished and asked, and nobody has answered. The question is attached
+    as the match."""
+    from orglens.workflow import session
+    from orglens.workflow.definition import WorkflowError, load_workflow
+    out: list[Document] = []
+    for item in found:
+        if not item.path.is_dir():
+            continue
+        facts = session.read(item.path)
+        if not facts:
+            continue
+        bound = session.workflow_path(facts)
+        workflow = None
+        if bound is not None:
+            try:
+                workflow = load_workflow(bound)
+            except WorkflowError:
+                workflow = None
+        if not session.gated(facts, workflow):
+            continue
+        question = None
+        if workflow is not None:
+            question = session.next_node(workflow, facts).question
+        else:
+            last = [f for f in facts if f["type"] in session.ROUTING][-1]
+            question = last.get("question")
+        hit = {"file": str(item.path / session.SESSION_FILE), "line": len(facts),
+               "text": question or "review"}
+        out.append(Document(item.name, item.kind, item.path, item.unit, (hit,)))
+    return out

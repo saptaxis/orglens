@@ -39,6 +39,7 @@ reports the gap and changes nothing.
 | `log` | `logs/*.md` | What actually happened executing the plan of the same number, written during or after. NN-topic-MonDDYYYY-log.md. |
 | `doc` | `*.md` | A document belonging to the entity as a whole rather than to a phase of work — a backlog, a handoff, a dated note, a requirements sheet. The catch-all: kinds are independent globs, so naming a narrower kind later costs nothing and moves nothing. |
 | `spec` | `specs/*.md` | A durable design document — what a thing is and why, not when. Named for its topic. Outlives the plans that implement it. |
+| `article` | `articles/*/` | A piece of public writing, one directory each, named for its slug. The directory is the packet the writing workflow runs over: brief, claims, skeleton, draft, critique, audit. A trailing slash in `find` means the artifact is the directory, not the files in it. |
 
 Names are a convention, not a rule the engine enforces — nothing parses a
 filename. Follow the description; every file in the directory is found

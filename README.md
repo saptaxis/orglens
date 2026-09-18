@@ -9,9 +9,10 @@ A piece of work lives in several places at once: a folder of documents, a code r
 orglens is built alongside [scad](https://github.com/saptaxis/scoped-agent-dispatch),
 a lower-level tool that runs agent sessions and records what happened.
 
-scad is optional and not a dependency. `orglens start` shells out to it to launch
-a session, and session counts are read from its index when it is present. Every
-other command works without it.
+scad is optional and not a dependency. `orglens start` and `resume` shell out to
+it, and sessions and notes come from `scad session ls --json` and `scad notes ls
+--about` when it is present (scad 0.5 or later; an older scad or none means no
+sessions, which is ordinary). Every other command works without it.
 
 ## What it assumes
 
@@ -22,9 +23,10 @@ other command works without it.
 - **A home is a name.** It resolves to a path on this machine — by marker, then
   git remote, then directory name — so one declaration works on your laptop,
   another machine, and inside a container where the repositories sit elsewhere.
-- **Nothing is guessed.** A session belongs to a unit because someone said so
-  when it started, or because containment gives exactly one answer. Where
-  neither holds it stays unattributed, which is a resting state.
+- **Nothing is guessed.** A session belongs to a unit because someone said so,
+  or because it ran inside one of the unit's homes. A session in a shared home
+  belongs to each unit sharing it; a session above every home belongs to none,
+  which is a resting state.
 - **Declarations decide what exists.** The grammar's patterns only propose
   candidates worth asking about, and roots are where it looks rather than what
   exists.
@@ -50,8 +52,8 @@ pip install -e .
 orglens needs to know where your docs tree lives:
 
 ```bash
-mkdir -p ~/.config/orglens
-cat > ~/.config/orglens/config.yaml <<'EOF'
+mkdir -p ~/.orglens
+cat > ~/.orglens/config.yaml <<'EOF'
 roots:
   - ~/path/to/your/docs
   - ~/path/to/your/code
@@ -61,7 +63,11 @@ EOF
 `roots` are the directories orglens sweeps for declarations: your documents tree
 and wherever your repositories are checked out. A unit outside every root is
 un-met rather than invisible, and registers itself the first time you work in
-it. `grammar: /path/to/custom.yaml` replaces the bundled grammar.
+it. The sweep goes three directories below each root; a marker deeper than
+that is found by listing its parent as a root too. A root that is itself a
+repository counts as a home candidate, so a checkout whose parent holds
+everything can be listed on its own. `grammar: /path/to/custom.yaml`
+replaces the bundled grammar.
 
 ## CLI Reference
 
@@ -69,17 +75,20 @@ it. `grammar: /path/to/custom.yaml` replaces the bundled grammar.
 |---------|-------------|
 | `orglens list [--type KIND]` | List all units, grouped by declared kind |
 | `orglens status` | Where every unit stands, across all of its homes |
-| `orglens find KIND [UNIT]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own |
+| `orglens find KIND [UNIT] [--in DIR] [--grep TEXT] [--since 2w] [--waiting] [--json]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own. `--in` scopes to a directory the grammar has no name for; `--grep` keeps the ones whose text matches and shows the lines |
 | `orglens new PATH [--kind KIND] [--part-of UNIT] [--home NAME]` | Create a unit: a directory, and the declaration that names it. `--home` is repeatable |
 | `orglens declare PATH [--yes]` | Declare an existing directory as a unit, proposed from what it looks like |
-| `orglens check` | Report where the tree has drifted. Reports only — never gates |
-| `orglens snapshot [--stdout]` | Generate a topology snapshot (markdown) |
+| `orglens check` | Report where the tree has drifted: missing driver documents, undeclared folders, weak or shared homes, kinds that match nothing, folders of documents the grammar has no word for. Reports only — never gates |
+| `orglens snapshot [--stdout] [--check]` | Generate a topology snapshot (markdown); `--check` says whether the written one is older than any declaration or driver document, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
-| `orglens view` | Render where everything stands as a page, and open it |
+| `orglens view` | Render where everything stands as a page, and open it: units banded by when they last moved, waiting first, a foldable card each; filter by band, kind, agent or text |
 | `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--dry-run]` | Start a session for a unit, attributed before its first turn |
+| `orglens sessions [UNIT] [--none] [--all]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
+| `orglens resume UNIT\|SESSION-ID [--print]` | Resume a session, or a unit's newest open one, through `scad session resume` |
+| `orglens attribute SESSION-ID UNIT` | Say which unit a session was for, after the fact |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 | `orglens where [NAME]` | Which roots are configured, and which unit a name or this directory resolves to |
-| `orglens workflow ...` | Derive and validate filesystem-native workflows |
+| `orglens workflow next\|done\|note\|goto PACKET` | Run a capability's workflow over a packet, one pass at a time, with a human between. See `capabilities/tutorial/README.md` |
 
 ## Skills
 
@@ -90,7 +99,7 @@ them:
 ./bootstrap
 ```
 
-Decks about work that cannot be published live in a second repo and install the
+Capabilities about work that cannot be published live in a second repo and install the
 same way:
 
 ```bash
@@ -98,7 +107,7 @@ same way:
 ```
 
 Skills install as copies, so re-run `bootstrap` after editing a `SKILL.md`. See
-[`capabilities/README.md`](capabilities/README.md) for the deck layout.
+[`capabilities/README.md`](capabilities/README.md) for the capability layout.
 
 ## Declaring a unit
 
@@ -121,11 +130,12 @@ named repositories, optionally with a path inside one — the marker's own
 directory is always a home whether or not it is listed.
 
 Homes can be shared: one repository is a home of two units when both work in it,
-and each sees its own documents.
+and each sees its own documents. Inside a shared home, `where` answers the first
+of those units by name; `check` reports every shared home and which unit that is.
 
-Everything needed to find a unit travels with it in git. `~/.orglens` holds an
-index and an event log; deleting it loses speed and attribution history, not the
-definition of your work.
+Everything needed to find a unit travels with it in git. `~/.orglens` holds the
+config, a snapshot cache and the event log; deleting it loses your roots, speed
+and attribution history, not the definition of your work.
 
 ## Grammar
 
@@ -155,7 +165,7 @@ structure:                    # what each part is for. Authoring, never discover
 ```
 
 The grammar is data. Adding a kind is one line and needs no Python change:
-`deck: capabilities/*` is a working example, exercised by
+`capability: "*"` is a working example, exercised by
 `capabilities/.orglens-grammar.yml`. A rendering of the grammar lives at
 `skills/orglens/references/grammar-reference.md`.
 
@@ -169,16 +179,24 @@ The grammar is data. Adding a kind is one line and needs no Python change:
 3. **Sessions join by where they ran.** A session in any of a unit's homes
    counts for that unit
 
-Status is the first line carrying a bolded `Status:` marker in blockquote form, found in a unit's documents,
-looking at the ones `structure` names first. Nothing declares a state file, so
+Status is the first `> **Status:**` line in a unit's documents, looking at the
+ones `structure` names first. Nothing declares a state file, so
 moving the line into whichever document you actually maintain works. It is
 always reported with its age, since an authored sentence can go stale.
 
 ## How Sessions Get Attributed
 
-Containment attributes a session when its working directory sits inside exactly
-one home. Above a home it cannot: at the root of a documents repository with
-sixteen homes below it, 108 sessions belong to no unit.
+A session belongs to a set of units. An explicit attribution names one unit, and
+the session is that unit's alone. Otherwise the session belongs to every unit
+with a home containing its working directory: one unit ordinarily, two when a
+home is shared, none when it ran above every home. At the root of a documents
+repository with sixteen homes below it, that is most of the sessions.
+
+`orglens sessions UNIT` lists a unit's sessions and how each is the unit's;
+`orglens sessions --none` lists the ones that belong to no unit. `orglens resume`
+hands a session id, or a unit's newest open session, to `scad session resume`.
+`orglens attribute SESSION-ID UNIT` records an attribution after the fact, which
+is also how a shared-home session is narrowed to one unit.
 
 `orglens start UNIT` records the unit before the session's first turn. It picks
 one of the unit's homes, asking with `--home` when more than one resolves,
@@ -186,11 +204,6 @@ shells out to `scad session launch`, reads the session id from scad's output,
 and appends one `attributed` event to `~/.orglens/events/`. Unless you pass
 `--prompt`, the session's first turn names the unit, lists every home, and
 points at wherever the unit's status is authored.
-
-A session is attributed when someone names the unit at launch, or when
-containment gives exactly one answer. Sessions started any other way are
-attributed by containment where that is unambiguous, and reported as
-**unattributed** where it is not.
 
 `orglens start` on an undeclared name proposes a declaration from the
 directory's position: kind from where it sits, `part_of` from what contains it,
@@ -200,9 +213,9 @@ starting a session.
 
 `orglens config UNIT` renders a unit's homes into the `repos:` block of the
 config a container launcher reads. Homes absent from this machine are left out.
-This is the only command that writes under `~/.scad`; the others read
-`~/.scad/index.sqlite` and `~/.scad/launches/`. Launching on this machine needs
-no config.
+This is the only command that writes under `~/.scad`; nothing else in orglens
+touches that directory, and scad's index is never opened — sessions and notes
+come through scad's own commands. Launching on this machine needs no config.
 
 ## Demo
 
@@ -219,8 +232,6 @@ DOCS_ROOT=~/path/to/your/docs ./demo.sh 3    # one step
 # Run tests
 pip install pytest
 python -m pytest tests/ -v
-
-# Current: 488 tests
 ```
 
 `skills/orglens/references/grammar-reference.md` is generated. Run

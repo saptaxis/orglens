@@ -92,3 +92,33 @@ def test_neither_key_is_an_error(tmp_path):
         assert "roots" in str(exc)
     else:
         raise AssertionError("expected a ValueError naming `roots`")
+
+
+class TestOneHome:
+    """Everything orglens keeps on a machine lives under one directory."""
+
+    def test_config_is_read_from_the_orglens_home(self, tmp_path, monkeypatch):
+        from orglens import config as config_module
+        home = tmp_path / "orglens-home"
+        home.mkdir()
+        (home / "config.yaml").write_text(f"roots:\n  - {tmp_path}\n")
+        monkeypatch.setattr(config_module, "ORGLENS_HOME", home)
+
+        loaded = Config.load()
+
+        assert loaded.roots == [tmp_path]
+        assert loaded.snapshot_path == home / "cache" / "snapshot.md"
+
+    def test_a_missing_config_names_the_one_place_it_goes(self, tmp_path, monkeypatch):
+        from orglens import config as config_module
+        monkeypatch.setattr(config_module, "ORGLENS_HOME", tmp_path / "nowhere")
+        with pytest.raises(FileNotFoundError) as exc:
+            Config.load()
+        assert str(tmp_path / "nowhere" / "config.yaml") in str(exc.value)
+        assert ".config" not in str(exc.value)
+
+    def test_the_event_log_is_under_the_same_home(self):
+        from orglens.config import ORGLENS_HOME
+        from orglens.events import EVENTS_DIR
+        assert EVENTS_DIR == ORGLENS_HOME / "events"
+        assert ORGLENS_HOME.name == ".orglens"

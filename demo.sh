@@ -51,7 +51,7 @@ fi
 if [ "$STEP" = "all" ] || [ "$STEP" = "2" ]; then
     print_header 2 "Configure"
 
-    CONFIG_DIR="$HOME/.config/orglens"
+    CONFIG_DIR="$HOME/.orglens"
     CONFIG_FILE="$CONFIG_DIR/config.yaml"
 
     if [ -f "$CONFIG_FILE" ]; then
@@ -112,7 +112,7 @@ if [ "$STEP" = "all" ] || [ "$STEP" = "5" ]; then
 
     echo "Skills this repo ships (not installed by this step):"
     npx --yes skills@latest add . -l --full-depth 2>/dev/null | grep -E "^│    [a-z]" || \
-        echo "  (needs node; skills live in skills/ and capabilities/decks/*/skills/)"
+        echo "  (needs node; skills live in skills/ and capabilities/*/skills/)"
     echo ""
 
     echo "Skill file:"

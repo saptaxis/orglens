@@ -56,6 +56,8 @@ def units_tree(tmp_path):
     (clipcompose / "overview.md").write_text("# Overview\n\n> **Status:** Active\n")
     (clipcompose / "plans" / "01-packaging-Feb252026.md").write_text("# 01 — Packaging\n")
     (clipcompose / "specs" / "agent-integration.md").write_text("# Agent Integration\n")
+    (clipcompose / "articles" / "one-piece").mkdir(parents=True)
+    (clipcompose / "articles" / "one-piece" / "draft.md").write_text("# draft\n")
 
     orglens = docs / "projects" / "orglens"
     _declare(orglens, "orglens", "project")
@@ -346,6 +348,79 @@ class TestFindCommand:
         result = runner.invoke(cli, ["find", "plan", "physics-priors"], env=cli_env)
         assert "01-testbed-Feb032026.md" not in result.output
 
+    def test_an_unknown_unit_is_refused_in_one_line(self, runner, cli_env):
+        result = runner.invoke(cli, ["find", "plan", "nosuchunit"], env=cli_env)
+        assert result.exit_code == 1
+        assert "No unit 'nosuchunit'" in result.output
+        assert "Traceback" not in result.output
+
+    def test_grep_matches_inside_files_and_shows_the_line(self, runner, cli_env, units_tree):
+        (units_tree / "projects" / "clipcompose" / "specs" / "agent-integration.md").write_text(
+            "# Agent Integration\n\nThe lunar lander harness sorts worst-confidence first.\n")
+        result = runner.invoke(cli, ["find", "spec", "--grep", "Lunar Lander"], env=cli_env)
+        assert result.exit_code == 0, result.output
+        assert "agent-integration.md" in result.output
+        assert ":3" in result.output and "worst-confidence" in result.output
+        # A plan that does not mention it is not listed.
+        result = runner.invoke(cli, ["find", "plan", "--grep", "Lunar Lander"], env=cli_env)
+        assert "No plans" in result.output
+
+    def test_grep_on_a_directory_kind_searches_the_files_inside(self, runner, cli_env, units_tree):
+        (units_tree / "projects" / "clipcompose" / "articles" / "one-piece" / "draft.md").write_text(
+            "# draft\n\nan observation about sort direction\n")
+        result = runner.invoke(cli, ["find", "article", "--grep", "sort direction"], env=cli_env)
+        assert "one-piece" in result.output
+        assert "draft.md:3" in result.output
+
+    def test_in_scopes_to_a_directory_name_the_grammar_does_not_know(self, runner, cli_env, units_tree):
+        extra = units_tree / "projects" / "clipcompose" / "specs2"
+        extra.mkdir()
+        (extra / "fresh.md").write_text("# fresh\n")
+        result = runner.invoke(cli, ["find", "doc", "clipcompose", "--in", "specs2"], env=cli_env)
+        assert result.exit_code == 0, result.output
+        assert "fresh.md" in result.output
+        assert "agent-integration.md" not in result.output
+
+    def test_json_carries_path_kind_unit_and_matches(self, runner, cli_env, units_tree):
+        import json
+        (units_tree / "projects" / "clipcompose" / "specs" / "agent-integration.md").write_text(
+            "# Agent Integration\n\nmentions lunar\n")
+        result = runner.invoke(cli, ["find", "spec", "--grep", "lunar", "--json"], env=cli_env)
+        [row] = json.loads(result.output)
+        assert row["kind"] == "spec" and row["unit"] == "clipcompose"
+        assert row["path"].endswith("specs/agent-integration.md")
+        assert row["matches"] == [{"file": row["path"], "line": 3, "text": "mentions lunar"}]
+
+    def test_since_keeps_documents_touched_within_the_window(self, runner, cli_env, units_tree):
+        import os, time
+        old = units_tree / "projects" / "clipcompose" / "specs" / "agent-integration.md"
+        ago = time.time() - 40 * 86400
+        os.utime(old, (ago, ago))
+        (units_tree / "projects" / "clipcompose" / "specs" / "new.md").write_text("# new\n")
+        result = runner.invoke(cli, ["find", "spec", "--since", "2w"], env=cli_env)
+        assert "new.md" in result.output and "agent-integration.md" not in result.output
+        result = runner.invoke(cli, ["find", "spec", "--since", "90d"], env=cli_env)
+        assert "agent-integration.md" in result.output
+
+    def test_since_refuses_a_window_it_cannot_read(self, runner, cli_env):
+        result = runner.invoke(cli, ["find", "spec", "--since", "soon"], env=cli_env)
+        assert result.exit_code == 1
+        assert "soon" in result.output
+
+    def test_waiting_keeps_the_packets_gated_on_a_human(self, runner, cli_env, units_tree):
+        from orglens.workflow import session
+        gated = units_tree / "projects" / "clipcompose" / "articles" / "one-piece"
+        quiet = units_tree / "projects" / "clipcompose" / "articles" / "another"
+        quiet.mkdir()
+        (quiet / "draft.md").write_text("# d\n")
+        for pkt in (gated, quiet):
+            session.bind(pkt, pkt / "WORKFLOW.yaml")
+        session.append(gated, {"type": "done", "node": "x", "agent": "a", "question": "which?"})
+        session.append(quiet, {"type": "done", "node": "x", "agent": "a"})
+        result = runner.invoke(cli, ["find", "article", "--waiting"], env=cli_env)
+        assert "one-piece" in result.output and "another" not in result.output
+        assert "which?" in result.output
+
     def test_find_specs(self, runner, cli_env):
         result = runner.invoke(cli, ["find", "spec", "clipcompose"], env=cli_env)
         assert result.exit_code == 0
@@ -375,6 +450,51 @@ class TestNewCommand:
         assert result.exit_code == 0
         assert (target / MARKER).exists()
         assert target.is_dir()
+
+    def test_new_writes_the_driver_document_as_a_stub(self, runner, cli_env, units_tree):
+        # The grammar says every unit carries the driver document and `status`
+        # reads its first line. Without a stub, the first thing an agent did
+        # after `new` was `cat` a sibling's overview to learn the shape.
+        target = units_tree / "projects" / "test-tool"
+        runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        text = (target / "overview.md").read_text()
+        assert text.startswith("# Overview")
+        assert "> **Status:**" in text
+        assert "What it is" in text
+
+    def test_new_does_not_overwrite_an_existing_driver_document(self, runner, cli_env, units_tree):
+        target = units_tree / "projects" / "test-tool"
+        target.mkdir()
+        (target / "overview.md").write_text("# mine\n")
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        # `new` refuses an existing directory; the point is that nothing here
+        # ever clobbers a document a person wrote.
+        assert result.exit_code == 1
+        assert (target / "overview.md").read_text() == "# mine\n"
+
+    def test_new_names_the_next_steps(self, runner, cli_env, units_tree):
+        target = units_tree / "projects" / "test-tool"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        assert "next:" in result.output
+        assert "overview.md" in result.output
+        assert "orglens start test-tool" in result.output
+
+    def test_new_registers_the_unit_in_an_explicit_parent_nav(self, runner, cli_env, units_tree):
+        # mkdocs-awesome-nav: a parent `.nav.yml` that lists children by name
+        # has no glob, so a new unit is invisible to the site until added.
+        nav = units_tree / "projects" / ".nav.yml"
+        nav.write_text("title: Projects\nnav:\n  - clipcompose\n  - orglens\n")
+        target = units_tree / "projects" / "test-tool"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        assert nav.read_text() == "title: Projects\nnav:\n  - clipcompose\n  - orglens\n  - test-tool\n"
+        assert ".nav.yml" in result.output
+
+    def test_new_leaves_a_parent_nav_with_a_glob_alone(self, runner, cli_env, units_tree):
+        nav = units_tree / "projects" / ".nav.yml"
+        nav.write_text("title: Projects\nnav:\n  - '*'\n")
+        target = units_tree / "projects" / "test-tool"
+        runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        assert nav.read_text() == "title: Projects\nnav:\n  - '*'\n"
 
     def test_the_declaration_names_the_unit_and_kind(self, runner, cli_env, units_tree):
         target = units_tree / "projects" / "test-tool"
@@ -696,6 +816,8 @@ class TestCheckCommand:
         (proj / "logs" / "01-x-Feb252026-log.md").write_text("# Log\n")
         (proj / "specs").mkdir()
         (proj / "specs" / "x.md").write_text("# Spec\n")
+        (proj / "articles" / "one-piece").mkdir(parents=True)
+        (proj / "articles" / "one-piece" / "draft.md").write_text("# draft\n")
 
         result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [docs]))
 
@@ -844,6 +966,26 @@ class TestCheckCommand:
         assert "dup-a" in result.output
         assert "dup-b" in result.output
 
+    def test_a_home_shared_by_two_units_says_which_one_answers_inside_it(
+        self, runner, tmp_path
+    ):
+        docs = tmp_path / "docs"
+        code = tmp_path / "code"
+        (code / "sharedrepo").mkdir(parents=True)
+        for name in ("zeta", "alpha"):
+            unit_dir = docs / "projects" / name
+            unit_dir.mkdir(parents=True)
+            (unit_dir / MARKER).write_text(
+                f"unit: {name}\nkind: project\nhomes:\n  - sharedrepo\n"
+            )
+
+        result = runner.invoke(cli, ["check"], env=_roots_config(tmp_path, [docs, code]))
+
+        assert (
+            "home 'sharedrepo' is declared on alpha and zeta — inside it, "
+            "`where` answers alpha" in result.output
+        )
+
 
 class TestDuplicateDeclarations:
     """Two markers naming the same unit — a copy-pasted folder, a worktree, a
@@ -896,6 +1038,36 @@ class TestSnapshotCommand:
         result = runner.invoke(cli, ["snapshot", "--stdout"], env=cli_env)
         assert result.exit_code == 0
         assert "Topology Snapshot" in result.output
+
+    def test_check_says_stale_when_there_is_no_snapshot(self, runner, cli_env):
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 1
+        assert "stale" in result.output
+
+    def test_check_says_fresh_after_writing(self, runner, cli_env):
+        runner.invoke(cli, ["snapshot"], env=cli_env)
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 0, result.output
+        assert "fresh" in result.output
+
+    def test_snapshot_can_be_scoped_to_a_kind_or_a_unit(self, runner, cli_env):
+        everything = runner.invoke(cli, ["snapshot", "--stdout"], env=cli_env).output
+        assert "freightify" in everything and "clipcompose" in everything
+        projects = runner.invoke(cli, ["snapshot", "--stdout", "--type", "project"], env=cli_env).output
+        assert "clipcompose" in projects and "freightify" not in projects
+        one = runner.invoke(cli, ["snapshot", "--stdout", "--unit", "clipcompose"], env=cli_env).output
+        assert "clipcompose" in one and "orglens" not in one and "freightify" not in one
+
+    def test_check_says_stale_when_a_declaration_is_newer(self, runner, cli_env, units_tree):
+        import os, time
+        runner.invoke(cli, ["snapshot"], env=cli_env)
+        marker = next(units_tree.rglob(MARKER))
+        later = time.time() + 5
+        os.utime(marker, (later, later))
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 1
+        assert "stale" in result.output
+        assert marker.name in result.output
 
 
 class TestAgainstTheSharedTwoRootFixture:

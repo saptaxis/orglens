@@ -237,3 +237,83 @@ def test_a_shared_home_is_seen_by_each_unit_that_shares_it(tmp_path, grammar):
 
     assert len(found) == 2
     assert {d.unit for d in found} == {"unit-a", "unit-b"}
+
+
+def test_a_home_is_walked_once_however_many_kinds_are_asked_for(two_root_tree, grammar):
+    """`find` used to `rglob` each home once per document kind — 92 walks
+    for 23 units. The directory list is computed once per home and every
+    kind filters it."""
+    from orglens import documents
+    documents._dirs_under.cache_clear()
+    unit = two_root_tree.resolve("orglens")
+    for kind in two_root_tree.grammar.artifact_types:
+        documents.find(two_root_tree, kind, unit)
+    info = documents._dirs_under.cache_info()
+    assert info.misses == len(unit.paths)
+    assert info.hits >= len(two_root_tree.grammar.artifact_types) - 1
+
+
+def _grammar_with(tmp_path, artifacts: str):
+    from orglens.grammar import Grammar
+    path = tmp_path / "g.yaml"
+    path.write_text(
+        "version: 2\ndriver: overview.md\nentities:\n  project: projects/*\n"
+        f"artifacts:\n{artifacts}"
+    )
+    return Grammar.from_yaml(path)
+
+
+def test_a_find_ending_in_a_slash_yields_directories_not_files(tmp_path):
+    """`articles/*/`: the artifact is the directory. One per piece, at any
+    depth under a container named `articles`, never the files inside."""
+    grammar = _grammar_with(tmp_path, "  article:\n    find: articles/*/\n")
+    docs = tmp_path / "docs"
+    unit = docs / "projects" / "widget"
+    unit.mkdir(parents=True)
+    (unit / MARKER).write_text("unit: widget\nkind: project\n")
+    for name in ("one", "two"):
+        (unit / "articles" / name).mkdir(parents=True)
+        (unit / "articles" / name / "draft.md").write_text("# d\n")
+        (unit / "articles" / name / "brief.md").write_text("# b\n")
+    (unit / "articles" / "index.md").write_text("# not an article\n")
+    (unit / "articles" / ".hidden").mkdir()
+
+    found = documents.find(Registry([docs], grammar), "article", "widget")
+
+    assert [d.name for d in found] == ["one", "two"]
+    assert all(d.path.is_dir() for d in found)
+    assert all(d.kind == "article" for d in found)
+
+
+def test_a_directory_kind_is_the_artifacts_own_directory_property(tmp_path):
+    grammar = _grammar_with(tmp_path, "  article:\n    find: articles/*/\n")
+    a = grammar.artifact_types["article"]
+    assert a.directory == "articles"
+    assert a.is_directory is True
+    assert grammar.artifact_types["article"].pattern == "*"
+    plan_grammar = _grammar_with(tmp_path, "  plan:\n    find: plans/*.md\n")
+    assert plan_grammar.artifact_types["plan"].is_directory is False
+
+
+def test_a_kind_can_name_several_containers(tmp_path):
+    """`plans/` for history and `plans2/` for a fresh start are one kind;
+    the grammar says so with a list, and nothing is renamed."""
+    from orglens.grammar import Grammar
+    path = tmp_path / "g.yaml"
+    path.write_text(
+        "version: 2\ndriver: overview.md\nentities:\n  project: projects/*\n"
+        "artifacts:\n  plan:\n    find:\n      - plans/*.md\n      - plans2/*.md\n"
+    )
+    grammar = Grammar.from_yaml(path)
+    docs = tmp_path / "docs"
+    unit = docs / "projects" / "widget"
+    unit.mkdir(parents=True)
+    (unit / MARKER).write_text("unit: widget\nkind: project\n")
+    (unit / "plans").mkdir(); (unit / "plans2").mkdir()
+    (unit / "plans" / "01-old.md").write_text("#\n")
+    (unit / "plans2" / "01-new.md").write_text("#\n")
+
+    found = documents.find(Registry([docs], grammar), "plan", "widget")
+    assert sorted(d.name for d in found) == ["01-new.md", "01-old.md"]
+    assert grammar.artifact_types["plan"].directories == ("plans", "plans2")
+    assert grammar.artifact_types["plan"].find == "plans/*.md"

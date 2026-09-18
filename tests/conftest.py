@@ -9,6 +9,26 @@ from orglens.homes import Home
 from orglens.units import Registry, Unit
 
 
+@pytest.fixture(autouse=True)
+def no_real_machine_state(tmp_path, monkeypatch):
+    """Keep the real `scad` and `~/.orglens/events` out of every test.
+
+    Sessions come from `scad session ls --json`; without this a test's count
+    depends on which machine runs it. A test that wants sessions hands
+    `fake_scad(rows)` to `orglens.sessions.run_scad`, which a later
+    `monkeypatch.setattr` still does.
+    """
+    monkeypatch.setattr("orglens.sessions.run_scad", fake_scad())
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "no-events")
+    # Per-process caches: one command is one process, but the suite is one
+    # process running hundreds of trees.
+    from orglens import activity, documents
+    activity._status_lines.cache_clear()
+    activity._last_commit.cache_clear()
+    activity._newest_mtime.cache_clear()
+    documents._dirs_under.cache_clear()
+
+
 @pytest.fixture
 def grammar():
     grammar_path = Path(__file__).parent.parent / "orglens" / "grammars" / "default.yaml"
@@ -30,6 +50,8 @@ def docs_tree(tmp_path):
     )
     (proj / "plans" / "01-packaging-Feb252026.md").write_text("# 01 — Packaging\n")
     (proj / "specs" / "agent-integration.md").write_text("# Agent Integration\n")
+    (proj / "articles" / "one-piece").mkdir(parents=True)
+    (proj / "articles" / "one-piece" / "draft.md").write_text("# draft\n")
 
     # Another project (minimal)
     proj2 = docs / "projects" / "orglens"
@@ -234,3 +256,27 @@ def unit_with_clobbering_runtime(tmp_path):
         declared_at=tmp_path / "orglens",
         runtime={"name": "hijacked", "repos": {"evil": {"path": "/nope"}}},
     )
+
+
+def export_row(id, cwd, **extra) -> dict:
+    """One row as `scad session ls --json --kind main` emits it. Defaults are
+    a claude main session with one turn and nothing live."""
+    row = {"id": id, "kind": "main", "parent_session_id": None, "agent": "claude",
+           "cwd": cwd, "project": None, "name": None, "title": None,
+           "started": None, "ended": None, "n_turns": 1, "outcome": None,
+           "needs": None, "grade": "full", "harness_state": None,
+           "last_turn": None, "live": None}
+    row.update(extra)
+    return row
+
+
+def fake_scad(sessions: list[dict] | None = None, notes: list[dict] | None = None):
+    """A stand-in for `sessions.run_scad`: answers `session ls` with `sessions`
+    (main rows only, as the real call is asked for) and `notes ls` with `notes`."""
+    def run(argv: list[str]) -> list[dict]:
+        if argv[:2] == ["session", "ls"]:
+            return [r for r in (sessions or []) if r.get("kind", "main") == "main"]
+        if argv[:2] == ["notes", "ls"]:
+            return list(notes or [])
+        return []
+    return run

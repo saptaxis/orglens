@@ -1,34 +1,30 @@
-# How orglens sees this bank — a second tree, and a second grammar file.
+# How orglens sees this tree of capabilities — a second tree, and a second grammar file.
 # Nothing in the engine assumes there is only one; which grammar governs which
 # root is a config question, not an engine one.
 version: 2
 
-driver: DECK.md
+driver: README.md
 
 entities:
-  deck: decks/*
+  capability: "*"
 
 artifacts:
-  operator:
-    find: operators/*/*.md
+  program:
+    find: programs/*.md
     means: >
-      A method-deck card — one pass, one instruction, one model. Grouped by
-      the phase it belongs to: inception, verification, communication.
+      A node program: what one node of a capability's workflow runs. One pass, one
+      file written, performed by whoever is at the packet.
   skill:
     find: skills/*/SKILL.md
     means: >
-      A domain-deck card. Directory-shaped: the card is a folder holding
-      SKILL.md plus whatever it needs beside it.
-  agent:
-    find: agents/*.md
-    means: An agent definition the deck can dispatch.
-  bias-pack:
-    find: packs/bias/*.md
-    means: A named bias to apply to a pass.
-  voice-pack:
-    find: packs/voice/*.md
-    means: A named voice to write in.
+      A skill a harness loads. Directory-shaped: a folder holding SKILL.md
+      plus whatever it needs beside it.
+  reference:
+    find: references/*.md
+    means: >
+      Material a program or skill reads: a template, a voice, a list of
+      patterns. Never performed on its own.
 
 structure:
-  deck:
-    DECK.md: What the deck is for, and how its cards fit together.
+  capability:
+    README.md: What the capability is for, and how its programs and skills fit together.

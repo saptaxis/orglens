@@ -1,0 +1,26 @@
+# A three-node workflow, small enough to read in one sitting.
+#
+# A bug report arrives. Someone reproduces it, someone fixes it, someone checks
+# the fix. If the check fails, a human sends it round again. When it passes,
+# the workflow is complete.
+#
+# Nothing here is about bugs as far as the engine is concerned. `reproduce`,
+# `fix`, `verdict.md` are strings this file invents; the engine names the program
+# and never reads what it writes. Swap them for `plan`/`apply`/`plan.tf` and
+# the same engine runs a deploy.
+
+workflow: triage
+nodes:
+  - name: reproduce
+    program: programs/reproduce.md
+    writes: repro.md
+
+  # review: true stops the workflow after this node until someone runs `note`.
+  - name: fix
+    program: programs/fix.md
+    writes: fix.md
+    review: true
+
+  - name: verify
+    program: programs/verify.md
+    writes: verdict.md

@@ -1,4 +1,4 @@
-# Role: verify
+# Program: verify
 
 Check the fix against the reproduction. Nothing else.
 
@@ -9,15 +9,14 @@ Write `verdict.md` with one of two outcomes, stated in the first line:
 - **PASSES** — the steps no longer produce the observed behaviour.
 - **FAILS** — they still do, or they now produce something else. Say which.
 
-If it FAILS, the loop returns to `reproduce` and your verdict is that pass's
-input. Write it so the next reproduction is better than the last one.
+`verify` is the last node, so after it the workflow reports `complete` whatever
+your verdict says — the engine does not read prose. Going round again is a
+human act:
 
-If it PASSES, the loop still returns to `reproduce` — the engine does not know
-what your prose says. Ending the loop is a human act:
+    orglens workflow goto <packet> --node reproduce --why "FAILS: ..."
 
-    touch <packet>/CLOSED
-
-`exists:CLOSED` is the workflow's only terminal condition.
+Your verdict is that next reproduction's input. Write it so the next round is
+better than the last one.
 
 **You should not be the same session that wrote `fix.md`.** A session checking
 its own work reads its own reasoning as obvious and misses what it assumed.
@@ -26,5 +25,4 @@ fresh session.
 
 When done:
 
-    orglens workflow record <packet> --workflow <deck>/WORKFLOW.yaml \
-        --deck <deck> --node verify
+    orglens workflow done <packet> --node verify --agent <you>
