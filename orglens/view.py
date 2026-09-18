@@ -366,8 +366,15 @@ def clocks(a: Activity, now: float | None = None) -> list[tuple[str, int]]:
         out.append(("waiting", max((ask.get("at") or 0) for ask in a.needs) or int(now)))
     if a.blocked:
         out.append(("waiting", int(now)))
-    if a.live:
-        out.append(("live", int(now)))
+    # A live process is only "now" while it is talking. An open pane that
+    # has not spoken for a day is a pane, not activity; it is placed by
+    # when it last spoke and shown as idle.
+    for s in a.live:
+        spoke = s.get("spoke")
+        if spoke is None or now - spoke < DAY:
+            out.append(("live", int(now)))
+        else:
+            out.append(("idle", int(spoke)))
     spoke = (a.last_turn or {}).get("at") or a.last_session
     if spoke:
         out.append(("session", int(spoke)))
@@ -431,7 +438,12 @@ def _placed(a: Activity, now: float) -> str:
     for i, (name, at) in enumerate(clocks(a, now)):
         if name == "waiting":
             continue
-        text = "&#x25CF; live" if name == "live" else f"{name} {ago(at, now)}"
+        if name == "live":
+            text = "&#x25CF; live"
+        elif name == "idle":
+            text = f"&#x25CB; open pane, idle {ago(at, now).replace(' ago', '')}"
+        else:
+            text = f"{name} {ago(at, now)}"
         bits.append(f"<span class='placed'>{text}</span>" if i == 0 else text)
     if a.sessions:
         who = "/".join(a.agents) if a.agents else "?"

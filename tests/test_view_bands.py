@@ -29,6 +29,17 @@ class TestClocks:
         a = Activity(last_session=NOW - 2 * H, modified=NOW - 5 * H, touched=NOW - 9 * H)
         assert [c[0] for c in clocks(a, now=NOW)] == ["session", "edited", "committed"]
 
+    def test_an_open_pane_that_has_not_spoken_for_a_day_is_idle_not_live(self):
+        a = Activity(live=[{"session": "s", "name": "n", "cwd": "/x", "spoke": NOW - 3 * 24 * H}])
+        assert clocks(a, now=NOW)[0] == ("idle", NOW - 3 * 24 * H)
+        assert band(a, now=NOW) == "this week"
+        page = render([("Projects", [_row("p", a)])], CTX, now=NOW)
+        assert "open pane, idle 3d" in page and "&#x25CF; live" not in page
+
+    def test_a_pane_that_spoke_today_is_live(self):
+        a = Activity(live=[{"session": "s", "name": "n", "cwd": "/x", "spoke": NOW - 2 * H}])
+        assert band(a, now=NOW) == "today"
+
     def test_a_gate_is_a_clock_of_its_own(self):
         a = Activity(needs=[{"question": "q", "at": NOW - H}])
         assert clocks(a, now=NOW)[0] == ("waiting", NOW - H)

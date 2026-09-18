@@ -67,7 +67,7 @@ def test_live_is_the_running_ones_from_the_list(tmp_path):
         _s("a", live=True, label="working", cwd="/here"),
         _s("b", live=False),
     ])
-    assert act.live == [{"session": "a", "name": "working", "cwd": "/here"}]
+    assert act.live == [{"session": "a", "name": "working", "cwd": "/here", "spoke": None}]
     assert act.live_sessions == 1
 
 

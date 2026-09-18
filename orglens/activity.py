@@ -327,8 +327,11 @@ def _from_sessions(sessions: list[Session]) -> dict:
             }
             for s in newest[:8]
         ],
+        # `spoke` is when the session last said anything; a pane that is
+        # open but has not spoken for a day is idle, not work in progress.
         "live": [
-            {"session": s.id, "name": s.label, "cwd": s.cwd}
+            {"session": s.id, "name": s.label, "cwd": s.cwd,
+             "spoke": _epoch((s.last_turn or {}).get("ts")) or ((s.when // 1000) if s.when else None)}
             for s in newest if s.live
         ],
     }
