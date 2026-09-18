@@ -514,8 +514,18 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     homes = (mine,) + tuple(h for h in extra_homes if h != mine)
     _write_marker(target, home=mine, unit=target.name, kind=kind,
                   part_of=part_of, homes=homes)
+    driver = target / registry.grammar.driver
+    driver.write_text(_driver_stub(target.name, kind).replace(
+        "{title}", driver.stem.replace("-", " ").capitalize()))
+    registered = _register_in_nav(target)
 
     click.echo(f"Created {kind or 'unit'}: {target}")
+    click.echo("next:")
+    click.echo(f"  write {driver.name}: the status line, what it is, where its state lives")
+    if registered is not None:
+        click.echo(f"  added to {registered}" if registered else
+                   "  the parent .nav.yml lists children by name; add this one")
+    click.echo(f"  orglens start {target.name}   # a session on it, attributed before its first turn")
     if not _under_a_root(target, registry.roots):
         # Warn, don't refuse: a unit outside every root is allowed to exist,
         # it is simply un-met until a root is added or someone works in it —
@@ -528,6 +538,51 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
             "standing inside it."
         )
     _refresh_snapshot(registry, config)
+
+
+def _driver_stub(name: str, kind: str | None) -> str:
+    """The driver document, with the shape a person fills in: the status
+    line `status` reads, and the two headings every real one carries. The
+    title is the document's own name, as the grammar declares it. Written
+    once by `new`; never touched again by anything."""
+    return (
+        "# {title}\n\n"
+        f"> **Status:** Opened {time.strftime('%Y-%m-%d')}. Nothing done yet.\n\n"
+        "## What it is\n\n"
+        f"What {name} is for, in a paragraph.\n\n"
+        "## State tracking\n\n"
+        "Where its state is written, and what to read to know where it stands.\n"
+    )
+
+
+def _register_in_nav(target: Path) -> str | bool | None:
+    """Add the unit to a parent `.nav.yml` that lists children by name.
+
+    mkdocs-awesome-nav: a parent nav with an explicit list has no glob, so
+    a new unit is invisible to the site until it is added, and nothing said
+    so. Returns the nav's path when the line was added, False when the nav
+    is explicit but could not be edited safely, None when there is no such
+    nav or it carries a glob and needs nothing.
+    """
+    nav = target.parent / ".nav.yml"
+    if not nav.is_file():
+        return None
+    try:
+        text = nav.read_text()
+    except OSError:
+        return None
+    lines = text.splitlines(keepends=True)
+    items = [l for l in lines if l.startswith("  - ")]
+    if not items or any("*" in l for l in items):
+        return None
+    if any(l.strip() == f"- {target.name}" for l in items):
+        return None
+    if not all(l.rstrip("\n").startswith("  - ") and ":" not in l for l in items):
+        return False
+    last = max(i for i, l in enumerate(lines) if l.startswith("  - "))
+    lines.insert(last + 1, f"  - {target.name}\n")
+    nav.write_text("".join(lines))
+    return str(nav)
 
 
 def _home_line(home) -> str:
@@ -667,6 +722,12 @@ def check_cmd():
             f"`where` answers {shared.units[0]}"
         )
 
+    for row in report.unlisted:
+        click.echo(
+            f"{row.unit}: not in {_relative(row.nav, registry.roots)}, which lists "
+            "its siblings by name; the site will not show it"
+        )
+
     for row in report.undescribed:
         shown = _relative(row.path, registry.roots)
         click.echo(
@@ -682,14 +743,26 @@ def check_cmd():
 @click.option("--stdout", is_flag=True, help="Print instead of writing")
 @click.option("--check", is_flag=True,
               help="Say whether the written snapshot is older than the tree; exit 1 if so.")
-def snapshot(stdout: bool, check: bool):
-    """Generate a snapshot of what is in the tree."""
+@click.option("--type", "kind", default=None, help="Only units of this kind.")
+@click.option("--unit", "unit_name", default=None, help="Only this unit and its parts.")
+def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None):
+    """Generate a snapshot of what is in the tree.
+
+    `--type` and `--unit` narrow it; a narrowed snapshot goes to stdout,
+    never to the cache, which always holds the whole tree.
+    """
     registry, config = _load_registry()
 
     if check:
         sys.exit(_snapshot_check(registry, config))
-    if stdout:
-        click.echo(generate_snapshot(registry, config))
+    if kind is not None and kind not in {u.kind for u in registry.units()}:
+        _unknown("kind", kind, sorted({u.kind for u in registry.units()}))
+    if stdout or kind is not None or unit_name is not None:
+        try:
+            click.echo(generate_snapshot(registry, config, kind=kind, unit=unit_name))
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
         return
     output = config.snapshot_path
     generate_snapshot(registry, config, output_path=output)
@@ -1050,28 +1123,27 @@ def attribute(session_id: str, unit_name: str):
     click.echo(f"attributed session {session.id} to {unit.name}")
 
 
-def _session_id_from(output: str) -> str | None:
-    """The id scad's own launch record names, or None.
+def _launch_record(output: str) -> dict | None:
+    """scad's launch record, or None when there is no usable one.
 
-    `--json` makes scad's own words the read: with the flag, its record's
+    `--json` makes scad's own words the read: with the flag, the record's
     `session_id` field is a contract it publishes, not prose we scrape a
-    line out of. The one thing orglens needs from scad is this id, and
-    reading it from the record makes the join exact — a newest-file scan of
-    `~/.scad/launches/` would be a guess, and this system does not guess
-    about attribution. A malformed or id-less record degrades to None here
-    rather than raising, same as every other derived source.
+    line out of. The pane (`tmux`) rides along, which is how `start` tells
+    the person the way back in. A malformed or id-less record degrades to
+    None rather than raising, same as every other derived source.
     """
     try:
         record = json.loads(output)
     except ValueError:
         return None
-    if not isinstance(record, dict):
+    if not isinstance(record, dict) or not record.get("session_id"):
         return None
-    return record.get("session_id") or None
+    return record
 
 
-def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
-    """Start a session through scad and return the id it minted. Never raises."""
+def _launch(cwd: Path, agent: str, prompt: str | None) -> dict | None:
+    """Start a session through scad and return its launch record — at least
+    `session_id`, and the `tmux` pane when scad names one. Never raises."""
     argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd), "--json"]
     if prompt:
         argv += ["--prompt", prompt]
@@ -1089,10 +1161,7 @@ def _launch(cwd: Path, agent: str, prompt: str | None) -> str | None:
     # inferred from an absent field.
     if done.returncode != 0:
         return None
-    try:
-        return _session_id_from(done.stdout)
-    except ValueError:
-        return None
+    return _launch_record(done.stdout)
 
 
 def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
@@ -1189,17 +1258,32 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
             click.echo(f"  {h.name:<40} {h.path}")
         sys.exit(1)
 
+    first_turn = prompt or _arrival(unit, chosen, registry)
     if dry_run:
-        click.echo(f"would launch {agent} in {chosen.path} for {unit.name}")
+        click.echo(f"would launch {agent} in {chosen.path} for {unit.name}, "
+                   "detached in tmux via `scad session launch`; this command "
+                   "returns at once and leaves your terminal alone.")
+        click.echo("first turn:")
+        for line in first_turn.splitlines():
+            click.echo(f"  {line}")
         return
 
-    session = _launch(chosen.path, agent, prompt or _arrival(unit, chosen, registry))
-    if session is None:
+    record = _launch(chosen.path, agent, first_turn)
+    if record is None:
         click.echo("scad returned no session id — the session is not attributed. "
                    "Attribute it later, or start it again through orglens.")
         return
+    session = record["session_id"]
 
     append(Event(kind="attributed", unit=unit.name, session=session,
                  at=int(time.time()), machine=this_machine()),
            root=EVENTS_DIR)
     click.echo(f"attributed session {session} to {unit.name}")
+    # The session is running detached; say how to get back to it. scad
+    # printed the pane on stderr, which is easy to miss, and never said
+    # `orglens resume`, which it cannot know about.
+    pane = record.get("tmux")
+    click.echo(f"running detached in {pane or 'tmux'}; your terminal is free.")
+    if pane:
+        click.echo(f"  watch it:   tmux attach -t {pane.split(':')[0]}")
+    click.echo(f"  come back:  orglens resume {unit.name}")

@@ -10,7 +10,7 @@ import subprocess
 from click.testing import CliRunner
 
 from orglens import activity, events
-from orglens.cli import cli, _launch, _session_id_from
+from orglens.cli import cli, _launch, _launch_record
 
 
 def test_the_session_id_is_read_from_scads_own_record():
@@ -25,14 +25,14 @@ def test_the_session_id_is_read_from_scads_own_record():
         "resume": "cd /somewhere && claude --resume 55d76105-719a-4ee7-96f5-6a93de9c9cc1",
         "provenance": "minted",
     })
-    assert _session_id_from(out) == "55d76105-719a-4ee7-96f5-6a93de9c9cc1"
+    assert _launch_record(out)["session_id"] == "55d76105-719a-4ee7-96f5-6a93de9c9cc1"
 
 
 def test_no_usable_id_is_none_not_a_crash():
-    assert _session_id_from("not json at all") is None
-    assert _session_id_from("") is None
-    assert _session_id_from(json.dumps({"agent": "claude"})) is None
-    assert _session_id_from(json.dumps({"session_id": ""})) is None
+    assert _launch_record("not json at all") is None
+    assert _launch_record("") is None
+    assert _launch_record(json.dumps({"agent": "claude"})) is None
+    assert _launch_record(json.dumps({"session_id": ""})) is None
 
 
 def _fake_run(returncode, stdout, stderr=""):
@@ -45,7 +45,7 @@ def test_launch_returns_the_session_id_scad_minted(tmp_path, monkeypatch):
     record = json.dumps({"session_id": "sess-launched", "agent": "claude"})
     monkeypatch.setattr("orglens.cli.subprocess.run", _fake_run(0, record))
 
-    assert _launch(tmp_path, "claude", None) == "sess-launched"
+    assert _launch(tmp_path, "claude", None)["session_id"] == "sess-launched"
 
 
 def test_a_nonzero_returncode_is_no_session_even_with_a_parseable_record(tmp_path,
@@ -92,7 +92,7 @@ def test_start_records_an_attribution(tmp_path, monkeypatch, two_root_tree_confi
     def fake_launch(cwd, agent, prompt):
         calls["cwd"] = cwd
         calls["agent"] = agent
-        return "sess-123"
+        return {"session_id": "sess-123"}
 
     monkeypatch.setattr("orglens.cli._launch", fake_launch)
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
@@ -203,7 +203,7 @@ def test_an_explicit_prompt_replaces_the_arrival(tmp_path, monkeypatch,
                                                  two_root_tree_config):
     seen = {}
     monkeypatch.setattr("orglens.cli._launch",
-                        lambda cwd, agent, prompt: seen.update(prompt=prompt) or "s1")
+                        lambda cwd, agent, prompt: seen.update(prompt=prompt) or {"session_id": "s1"})
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
     CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens",
                              "--prompt", "just do the thing"])
@@ -265,3 +265,37 @@ def test_view_passes_the_attributed_session_to_read(tmp_path, monkeypatch, two_r
     result = CliRunner().invoke(cli, ["view", "--out", str(out), "--no-open"])
     assert result.exit_code == 0
     assert [(s.id, s.how) for s in calls["orglens"]] == [("sess-abc", "attributed")]
+
+
+def test_start_prints_the_way_back_in(tmp_path, monkeypatch, two_root_tree_config):
+    # scad launches detached and prints a pane; through orglens that pane
+    # arrived on stderr with no attach command and no `resume` line, so an
+    # agent that ran `start` had no idea the session was already running.
+    def fake_launch(cwd, agent, prompt):
+        return {"session_id": "sess-123", "tmux": "scad-cl-2347:0.0"}
+    monkeypatch.setattr("orglens.cli._launch", fake_launch)
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+
+    result = CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens"])
+    assert result.exit_code == 0, result.output
+    assert "attributed session sess-123 to orglens" in result.output
+    assert "running detached" in result.output
+    assert "tmux attach -t scad-cl-2347" in result.output
+    assert "orglens resume orglens" in result.output
+
+
+def test_dry_run_says_the_launch_is_detached(tmp_path, monkeypatch, two_root_tree_config):
+    result = CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens", "--dry-run",
+                                      "--prompt", "do the thing"])
+    assert result.exit_code == 0
+    assert "detached" in result.output
+    assert "scad session launch" in result.output
+    assert "do the thing" in result.output
+    assert "returns at once" in result.output or "your terminal" in result.output
+
+
+def test_launch_returns_the_record_not_only_the_id(tmp_path, monkeypatch):
+    record = json.dumps({"session_id": "sess-launched", "agent": "claude", "tmux": "scad-cl-1:0.0"})
+    monkeypatch.setattr("orglens.cli.subprocess.run", _fake_run(0, record))
+    got = _launch(tmp_path, "claude", None)
+    assert got["session_id"] == "sess-launched" and got["tmux"] == "scad-cl-1:0.0"

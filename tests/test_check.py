@@ -476,3 +476,20 @@ def test_a_package_with_one_readme_is_not_a_folder_of_documents(declared_tree, g
     (pkg / "NOTES.md").write_text("# notes\n")
     report = check.run(Registry([declared_tree], grammar))
     assert report.undescribed == []
+
+
+def test_a_unit_missing_from_an_explicit_parent_nav_is_reported(declared_tree, grammar):
+    nav = declared_tree / "projects" / ".nav.yml"
+    nav.write_text("title: Projects\nnav:\n  - clipcompose\n")
+    report = check.run(Registry([declared_tree], grammar))
+    [row] = report.unlisted
+    assert row.unit == "orglens" and row.nav == nav
+
+
+def test_a_parent_nav_with_a_glob_lists_everything(declared_tree, grammar):
+    (declared_tree / "projects" / ".nav.yml").write_text("title: Projects\nnav:\n  - '*'\n")
+    assert check.run(Registry([declared_tree], grammar)).unlisted == []
+
+
+def test_no_parent_nav_means_nothing_to_report(declared_tree, grammar):
+    assert check.run(Registry([declared_tree], grammar)).unlisted == []

@@ -451,6 +451,51 @@ class TestNewCommand:
         assert (target / MARKER).exists()
         assert target.is_dir()
 
+    def test_new_writes_the_driver_document_as_a_stub(self, runner, cli_env, units_tree):
+        # The grammar says every unit carries the driver document and `status`
+        # reads its first line. Without a stub, the first thing an agent did
+        # after `new` was `cat` a sibling's overview to learn the shape.
+        target = units_tree / "projects" / "test-tool"
+        runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        text = (target / "overview.md").read_text()
+        assert text.startswith("# Overview")
+        assert "> **Status:**" in text
+        assert "What it is" in text
+
+    def test_new_does_not_overwrite_an_existing_driver_document(self, runner, cli_env, units_tree):
+        target = units_tree / "projects" / "test-tool"
+        target.mkdir()
+        (target / "overview.md").write_text("# mine\n")
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        # `new` refuses an existing directory; the point is that nothing here
+        # ever clobbers a document a person wrote.
+        assert result.exit_code == 1
+        assert (target / "overview.md").read_text() == "# mine\n"
+
+    def test_new_names_the_next_steps(self, runner, cli_env, units_tree):
+        target = units_tree / "projects" / "test-tool"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        assert "next:" in result.output
+        assert "overview.md" in result.output
+        assert "orglens start test-tool" in result.output
+
+    def test_new_registers_the_unit_in_an_explicit_parent_nav(self, runner, cli_env, units_tree):
+        # mkdocs-awesome-nav: a parent `.nav.yml` that lists children by name
+        # has no glob, so a new unit is invisible to the site until added.
+        nav = units_tree / "projects" / ".nav.yml"
+        nav.write_text("title: Projects\nnav:\n  - clipcompose\n  - orglens\n")
+        target = units_tree / "projects" / "test-tool"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        assert nav.read_text() == "title: Projects\nnav:\n  - clipcompose\n  - orglens\n  - test-tool\n"
+        assert ".nav.yml" in result.output
+
+    def test_new_leaves_a_parent_nav_with_a_glob_alone(self, runner, cli_env, units_tree):
+        nav = units_tree / "projects" / ".nav.yml"
+        nav.write_text("title: Projects\nnav:\n  - '*'\n")
+        target = units_tree / "projects" / "test-tool"
+        runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
+        assert nav.read_text() == "title: Projects\nnav:\n  - '*'\n"
+
     def test_the_declaration_names_the_unit_and_kind(self, runner, cli_env, units_tree):
         target = units_tree / "projects" / "test-tool"
         runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
@@ -1004,6 +1049,14 @@ class TestSnapshotCommand:
         result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
         assert result.exit_code == 0, result.output
         assert "fresh" in result.output
+
+    def test_snapshot_can_be_scoped_to_a_kind_or_a_unit(self, runner, cli_env):
+        everything = runner.invoke(cli, ["snapshot", "--stdout"], env=cli_env).output
+        assert "freightify" in everything and "clipcompose" in everything
+        projects = runner.invoke(cli, ["snapshot", "--stdout", "--type", "project"], env=cli_env).output
+        assert "clipcompose" in projects and "freightify" not in projects
+        one = runner.invoke(cli, ["snapshot", "--stdout", "--unit", "clipcompose"], env=cli_env).output
+        assert "clipcompose" in one and "orglens" not in one and "freightify" not in one
 
     def test_check_says_stale_when_a_declaration_is_newer(self, runner, cli_env, units_tree):
         import os, time

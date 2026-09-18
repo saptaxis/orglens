@@ -106,6 +106,17 @@ class Undescribed:
 
 
 @dataclass(frozen=True)
+class Unlisted:
+    """A unit whose parent directory carries a `.nav.yml` listing children
+    by name, without this one. mkdocs-awesome-nav renders only what an
+    explicit list names, so the unit exists and the site does not show it.
+    One sibling file orglens knows about; a nav with a glob needs nothing.
+    """
+    unit: str
+    nav: Path
+
+
+@dataclass(frozen=True)
 class Report:
     drifted: list[Drift] = field(default_factory=list)
     #: Directories that look like work and have not declared themselves. The
@@ -137,6 +148,8 @@ class Report:
     shared: list[Shared] = field(default_factory=list)
     #: Folders of documents the grammar has no word for.
     undescribed: list[Undescribed] = field(default_factory=list)
+    #: Units an explicit parent nav does not list.
+    unlisted: list[Unlisted] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(
@@ -148,6 +161,7 @@ class Report:
             or self.collisions
             or self.shared
             or self.undescribed
+            or self.unlisted
         )
 
 
@@ -317,6 +331,12 @@ def run(registry: Registry) -> Report:
                 if count >= UNDESCRIBED_FLOOR:
                     undescribed.append(Undescribed(unit=unit.name, path=directory, count=count))
 
+    unlisted = [
+        Unlisted(unit=unit.name, nav=unit.declared_at.parent / ".nav.yml")
+        for unit in units
+        if _nav_omits(unit.declared_at.parent / ".nav.yml", unit.declared_at.name)
+    ]
+
     return Report(
         drifted=drifted,
         undeclared=registry.candidates(),
@@ -326,4 +346,19 @@ def run(registry: Registry) -> Report:
         collisions=collisions,
         shared=shared,
         undescribed=sorted(undescribed, key=lambda u: (u.unit, u.path)),
+        unlisted=unlisted,
     )
+
+
+def _nav_omits(nav: Path, name: str) -> bool:
+    """Whether `nav` is an explicit list that leaves `name` out."""
+    if not nav.is_file():
+        return False
+    try:
+        items = [l.strip()[2:] for l in nav.read_text().splitlines() if l.startswith("  - ")]
+    except OSError:
+        return False
+    if not items or any("*" in item for item in items):
+        return False
+    listed = {item.split(":")[-1].strip().strip("'\"") for item in items} | {item.strip("'\"") for item in items}
+    return name not in listed

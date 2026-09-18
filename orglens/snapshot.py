@@ -22,8 +22,12 @@ from orglens.units import Registry
 
 
 def generate_snapshot(
-    registry: Registry, config: Config, output_path: Path | None = None
+    registry: Registry, config: Config, output_path: Path | None = None,
+    kind: str | None = None, unit: str | None = None,
 ) -> str:
+    """The tree as one document. `kind` or `unit` narrows it to the units a
+    session is about: a projects task need not load every client and
+    experiment, and on the real tree that was half the tokens read."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     lines = [
         "# Topology Snapshot",
@@ -52,9 +56,14 @@ def generate_snapshot(
     ]
 
     units = registry.units()
+    if kind is not None:
+        units = [u for u in units if u.kind == kind]
+    if unit is not None:
+        chosen = registry.resolve(unit)
+        units = [u for u in units if u.name == chosen.name or u.part_of == chosen.name]
     by_kind: dict[str, list] = {}
-    for unit in units:
-        by_kind.setdefault(unit.kind, []).append(unit)
+    for u in units:
+        by_kind.setdefault(u.kind, []).append(u)
 
     for kind in sorted(by_kind):
         lines += [f"## {_heading(kind)}", ""]
