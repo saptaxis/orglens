@@ -26,7 +26,8 @@ from dataclasses import dataclass, field
 from difflib import get_close_matches
 from pathlib import Path
 
-from orglens import documents
+from orglens import activity, documents
+from orglens.state import read_status
 from orglens.homes import Candidate, candidates_for
 from orglens.units import Registry
 
@@ -117,6 +118,16 @@ class Unlisted:
 
 
 @dataclass(frozen=True)
+class Stale:
+    """The unit's status line is older than its newest edit by more than a
+    week: the tree moved and the person's sentence did not. The line is the
+    one authored fact `status` and `view` show, so a stale one misleads
+    every reader until it is rewritten."""
+    unit: str
+    days: int
+
+
+@dataclass(frozen=True)
 class Report:
     drifted: list[Drift] = field(default_factory=list)
     #: Directories that look like work and have not declared themselves. The
@@ -150,6 +161,8 @@ class Report:
     undescribed: list[Undescribed] = field(default_factory=list)
     #: Units an explicit parent nav does not list.
     unlisted: list[Unlisted] = field(default_factory=list)
+    #: Status lines older than the unit's newest edit by more than a week.
+    stale: list[Stale] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(
@@ -162,6 +175,7 @@ class Report:
             or self.shared
             or self.undescribed
             or self.unlisted
+            or self.stale
         )
 
 
@@ -337,6 +351,19 @@ def run(registry: Registry) -> Report:
         if _nav_omits(unit.declared_at.parent / ".nav.yml", unit.declared_at.name)
     ]
 
+    stale: list[Stale] = []
+    for unit in units:
+        status = None
+        for home in unit.paths:
+            status = read_status(home, grammar.documents_for(unit.kind))
+            if status:
+                break
+        if status is None or not status.edited:
+            continue
+        newest = max((activity._newest_mtime(p) or 0) for p in unit.paths)
+        if newest - status.edited > 7 * 86400:
+            stale.append(Stale(unit=unit.name, days=int((newest - status.edited) // 86400)))
+
     return Report(
         drifted=drifted,
         undeclared=registry.candidates(),
@@ -347,6 +374,7 @@ def run(registry: Registry) -> Report:
         shared=shared,
         undescribed=sorted(undescribed, key=lambda u: (u.unit, u.path)),
         unlisted=unlisted,
+        stale=stale,
     )
 
 

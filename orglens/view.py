@@ -43,19 +43,18 @@ h1 { font-size:1.35rem; font-weight:600; margin:1.6rem 0 .2rem; letter-spacing:.
 .sub { color:var(--dim); font-size:.82rem; margin-bottom:1rem }
 .filters { position:sticky; top:0; z-index:20; background:var(--bar);
   border:1px solid var(--line); border-radius:8px; padding:.55rem .8rem;
-  margin:0 0 1.4rem; display:flex; flex-wrap:wrap; gap:.5rem 1.2rem; align-items:center }
+  margin:0 0 1.2rem; display:flex; flex-wrap:wrap; gap:.5rem 1.2rem; align-items:center }
 .facet { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap }
 .flabel { font-size:.68rem; text-transform:uppercase; letter-spacing:.07em; color:var(--dim) }
-.tab, .achip { font:inherit; font-size:.78rem; border:1px solid var(--line); background:transparent;
+.chip { font:inherit; font-size:.78rem; border:1px solid var(--line); background:transparent;
   color:var(--fg); border-radius:999px; padding:.1rem .6rem; cursor:pointer }
-.tab.on, .achip.on { background:var(--fg); color:var(--bg); border-color:var(--fg) }
-.tab .n { color:var(--dim); font-size:.7rem; margin-left:.3rem }
-.tab.on .n { color:var(--bg); opacity:.8 }
-.tab.hot { border-color:var(--warn) }
-.achip.claude { color:var(--claude) } .achip.codex { color:var(--codex) } .achip.kimi { color:var(--kimi) }
-.achip.on.claude { background:var(--claude); border-color:var(--claude); color:var(--bg) }
-.achip.on.codex { background:var(--codex); border-color:var(--codex); color:var(--bg) }
-.achip.on.kimi { background:var(--kimi); border-color:var(--kimi); color:var(--bg) }
+.chip.on { background:var(--fg); color:var(--bg); border-color:var(--fg) }
+.chip .n { color:var(--dim); font-size:.7rem; margin-left:.3rem }
+.chip.on .n { color:var(--bg); opacity:.8 }
+.chip.claude { color:var(--claude) } .chip.codex { color:var(--codex) } .chip.kimi { color:var(--kimi) }
+.chip.on.claude { background:var(--claude); border-color:var(--claude); color:var(--bg) }
+.chip.on.codex { background:var(--codex); border-color:var(--codex); color:var(--bg) }
+.chip.on.kimi { background:var(--kimi); border-color:var(--kimi); color:var(--bg) }
 #find { font:inherit; font-size:.82rem; border:1px solid var(--line); border-radius:6px;
   background:var(--card); color:var(--fg); padding:.2rem .5rem; min-width:16rem }
 .badge { display:inline-block; border:1px solid var(--warn); color:var(--warn);
@@ -63,9 +62,25 @@ h1 { font-size:1.35rem; font-weight:600; margin:1.6rem 0 .2rem; letter-spacing:.
   margin-bottom:1.2rem }
 .badge.clear { border-color:var(--line); color:var(--dim); font-weight:400 }
 .badge.live-badge { border-color:var(--ok); color:var(--ok); margin-right:.4rem }
-section.lead { margin-bottom:1.2rem }
-section.lead ol.list { padding-left:1.2rem }
-section.lead .unit { font-weight:600; margin-right:.4rem }
+details.band > summary { cursor:pointer; list-style:none; outline:none;
+  font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  font-size:1rem; font-weight:600; margin:1.4rem 0 .5rem; border-bottom:1px solid var(--line);
+  padding-bottom:.25rem; display:flex; align-items:baseline; gap:.5rem }
+details.band > summary::-webkit-details-marker { display:none }
+details.band > summary::before { content:"▸"; color:var(--dim); font-size:.8rem }
+details.band[open] > summary::before { content:"▾" }
+details.band > summary .n { color:var(--dim); font-weight:400; font-size:.78rem }
+details.band.waiting > summary { color:var(--warn); border-bottom-color:var(--warn) }
+.kind { font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; color:var(--dim);
+  border:1px solid var(--line); border-radius:4px; padding:0 .35rem; margin-left:.5rem; vertical-align:middle }
+.placed { color:var(--fg) }
+.why.stale { color:var(--dim) }
+.why .age { font-size:.75rem; color:var(--dim); margin-left:.4rem }
+.why.stale .age { color:var(--warn) }
+.tag { font-size:.72rem; color:var(--warn); border:1px solid var(--warn); border-radius:4px;
+  padding:0 .35rem; margin-left:.5rem; vertical-align:middle }
+.nested { margin:.6rem 0 0 1rem; border-left:2px solid var(--line); padding-left:.8rem }
+.nested .card { margin-bottom:.4rem }
 details.card > summary { cursor:pointer; list-style:none; outline:none }
 details.card > summary::-webkit-details-marker { display:none }
 details.card[open] { background:transparent }
@@ -103,7 +118,7 @@ h2.grp .n { color:var(--dim); font-weight:400; font-size:.78rem; margin-left:.4r
 .card.idle { opacity:.55 }
 .card[hidden], li[hidden], section[hidden], h2[hidden] { display:none }
 .top { display:flex; justify-content:space-between; align-items:baseline; gap:1rem }
-.name { font-weight:600; font-size:1.02rem }
+.name { font-weight:600; font-size:1.02rem; white-space:nowrap }
 .facts { color:var(--dim); font-size:.82rem; font-variant-numeric:tabular-nums }
 .why { margin-top:.3rem; font-size:.9rem }
 .notes { margin-top:.5rem; font-size:.8rem; color:var(--dim) }
@@ -117,10 +132,10 @@ footer { margin-top:2.5rem; color:var(--dim); font-size:.75rem }
 """
 
 
-def ago(ts: int | None) -> str:
+def ago(ts: int | None, now: float | None = None) -> str:
     if not ts:
         return "—"
-    hours = (time.time() - ts) / 3600
+    hours = ((time.time() if now is None else now) - ts) / 3600
     if hours < 1:
         return "just now"
     if hours < 24:
@@ -128,33 +143,6 @@ def ago(ts: int | None) -> str:
     if hours < 24 * 60:
         return f"{hours / 24:.0f}d ago"
     return f"{hours / 720:.0f}mo ago"
-
-
-def _facts(a: Activity) -> str:
-    bits = []
-    if a.plan:
-        bits.append(f"plan {a.plan}")
-    if a.packets:
-        gate = f" <span class='gate'>{a.blocked} at a gate</span>" if a.blocked else ""
-        bits.append(f"{a.packets} packet{'s' * (a.packets != 1)}{gate}")
-    if a.sessions:
-        who = "/".join(a.agents) if a.agents else "?"
-        bits.append(f"{a.sessions} sessions ({who}) · {a.turns:,} turns")
-    if a.live_sessions:
-        bits.append(f"<span class='live'>&#x25CF; {a.live_sessions} live</span>")
-    if a.open_sessions:
-        bits.append(f"{a.open_sessions} resumable")
-    if a.dirty:
-        bits.append(f"{a.dirty} uncommitted")
-    # Three clocks, deliberately not merged: what landed, what was touched,
-    # and when an agent last spoke. They diverge when work is in flight.
-    bits.append(f"edited {ago(a.modified)}")
-    if a.touched and a.modified and abs(a.touched - a.modified) > 3600:
-        bits.append(f"committed {ago(a.touched)}")
-    spoke = (a.last_turn or {}).get("at") or a.last_session
-    if spoke:
-        bits.append(f"session {ago(spoke)}")
-    return " · ".join(bits)
 
 
 def doc_url(path: Path, roots: Path | list[Path], base: str) -> str:
@@ -310,27 +298,6 @@ def _detail(row: dict, ctx: dict) -> str:
     return "<div class='detail'>" + "".join(out) + "</div>"
 
 
-def _card(name: str, why: str | None, a: Activity) -> str:
-    idle = "" if (a.dirty or a.waiting or (a.touched and time.time() - a.touched < 86400 * 14)) else " idle"
-    out = [f"<div class='card{idle}'><div class='top'><span class='name'>{html.escape(name)}</span>"
-           f"<span class='facts'>{_facts(a)}</span></div>"]
-    if why:
-        out.append(f"<div class='why'>{html.escape(why)}</div>")
-    if a.notes:
-        recent = ", ".join(
-            f"<b>{html.escape(str(n['topic']))}</b>" for n in a.notes[:4]
-        )
-        more = f" +{len(a.notes) - 4}" if len(a.notes) > 4 else ""
-        out.append(f"<div class='notes'>{len(a.notes)} note(s): {recent}{more}</div>")
-    elif a.sessions > 50:
-        out.append(
-            "<div class='notes'>no notes — "
-            f"{a.turns:,} turns of work with nothing captured</div>"
-        )
-    out.append("</div>")
-    return "".join(out)
-
-
 def _unattributed(loose: list) -> str:
     """Sessions belonging to no unit, newest first, each with the command
     that resumes it. The copy affordance takes any text, not only a path."""
@@ -372,104 +339,181 @@ def _searchable(row: dict) -> str:
     return html.escape(" ".join(p for p in parts if p).lower(), quote=True)
 
 
-def _tabs(rows: list[dict]) -> str:
-    """One tab per top-level unit, most recently active first, carrying
-    two counts: how much is here, and how much of it wants you. A unit that
-    is part of another is filed under that one's tab, so a programme's tab
-    holds its experiments.
-
-    Recency, not the alphabet: the unit you were just in is the one you are
-    coming back to, and an alphabetical strip buries it wherever its name
-    falls.
-    """
-    top = {r["name"]: r for r in rows if not r.get("part_of")}
-    tabs: dict[str, dict] = {}
-    for r in rows:
-        key = r["name"] if r["name"] in top else (r.get("part_of") or r["name"])
-        tab = tabs.setdefault(key, {"sessions": 0, "waiting": 0, "recency": 0})
-        a = r["activity"]
-        tab["sessions"] += a.sessions
-        tab["waiting"] += a.waiting
-        tab["recency"] = max(tab["recency"], recency(a))
-    out = ["<button class='tab on' data-tab=''>all</button>"]
-    for name, tab in sorted(tabs.items(), key=lambda kv: kv[1]["recency"], reverse=True):
-        hot = " hot" if tab["waiting"] else ""
-        counts = f"{tab['sessions']}"
-        if tab["waiting"]:
-            counts += f" · {tab['waiting']} waiting"
-        out.append(
-            f"<button class='tab{hot}' data-tab='{html.escape(name, quote=True)}'>"
-            f"{html.escape(name)}<span class='n'>{counts}</span></button>"
-        )
-    return "".join(out)
+def write(page: str, path: Path) -> Path:
+    path = Path(path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(page, encoding="utf-8")
+    return path
 
 
-def _lead_sections(rows: list[dict]) -> str:
-    """What wants you and what is running, across every unit, before the
-    cards. Each row names its unit and carries the same data attributes the
-    cards do, so the filters scope them together."""
-    out = []
-    waiting = []
-    for r in rows:
-        a = r["activity"]
-        unit = html.escape(r["name"])
-        attrs = f"data-unit='{html.escape(r['name'], quote=True)}' data-parent='{html.escape(r.get('part_of') or '', quote=True)}'"
-        if a.blocked:
-            waiting.append(f"<li {attrs}><span class='unit'>{unit}</span>"
-                           f"<span class='ask'>{a.blocked} workflow packet(s) at a gate</span></li>")
-        for ask in a.needs:
-            when = f"<span class='when'> · asked {ago(ask['at'])}</span>" if ask.get("at") else ""
-            waiting.append(f"<li {attrs}><span class='unit'>{unit}</span>"
-                           f"<span class='ask'>{html.escape(ask['question'].strip()[:200])}</span>{when}</li>")
-    if waiting:
-        out.append(f"<section class='lead' data-sec='waiting'><h2 class='grp'>Waiting on you"
-                   f"<span class='n'>{len(waiting)}</span></h2><ol class='list'>"
-                   + "".join(waiting) + "</ol></section>")
-    running = []
-    for r in rows:
-        a = r["activity"]
-        unit = html.escape(r["name"])
-        attrs = f"data-unit='{html.escape(r['name'], quote=True)}' data-parent='{html.escape(r.get('part_of') or '', quote=True)}'"
-        for s in a.live:
-            running.append(f"<li class='live' {attrs} data-agent='claude'><span class='unit'>{unit}</span>"
-                           f"&#x25CF; {html.escape(str(s['name'] or s['session'] or '')[:60])}"
-                           f"<span class='when'> · {html.escape(str(s['cwd'] or '')[-46:])}</span></li>")
-    if running:
-        out.append(f"<section class='lead' data-sec='running'><h2 class='grp'>Running now"
-                   f"<span class='n'>{len(running)}</span></h2><ol class='list'>"
-                   + "".join(running) + "</ol></section>")
+# ── clocks, bands, staleness ─────────────────────────────────────────────
+#
+# A unit is placed by when it last moved, not by what kind it is. The clocks
+# that count, in the order they are trusted: a live session; a session that
+# ended; an edit in a home; a commit that touched the unit's own paths. A
+# gate — a session that stopped and asked — is not recency at all and puts
+# the unit in its own band ahead of every other.
+
+BANDS = ("waiting", "today", "yesterday", "this week", "this month", "earlier")
+DAY = 86400
+
+
+def clocks(a: Activity, now: float | None = None) -> list[tuple[str, int]]:
+    """Every clock the unit has, newest first, each named."""
+    now = time.time() if now is None else now
+    out: list[tuple[str, int]] = []
+    if a.needs:
+        out.append(("waiting", max((ask.get("at") or 0) for ask in a.needs) or int(now)))
+    if a.blocked:
+        out.append(("waiting", int(now)))
+    if a.live:
+        out.append(("live", int(now)))
+    spoke = (a.last_turn or {}).get("at") or a.last_session
+    if spoke:
+        out.append(("session", int(spoke)))
+    if a.modified:
+        out.append(("edited", int(a.modified)))
+    if a.touched:
+        out.append(("committed", int(a.touched)))
+    rank = {"waiting": 0, "live": 1}
+    return sorted(out, key=lambda c: (rank.get(c[0], 2), -c[1]))
+
+
+def band(a: Activity, now: float | None = None) -> str:
+    now = time.time() if now is None else now
+    cs = clocks(a, now)
+    if not cs:
+        return "earlier"
+    name, at = cs[0]
+    if name == "waiting":
+        return "waiting"
+    age = now - at
+    if age < DAY:
+        return "today"
+    if age < 2 * DAY:
+        return "yesterday"
+    if age < 7 * DAY:
+        return "this week"
+    if age < 30 * DAY:
+        return "this month"
+    return "earlier"
+
+
+def stale(a: Activity, why_edited: int | None, now: float | None = None) -> bool:
+    """The status line is older than the unit's newest movement by more than
+    a week: the tree moved and the person's sentence did not."""
+    if not why_edited:
+        return False
+    moved = [at for name, at in clocks(a, now) if name in ("session", "edited", "committed")]
+    return bool(moved) and max(moved) - why_edited > 7 * DAY
+
+
+def _drift_tag(a: Activity, now: float | None = None) -> str:
+    """Sessions and edits far apart: talked without landing, or landed
+    without a session orglens can see."""
+    spoke = (a.last_turn or {}).get("at") or a.last_session
+    if not spoke or not a.modified:
+        return ""
+    if spoke - a.modified > 7 * DAY:
+        return "<span class='tag'>talked, nothing landed</span>"
+    if a.modified - spoke > 7 * DAY:
+        return "<span class='tag'>landed, no session</span>"
+    return ""
+
+
+# ── the page ─────────────────────────────────────────────────────────────
+
+
+def _placed(a: Activity, now: float) -> str:
+    """The one-line reason the unit is where it is: the clock that placed it
+    first and in ink, the others after it, then the counts."""
+    bits = []
+    for i, (name, at) in enumerate(clocks(a, now)):
+        if name == "waiting":
+            continue
+        text = "&#x25CF; live" if name == "live" else f"{name} {ago(at, now)}"
+        bits.append(f"<span class='placed'>{text}</span>" if i == 0 else text)
+    if a.sessions:
+        who = "/".join(a.agents) if a.agents else "?"
+        bits.append(f"{a.sessions} sessions ({who})")
+    if a.open_sessions:
+        bits.append(f"{a.open_sessions} resumable")
+    if a.packets:
+        gate = f" <span class='gate'>{a.blocked} at a gate</span>" if a.blocked else ""
+        bits.append(f"{a.packets} packet{'s' * (a.packets != 1)}{gate}")
+    if a.plan:
+        bits.append(f"plan {a.plan}")
+    if a.dirty:
+        bits.append(f"{a.dirty} uncommitted")
+    return " · ".join(bits)
+
+
+def _card(row: dict, ctx: dict, now: float, nested: list[dict] = ()) -> str:
+    a = row["activity"]
+    name = row["name"]
+    agents = " ".join(sorted({str(s.get("agent") or "") for s in a.recent} - {""}))
+    why_edited = row.get("why_edited")
+    is_stale = stale(a, why_edited, now)
+    attrs = (
+        f" data-unit='{html.escape(name, quote=True)}'"
+        f" data-parent='{html.escape(row.get('part_of') or '', quote=True)}'"
+        f" data-kind='{html.escape(row.get('kind') or '', quote=True)}'"
+        f" data-agents='{agents}' data-text='{_searchable(row)}'"
+    )
+    out = [f"<details{attrs} class='card'><summary><div class='top'>"
+           f"<span class='name'>{html.escape(name)}"
+           f"<span class='kind'>{html.escape(row.get('kind') or 'unit')}</span>"
+           f"{_drift_tag(a, now)}</span>"
+           f"<span class='facts'>{_placed(a, now)}</span></div>"]
+    for ask in a.needs[:2]:
+        out.append(f"<div class='ask'>{html.escape(ask['question'].strip()[:200])}"
+                   f"<span class='when'> · asked {ago(ask.get('at'), now)}</span></div>")
+    if row.get("why"):
+        age = f"<span class='age'>{ago(why_edited, now).replace(' ago', ' old')}{' · stale' if is_stale else ''}</span>" if why_edited else ""
+        out.append(f"<div class='why{' stale' if is_stale else ''}'>&#x201C;{html.escape(row['why'])}&#x201D;{age}</div>")
+    if a.notes:
+        recent = ", ".join(f"<b>{html.escape(str(n['topic']))}</b>" for n in a.notes[:4])
+        more = f" +{len(a.notes) - 4}" if len(a.notes) > 4 else ""
+        out.append(f"<div class='notes'>{len(a.notes)} note(s): {recent}{more}</div>")
+    out.append("</summary>")
+    out.append(_detail(row, ctx))
+    if nested:
+        out.append("<div class='nested'>")
+        for child in sorted(nested, key=lambda r: recency(r["activity"]), reverse=True):
+            out.append(_card(child, ctx, now))
+        out.append("</div>")
+    out.append("</details>")
     return "".join(out)
 
 
 JS = """
-const tabs = document.querySelectorAll('.tab'), chips = document.querySelectorAll('.achip');
+const chips = document.querySelectorAll('.chip');
 const find = document.getElementById('find');
-let unit = '', agent = '', q = '';
+const on = {band: '', kind: '', agent: ''};
+let q = '';
 function apply() {
-  document.querySelectorAll('[data-unit]').forEach(el => {
-    const mine = !unit || el.dataset.unit === unit || el.dataset.parent === unit;
-    const agents = (el.dataset.agents || el.dataset.agent || '').split(' ');
-    const byAgent = !agent || agents.includes(agent);
-    const text = el.dataset.text || el.textContent.toLowerCase();
-    const byText = !q || text.includes(q);
-    el.hidden = !(mine && byAgent && byText);
+  document.querySelectorAll('details.card').forEach(el => {
+    const kind = !on.kind || el.dataset.kind === on.kind;
+    const agents = (el.dataset.agents || '').split(' ');
+    const agent = !on.agent || agents.includes(on.agent);
+    const text = !q || (el.dataset.text || '').includes(q);
+    el.hidden = !(kind && agent && text);
   });
-  document.querySelectorAll('.card li[data-agent]').forEach(li => {
-    li.hidden = !!agent && li.dataset.agent !== agent;
+  document.querySelectorAll('details.band').forEach(b => {
+    const mine = !on.band || b.dataset.band === on.band;
+    const any = [...b.querySelectorAll(':scope > details.card')].some(c => !c.hidden);
+    b.hidden = !(mine && any);
+    if (on.band && mine) b.open = true;
   });
-  document.querySelectorAll('h2.grp[data-group]').forEach(h => {
-    const any = [...document.querySelectorAll(`[data-group-of='${h.dataset.group}']`)].some(c => !c.hidden);
-    h.hidden = !any;
-  });
-  document.querySelectorAll('section.lead').forEach(sec => {
-    sec.hidden = ![...sec.querySelectorAll('li')].some(li => !li.hidden);
+  document.querySelectorAll('.loose li').forEach(li => {
+    li.hidden = !!on.agent && li.dataset.agent !== on.agent;
   });
 }
-tabs.forEach(t => t.addEventListener('click', () => {
-  unit = t.dataset.tab; tabs.forEach(x => x.classList.toggle('on', x === t)); apply();
-}));
 chips.forEach(c => c.addEventListener('click', () => {
-  agent = c.dataset.agent; chips.forEach(x => x.classList.toggle('on', x === c)); apply();
+  const facet = c.dataset.facet;
+  on[facet] = c.dataset.value;
+  document.querySelectorAll(`.chip[data-facet='${facet}']`).forEach(x => x.classList.toggle('on', x === c));
+  apply();
 }));
 find.addEventListener('input', () => { q = find.value.trim().toLowerCase(); apply(); });
 document.addEventListener('click', e => {
@@ -480,87 +524,88 @@ document.addEventListener('click', e => {
 """
 
 
+def _chips(facet: str, values: list[tuple[str, str, int | None]], colour: bool = False) -> str:
+    out = [f"<button class='chip on' data-facet='{facet}' data-value=''>all</button>"]
+    for value, label, count in values:
+        cls = f" {value}" if colour else ""
+        n = f"<span class='n'>{count}</span>" if count is not None else ""
+        out.append(f"<button class='chip{cls}' data-facet='{facet}' "
+                   f"data-value='{html.escape(value, quote=True)}'>{html.escape(label)}{n}</button>")
+    return "".join(out)
+
+
 def render(
-    groups: list[tuple[str, list[dict]]], ctx: dict, unattributed: list | None = None
+    groups: list[tuple[str, list[dict]]], ctx: dict, unattributed: list | None = None,
+    now: float | None = None,
 ) -> str:
     """`groups` is [(label, [row, ...]), ...]; a row is what `cli.view` builds.
-    `unattributed` is the sessions belonging to no unit, rendered last.
+    The labels are ignored: units are banded by when they last moved, and
+    their kind is a chip on the card and a filter, not a section.
 
-    Ordered by use — most recently touched first — because the question is
-    almost always about what you were last doing, not what is alphabetically
-    first. The page embeds every row and scopes itself in the browser: the
-    tabs, the agent chips and the find box hide what does not match, and
-    nothing is filtered before render.
+    Every card folds. A unit that is part of another is a card inside its
+    parent's. The page embeds every row and scopes itself in the browser.
     """
+    now = time.time() if now is None else now
     rows = [r for _, group in groups for r in group]
-    open_items = sum(r["activity"].waiting for r in rows)
-    projects = len([r for r in rows if r["activity"].waiting])
-    body = []
+    by_name = {r["name"]: r for r in rows}
+    children: dict[str, list[dict]] = {}
+    for r in rows:
+        parent = r.get("part_of")
+        if parent and parent in by_name:
+            children.setdefault(parent, []).append(r)
+    top = [r for r in rows if not (r.get("part_of") and r.get("part_of") in by_name)]
 
-    body.append(
+    # A parent's band is the newest of its own clocks and its parts'.
+    def band_of(r: dict) -> str:
+        own = band(r["activity"], now)
+        kids = [band(c["activity"], now) for c in children.get(r["name"], [])]
+        return min([own, *kids], key=BANDS.index)
+
+    banded: dict[str, list[dict]] = {b: [] for b in BANDS}
+    for r in top:
+        banded[band_of(r)].append(r)
+
+    running = sum(r["activity"].live_sessions for r in rows)
+    waiting = sum(r["activity"].waiting for r in rows)
+    kinds = sorted({r.get("kind") or "" for r in rows} - {""})
+
+    body = [
         "<div class='filters'>"
-        f"<div class='facet'><span class='flabel'>unit</span>{_tabs(rows)}</div>"
+        "<div class='facet'><span class='flabel'>when</span>"
+        + _chips("band", [(b, b, len(banded[b])) for b in BANDS if banded[b]]) + "</div>"
+        "<div class='facet'><span class='flabel'>kind</span>"
+        + _chips("kind", [(k, k, None) for k in kinds]) + "</div>"
         "<div class='facet'><span class='flabel'>agent</span>"
-        "<button class='achip on' data-agent=''>all</button>"
-        "<button class='achip claude' data-agent='claude'>claude</button>"
-        "<button class='achip codex' data-agent='codex'>codex</button>"
-        "<button class='achip kimi' data-agent='kimi'>kimi</button></div>"
+        + _chips("agent", [(a, a, None) for a in ("claude", "codex", "kimi")], colour=True) + "</div>"
         "<div class='facet'><span class='flabel'>find</span>"
         "<input id='find' placeholder='unit, session, document, note…' autocomplete='off'></div>"
         "</div>"
-    )
-
-    running = sum(r["activity"].live_sessions for r in rows)
+    ]
     if running:
         body.append(f"<div class='badge live-badge'>&#x25CF; {running} running now</div> ")
-
-    if open_items:
-        oldest = min(
-            (ask["at"] for r in rows for ask in r["activity"].needs if ask.get("at")),
-            default=None,
-        )
-        age = f" · oldest {ago(oldest)}" if oldest else ""
-        body.append(
-            f"<div class='badge'>{open_items} waiting on you"
-            f" · {projects} unit{'s' * (projects != 1)}{age}</div>"
-        )
+    if waiting:
+        body.append(f"<div class='badge'>{waiting} waiting on you</div>")
     else:
         body.append("<div class='badge clear'>nothing waiting</div>")
 
-    body.append(_lead_sections(rows))
-
-    # Groups led by whichever holds the newest member, the same rule `list`
-    # uses: the kind that sorts first alphabetically has no claim to the top.
-    def newest(group):
-        return max((recency(r["activity"]) for r in group), default=0)
-
-    for label, group in sorted(groups, key=lambda g: newest(g[1]), reverse=True):
-        if not group:
+    for b in BANDS:
+        members = banded[b]
+        if not members:
             continue
-        gid = html.escape(label, quote=True)
-        body.append(f"<h2 class='grp' data-group='{gid}'>{html.escape(label)}"
-                    f"<span class='n'>{len(group)}</span></h2>")
-        for row in sorted(group, key=lambda r: recency(r["activity"]), reverse=True):
-            a = row["activity"]
-            agents = " ".join(sorted({str(s.get("agent") or "") for s in a.recent} - {""}))
-            attrs = (
-                f" data-unit='{html.escape(row['name'], quote=True)}'"
-                f" data-parent='{html.escape(row.get('part_of') or '', quote=True)}'"
-                f" data-agents='{agents}' data-group-of='{gid}'"
-                f" data-text='{_searchable(row)}'"
-            )
-            card = _card(row["name"], row["why"], a)
-            body.append(
-                card.replace("<div class='card", "<details" + attrs + " class='card", 1)
-                .replace("<div class='top'>", "<summary><div class='top'>", 1)
-                .replace("</div></div>", "</div></summary>", 1)
-                + _detail(row, ctx)
-                + "</details>"
-            )
+        opened = " open" if b in ("waiting", "today", "yesterday") else ""
+        cls = " waiting" if b == "waiting" else ""
+        body.append(f"<details class='band{cls}' data-band='{b}'{opened}>"
+                    f"<summary>{html.escape(b)}<span class='n'>{len(members)}</span></summary>")
+        for r in sorted(members, key=lambda r: recency(r["activity"]), reverse=True):
+            body.append(_card(r, ctx, now, nested=children.get(r["name"], [])))
+        body.append("</details>")
 
     loose = listed(unattributed or [])
     if loose:
-        body.append(_unattributed(loose))
+        body.append(f"<details class='band' data-band='unattributed'>"
+                    f"<summary>unattributed sessions<span class='n'>{len(loose)}</span></summary>"
+                    + _unattributed(loose).replace("<h2 class='grp'>", "<h2 class='grp' hidden>", 1)
+                    + "</details>")
 
     stamp = time.strftime("%Y-%m-%d %H:%M")
     return (
@@ -577,10 +622,3 @@ def render(
         " · &#x2398; copies the path</footer></main>"
         f"<script>{JS}</script>"
     )
-
-
-def write(page: str, path: Path) -> Path:
-    path = Path(path).expanduser()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(page, encoding="utf-8")
-    return path

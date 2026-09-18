@@ -728,6 +728,12 @@ def check_cmd():
             "its siblings by name; the site will not show it"
         )
 
+    for row in report.stale:
+        click.echo(
+            f"{row.unit}: the status line is {row.days} days older than the newest edit; "
+            "rewrite it if it is no longer true"
+        )
+
     for row in report.undescribed:
         shown = _relative(row.path, registry.roots)
         click.echo(
@@ -910,9 +916,11 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
             rows.append(
                 {
                     "name": unit.name,
+                    "kind": unit.kind,
                     "part_of": unit.part_of,
                     "path": unit.declared_at,
                     "why": status.text if status else None,
+                    "why_edited": status.edited if status else None,
                     "activity": activity.read(
                         unit.paths, unit.name, sessions=by_unit[unit.name],
                         notes=notes[unit.name],

@@ -44,13 +44,16 @@ bound under the old names.
 - Unattributed sessions, in `sessions --none` and at the end of `view`, show
   where they ran and the last thing said, which is what deciding whose they
   are needs.
-- `view` has a filter bar: a tab per top-level unit (most recently active
-  first, with its session count and how much is waiting; a programme's tab
-  holds its experiments), agent chips, and a find box over unit names,
-  session labels, document names and note titles. Waiting and running come
-  first, across units, before the cards. The page embeds everything and
-  scopes itself in the browser. Its own look: paper, serif headings, warm
-  agent colours.
+- `view` is banded by when a unit last moved — waiting, today, yesterday,
+  this week, this month, earlier — with the clock that placed it first on
+  the card: a live session, then a session, an edit, a commit to its own
+  paths. Every card folds; a unit that is part of another is a card inside
+  its parent's. Kind is a chip and a filter, not a section. The status line
+  is shown as the person's last word with its age, marked stale when the
+  tree moved more than a week after it; a unit talked about without an edit,
+  or edited without a session, says so. Filters: band, kind, agent, text.
+  The unattributed sessions fold at the end. Its own look: paper, serif
+  headings, warm agent colours.
 - Session counts are main sessions only. Subagents and workflow agents used to
   be counted too, which is why a unit's number can be lower than before.
 - A home reached through a symlinked root matches sessions that recorded
@@ -76,6 +79,8 @@ bound under the old names.
   the lines), `--in DIR` (scopes to a directory the grammar has no name for),
   `--since 2w`, `--waiting` (packets with a gate open) and `--json`. An
   unknown unit is refused in one line.
+- `orglens check` reports a status line older than the unit's newest edit
+  by more than a week.
 - `orglens check` reports folders holding three or more documents that no
   kind's container and no entity's structure names.
 - `orglens new` writes a stub driver document and adds the unit to a parent

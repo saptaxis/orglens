@@ -493,3 +493,20 @@ def test_a_parent_nav_with_a_glob_lists_everything(declared_tree, grammar):
 
 def test_no_parent_nav_means_nothing_to_report(declared_tree, grammar):
     assert check.run(Registry([declared_tree], grammar)).unlisted == []
+
+
+def test_a_status_line_older_than_the_tree_by_a_week_is_reported(declared_tree, grammar, monkeypatch):
+    import os, time
+    overview = declared_tree / "projects" / "clipcompose" / "overview.md"
+    overview.write_text("# Overview\n\n> **Status:** v1 done\n")
+    old = time.time() - 30 * 86400
+    os.utime(overview, (old, old))
+    (declared_tree / "projects" / "clipcompose" / "plans" / "02-new-Sep182026.md").write_text("# 02\n")
+
+    report = check.run(Registry([declared_tree], grammar))
+    [row] = report.stale
+    assert row.unit == "clipcompose" and row.days >= 29
+
+
+def test_a_status_line_as_fresh_as_the_tree_is_not_reported(declared_tree, grammar):
+    assert check.run(Registry([declared_tree], grammar)).stale == []

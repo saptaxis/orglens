@@ -73,9 +73,9 @@ def test_unattributed_sessions_render_in_their_own_section_at_the_end():
                      ended=2000_000, turns=9, label="stray work", outcome="awaiting-user",
                      live=False, units=frozenset(), how=None)]
     page = render([("Projects", [_row("a", Activity())])], CTX, unattributed=loose)
-    assert "Unattributed<span class='n'>1</span>" in page
+    assert "data-band='unattributed'" in page
     assert "stray work" in page
-    assert page.index("Unattributed<span") > page.index("Projects")
+    assert page.index("data-band='unattributed'") > page.index("data-unit='a'")
     assert "scad session resume deadbeef-1 --print" in page
 
 
@@ -96,30 +96,6 @@ def _recent(id, agent, name, at=1):
             "turns": 3, "open": False, "how": "containment"}
 
 
-def test_the_page_has_a_filter_bar_with_unit_tabs_agent_chips_and_a_find_box():
-    a = Activity(recent=[_recent("s1", "claude", "one")], last_session=100)
-    b = Activity(recent=[_recent("s2", "codex", "two")], last_session=200,
-                 needs=[{"question": "which?", "at": 50}])
-    page = render([("Projects", [_row_with("alpha", a), _row_with("beta", b)])], CTX)
-    assert "class='filters'" in page
-    # One tab per top-level unit, most recently active first, two counts each.
-    assert page.index("data-tab='beta'") < page.index("data-tab='alpha'")
-    assert "data-tab='beta'" in page and "1 waiting" in page
-    for agent in ("claude", "codex", "kimi"):
-        assert f"data-agent='{agent}'" in page
-    assert "id='find'" in page
-
-
-def test_an_experiment_is_filed_under_its_programmes_tab():
-    prog = Activity(last_session=100)
-    expt = Activity(recent=[_recent("s1", "claude", "run")], last_session=200)
-    page = render([("Research programs", [_row_with("phys", prog, kind="research-program")]),
-                   ("Experiments", [_row_with("expt-1", expt, part_of="phys", kind="experiment")])], CTX)
-    assert "data-tab='phys'" in page
-    assert "data-tab='expt-1'" not in page
-    assert "<details data-unit='expt-1' data-parent='phys'" in page
-
-
 def test_cards_carry_what_the_filters_scope_on():
     a = Activity(recent=[_recent("s1", "claude", "first pass"), _recent("s2", "kimi", "second")])
     page = render([("Projects", [_row_with("alpha", a)])], CTX)
@@ -127,28 +103,6 @@ def test_cards_carry_what_the_filters_scope_on():
     assert "data-agents='claude kimi'" in page
     # Searchable text is lowercased and carries the session labels.
     assert "first pass" in page.split("data-text='", 1)[1].split("'", 1)[0]
-
-
-def test_waiting_and_running_come_first_across_units():
-    a = Activity(needs=[{"question": "answer me", "at": 50}])
-    b = Activity(live=[{"session": "x", "name": "busy one", "cwd": "/y"}])
-    page = render([("Projects", [_row_with("alpha", a), _row_with("beta", b)])], CTX)
-    waiting = page.index("Waiting on you")
-    running = page.index("Running now")
-    cards = page.index("<details data-unit='alpha'")
-    assert waiting < running < cards
-    # Each row names its unit.
-    assert "answer me" in page and page.index("answer me") < cards
-    sec = page[waiting:running]
-    assert "alpha" in sec
-
-
-def test_groups_are_led_by_the_one_with_the_newest_member():
-    quiet = Activity(last_session=100)
-    busy = Activity(last_session=9000)
-    page = render([("Clients", [_row_with("c", quiet, kind="client")]),
-                   ("Projects", [_row_with("p", busy)])], CTX)
-    assert page.index("data-group='Projects'") < page.index("data-group='Clients'")
 
 
 def test_unattributed_rows_in_the_view_show_the_last_thing_said():
