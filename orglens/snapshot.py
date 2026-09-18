@@ -33,7 +33,10 @@ def generate_snapshot(
         "# Topology Snapshot",
         "",
         f"> Generated: {now}",
-        "> Roots: " + ", ".join(f"`{r}`" for r in registry.roots),
+        # Resolved, as every home path below is: `~/Dropbox` is a symlink to
+        # `~/Library/CloudStorage/Dropbox` here, and a header spelling the
+        # root one way above homes spelled the other made a reader assume.
+        "> Roots: " + ", ".join(f"`{Path(r).expanduser().resolve()}`" for r in registry.roots),
         "",
         "---",
         "",
