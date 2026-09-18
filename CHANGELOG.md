@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.3.0] — 2026-09-18
 
 A session belongs to a set of units: the one an attribution names, or every
 unit with a home containing where it ran. `orglens/sessions.py` is the one
