@@ -179,8 +179,8 @@ The grammar is data. Adding a kind is one line and needs no Python change:
 3. **Sessions join by where they ran.** A session in any of a unit's homes
    counts for that unit
 
-Status is the first line carrying a bolded `Status:` marker in blockquote form, found in a unit's documents,
-looking at the ones `structure` names first. Nothing declares a state file, so
+Status is the first `> **Status:**` line in a unit's documents, looking at the
+ones `structure` names first. Nothing declares a state file, so
 moving the line into whichever document you actually maintain works. It is
 always reported with its age, since an authored sentence can go stale.
 
@@ -232,8 +232,6 @@ DOCS_ROOT=~/path/to/your/docs ./demo.sh 3    # one step
 # Run tests
 pip install pytest
 python -m pytest tests/ -v
-
-# Current: 488 tests
 ```
 
 `skills/orglens/references/grammar-reference.md` is generated. Run

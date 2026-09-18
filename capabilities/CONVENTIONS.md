@@ -24,8 +24,7 @@ or out of this tree as a unit — one folder per capability, directly under `cap
 1. **A program does one pass and writes one file.** Two programs that compose
    beat one that does everything; the workflow is where they are put in order.
 2. **A program reads what it says it reads.** Nothing declares reads for it,
-   and the engine opens no artifact. A glob that silently matched nothing was
-   the previous engine's worst failure, so there is no glob.
+   and the engine opens no artifact.
 3. **State is the packet's session file.** `session.jsonl` records what
    finished, what was asked, and what was answered; position is derived from
    it and never stored. No status flag anywhere to keep in sync.

@@ -42,8 +42,7 @@ bound under the old names.
   started in one minute share their first eight; they read as duplicates and
   `resume` could not tell them apart.
 - Unattributed sessions, in `sessions --none` and at the end of `view`, show
-  where they ran and the last thing said, which is what deciding whose they
-  are needs.
+  where they ran and the last thing said.
 - `view` is banded by when a unit last moved — waiting, today, yesterday,
   this week, this month, earlier — with the clock that placed it first on
   the card: a live session, then a session, an edit, a commit to its own
@@ -52,8 +51,7 @@ bound under the old names.
   is shown as the person's last word with its age, marked stale when the
   tree moved more than a week after it; a unit talked about without an edit,
   or edited without a session, says so. Filters: band, kind, agent, text.
-  The unattributed sessions fold at the end. Its own look: paper, serif
-  headings, warm agent colours.
+  The unattributed sessions fold at the end.
 - Session counts are main sessions only. Subagents and workflow agents used to
   be counted too, which is why a unit's number can be lower than before.
 - A home reached through a symlinked root matches sessions that recorded

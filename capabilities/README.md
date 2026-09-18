@@ -51,7 +51,7 @@ orglens/
 
 `tutorial` is the only capability this repo ships. It is a bug-triage workflow and shares no vocabulary with any writing capability, so it tests that the engine carries none of its own. The engine is `orglens workflow`: a workflow is an ordered list of nodes in `WORKFLOW.yaml`, each naming a program and the one file it writes; a packet is a directory; its `session.jsonl` is an append-only record of what finished, what was asked, and what was answered. Capabilities about work that cannot be published live in `orglens-extras`.
 
-Canonical prompts live here once. `bootstrap` routes each capability's skills out with `npx skills add`, which walks a repo and owns the harness path table — a wrong skills path fails silently, so the tool decides it rather than a list here. Skills install as **copies**, not symlinks, so re-run `bootstrap` after editing one.
+`bootstrap` routes each capability's skills out with `npx skills add`, which walks a repo and owns the harness path table — a wrong skills path fails silently, so the tool decides it rather than a list here. Skills install as **copies**, not symlinks, so re-run `bootstrap` after editing one.
 
 ## Install
 
@@ -80,8 +80,7 @@ It prints what it would remove and confirms once before doing any of it. `~/.age
 
 Structure defined; capabilities harvested as they prove themselves on real problems,
 not designed up front. The first working capability was built before the pattern was
-named and moved to `orglens-extras` when this repo went public; the anatomy it
-demonstrated is what stayed.
+named and moved to `orglens-extras` when this repo went public.
 
 ## Private capabilities
 
@@ -93,4 +92,4 @@ Installing a second capability repo needs no extra machinery, because skills ins
 ./bootstrap --extras ~/code/orglens-extras
 ```
 
-which is the same `npx skills add . -g -a '*' -y --full-depth`, run once per repo. There is nothing to configure and nothing that remembers the answer.
+which is the same `npx skills add . -g -a '*' -y --full-depth`, run once per repo.
