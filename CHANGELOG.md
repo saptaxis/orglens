@@ -78,6 +78,15 @@ bound under the old names.
   unknown unit is refused in one line.
 - `orglens check` reports folders holding three or more documents that no
   kind's container and no entity's structure names.
+- `orglens new` writes a stub driver document and adds the unit to a parent
+  `.nav.yml` that lists children by name, and prints the next steps. `start`
+  says the session is running detached and how to get back to it; `--dry-run`
+  says so too and shows the first turn. `snapshot` takes `--type` and
+  `--unit`. `check` reports a unit its parent nav omits. From a first-time
+  operator's account: ~8k tokens and one human round-trip to do new, overview
+  and start, half of it recovering the fact that the launch is detached.
+- The `orglens` skill is an operator card: every command an agent runs, once,
+  with its one non-obvious fact, so the common path needs no `--help`.
 - `orglens snapshot --check` says whether the written snapshot is older than
   any declaration or driver document, and exits 1 if it is.
 - Everything orglens keeps on a machine is under `~/.orglens/`: `config.yaml`,
