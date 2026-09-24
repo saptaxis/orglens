@@ -74,6 +74,10 @@ class Session:
     needs: str | None = None
     #: Why this session is nobody's, when someone has said so.
     dismissed: str | None = None
+    #: The other live processes on this same session id, when scad reports
+    #: any: [{pid, name, pane}]. Two writers on one transcript is how a
+    #: session forks, so anything that opens one has to know.
+    also_held_by: tuple = ()
 
     @property
     def open(self) -> bool:
@@ -166,6 +170,7 @@ def all_sessions(registry: Registry, events_root: Path) -> list[Session]:
             units=units, how=how,
             last_turn=row.get("last_turn") or None, needs=row.get("needs") or None,
             dismissed=gone.get(sid),
+            also_held_by=tuple((live or {}).get("also_held_by") or ()),
         ))
     out.sort(key=lambda s: (s.when or 0, s.id), reverse=True)
     return out

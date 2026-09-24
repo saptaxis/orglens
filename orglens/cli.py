@@ -678,7 +678,7 @@ def where_cmd(name: str | None):
 def check_cmd():
     """Report where the tree has drifted from the grammar. Changes nothing."""
     registry, _ = _load_registry()
-    report = check_module.run(registry)
+    report = check_module.run(registry, sessions.all_sessions(registry, EVENTS_DIR))
 
     for drift in report.drifted:
         names = ", ".join(m.name for m in drift.missing)
@@ -737,6 +737,12 @@ def check_cmd():
         click.echo(
             f"{row.unit}: the status line is {row.days} days older than the newest edit; "
             "rewrite it if it is no longer true"
+        )
+
+    for row in report.held:
+        click.echo(
+            f"{row.session[:8]}: open in more than one process "
+            f"({', '.join(row.panes)}); two writers on one transcript fork it"
         )
 
     for row in report.undescribed:
@@ -1144,9 +1150,11 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
 
 @cli.command()
 @click.argument("target")
+@click.option("--prompt", default=None,
+              help="Send this as the next turn instead of going in yourself.")
 @click.option("--print", "print_only", is_flag=True,
               help="Print the resume command instead of running it.")
-def resume(target: str, print_only: bool):
+def resume(target: str, prompt: str | None, print_only: bool):
     """Resume a session by id, or a unit's newest open session.
 
     Hands the id to `scad session resume`, which knows where the session
@@ -1176,8 +1184,37 @@ def resume(target: str, print_only: bool):
             sys.exit(1)
         session = open_[0]
 
+    if prompt:
+        # A turn into the open pane, rather than a terminal to type it in.
+        # scad pastes and submits it; `send-keys` is not a substitute, it
+        # lost the first 200 characters of a 1.4k prompt.
+        sys.exit(_scad(["session", "send", session.id, prompt]))
+
+    _warn_if_held_twice(session)
     argv = ["session", "resume", session.id] + (["--print"] if print_only else [])
     sys.exit(_scad(argv))
+
+
+def _warn_if_held_twice(session) -> None:
+    """Say so when another process already has this session open.
+
+    Measured on this machine 2026-09-24: six ids each held by two live
+    processes, two of the transcripts genuinely forked and one carrying
+    seven interrupted-turn repairs. scad refuses a second process where it
+    can; this is the case it cannot see from one id, and a person about to
+    resume is the one who can decide.
+    """
+    held = getattr(session, "also_held_by", ()) or ()
+    if not held:
+        return
+    click.echo(f"{session.id[:8]} is already open in "
+               f"{len(held)} other process(es):", err=True)
+    for holder in held:
+        where = holder.get("pane") or "pane unknown"
+        click.echo(f"  pid {holder.get('pid')}  {where}  "
+                   f"{holder.get('name') or ''}".rstrip(), err=True)
+    click.echo("Go to that one rather than opening a second writer on it.",
+               err=True)
 
 
 def _attribute(session_id: str, unit: str, why: str | None = None) -> None:
@@ -1379,12 +1416,21 @@ def _launch_record(output: str) -> dict | None:
     return record
 
 
-def _launch(cwd: Path, agent: str, prompt: str | None) -> dict | None:
+def _launch(cwd: Path, agent: str, prompt: str | None,
+            window: str | None = None, name: str | None = None) -> dict | None:
     """Start a session through scad and return its launch record — at least
     `session_id`, and the `tmux` pane when scad names one. Never raises."""
     argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd), "--json"]
     if prompt:
         argv += ["--prompt", prompt]
+    # The unit name is the one thing orglens knows and scad does not, so it
+    # is what the window and the session are called. `--window` lands the
+    # pane in the tmux session the person is already watching instead of a
+    # detached sibling; without it scad behaves as before.
+    if window:
+        argv += ["--window", window]
+    if name:
+        argv += ["--name", name]
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.SubprocessError):
@@ -1445,9 +1491,13 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
               type=click.Choice(["claude", "codex", "kimi"]),
               help="Which agent family to launch.")
 @click.option("--prompt", default=None, help="The session's first turn.")
+@click.option("--window", is_flag=True,
+              help="Land it as a window in your tmux, named for the unit.")
+@click.option("--name/--no-name", default=True,
+              help="Name the session after the unit at launch. On by default.")
 @click.option("--dry-run", is_flag=True, help="Say what would happen; launch nothing.")
 def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
-          dry_run: bool):
+          window: bool, name: bool, dry_run: bool):
     """Start a session for a unit, attributed before its first turn.
 
     The unit is what you asked for and the working directory is a consequence,
@@ -1506,7 +1556,9 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
             click.echo(f"  {line}")
         return
 
-    record = _launch(chosen.path, agent, first_turn)
+    record = _launch(chosen.path, agent, first_turn,
+                     window=unit.name if window else None,
+                     name=unit.name if name else None)
     if record is None:
         click.echo("scad returned no session id — the session is not attributed. "
                    "Attribute it later, or start it again through orglens.")

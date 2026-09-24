@@ -371,3 +371,60 @@ class TestTriage:
         written = {e.session[:8]: e.kind for e in
                    events.read_all(root=tmp_path / "events")}
         assert written == {"0000aaaa": "attributed", "0000bbbb": "dismissed"}
+
+
+class TestHeldTwice:
+    """A session id with two live processes on it. scad reports the other
+    holders; orglens is the surface that would otherwise open a third."""
+
+    def _held(self, tmp_path, monkeypatch, two_root_tree):
+        home = tmp_path / "code" / "orglens"
+        return _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("abcd1234-full-id", str(home), live={
+                "pid": 1, "name": "mine", "status": "idle", "waiting_for": "",
+                "also_held_by": [{"pid": 2, "name": "older",
+                                  "pane": "scad-cl-1128:0.0"}]}),
+        ])
+
+    def test_resume_says_where_the_other_process_is(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._held(tmp_path, monkeypatch, two_root_tree)
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: 0)
+        out = CliRunner().invoke(cli, ["resume", "abcd1234"]).output
+        assert "scad-cl-1128:0.0" in out and "pid 2" in out
+
+    def test_check_reports_it_and_does_not_gate(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._held(tmp_path, monkeypatch, two_root_tree)
+        result = CliRunner().invoke(cli, ["check"])
+        assert "more than one process" in result.output
+        assert result.exit_code == 0
+
+    def test_a_single_holder_is_not_reported(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("abcd1234-full-id", str(home), live={
+                "pid": 1, "name": "mine", "status": "idle",
+                "waiting_for": "", "also_held_by": []}),
+        ])
+        assert "more than one process" not in CliRunner().invoke(cli, ["check"]).output
+
+
+class TestResumePrompt:
+    def test_a_prompt_goes_to_scad_session_send(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """Not a terminal to type in: the turn is delivered to the open pane.
+        orglens builds no tmux transport of its own."""
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("abcd1234-full-id", str(home)),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+        CliRunner().invoke(cli, ["resume", "abcd1234", "--prompt", "carry on"])
+        assert seen == [["session", "send", "abcd1234-full-id", "carry on"]]
