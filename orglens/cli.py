@@ -13,6 +13,7 @@ declaration does.
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import subprocess
@@ -25,7 +26,8 @@ import click
 from orglens import activity, check as check_module, documents, reference, sessions, view
 from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
-from orglens.events import EVENTS_DIR, Event, append, this_machine
+from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
+                            this_machine)
 from orglens.homes import Home, repo_of
 from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
@@ -1062,16 +1064,48 @@ def notes_cmd(unit_name: str | None, want_mentions: bool):
               help="Only the sessions that belong to no unit.")
 @click.option("--all", "everything", is_flag=True,
               help="Include sessions with no turns yet.")
-def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
+@click.option("--triage", is_flag=True,
+              help="Walk the unclaimed sessions and decide them one by one.")
+@click.option("--from", "from_file", default=None, metavar="FILE",
+              help="Apply decisions from a `--none --json` file you edited.")
+@click.option("--json", "as_json", is_flag=True,
+              help="The rows as JSON, each with a `unit` to fill in.")
+def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
+                 triage: bool, from_file: str | None, as_json: bool):
     """List a unit's sessions, or every unit's, newest first.
 
     A session is a unit's because `orglens start` or `orglens attribute`
     said so, or because it ran inside one of the unit's homes. A home
     shared by two units lists its sessions under both.
+
+    `--triage` and `--from` decide the unclaimed ones: at a prompt, or in
+    an editor over the JSON. Neither proposes a unit; both only record.
     """
     registry, _ = _load_registry()
     every = sessions.all_sessions(registry, EVENTS_DIR)
     short = sessions.short_ids([s.id for s in every])
+
+    if triage or from_file:
+        loose = sessions.listed(sessions.unattributed(every), everything)
+        if not loose:
+            click.echo("nothing unclaimed.")
+            return
+        if from_file:
+            _triage_from_file(registry, loose, from_file)
+        else:
+            _triage(registry, loose)
+        return
+
+    if as_json:
+        if only_none:
+            rows = sessions.unattributed(every)
+        elif unit_name is not None:
+            rows = sessions.for_unit(every, registry.resolve(unit_name).name)
+        else:
+            rows = every
+        click.echo(json.dumps(
+            [_session_row(s) for s in sessions.listed(rows, everything)], indent=2))
+        return
 
     if unit_name is not None and not only_none:
         try:
@@ -1146,10 +1180,158 @@ def resume(target: str, print_only: bool):
     sys.exit(_scad(argv))
 
 
+def _attribute(session_id: str, unit: str, why: str | None = None) -> None:
+    """One attribution, the single writer for every path that makes one."""
+    append(Event(kind=ATTRIBUTED, unit=unit, session=session_id,
+                 at=int(time.time()), machine=this_machine(), why=why),
+           root=EVENTS_DIR)
+
+
+def _dismiss(session_id: str, why: str | None = None) -> None:
+    """Say a session is nobody's. The unit is empty because there is none."""
+    append(Event(kind=DISMISSED, unit="", session=session_id,
+                 at=int(time.time()), machine=this_machine(), why=why),
+           root=EVENTS_DIR)
+
+
+@cli.command()
+@click.argument("session_id")
+@click.option("--why", default=None, help="Why it is nobody's, in your words.")
+def dismiss(session_id: str, why: str | None):
+    """Say a session belongs to no unit and never will.
+
+    Without this the pile never empties. A scratch session in `/tmp` was
+    never anyone's work, and with only `attribute` to say things with it
+    sits in `sessions --none` forever, asked about every time. A later
+    `attribute` takes it back.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, EVENTS_DIR)
+    session, matches = _find_session(every, session_id)
+    if session is None:
+        if matches:
+            click.echo(f"'{session_id}' matches more than one session:", err=True)
+            for s in matches:
+                click.echo(_session_line(s), err=True)
+        else:
+            click.echo(f"No session '{session_id}' in the index.", err=True)
+        sys.exit(1)
+    _dismiss(session.id, why)
+    click.echo(f"dismissed session {session.id}")
+
+
+def _session_row(s) -> dict:
+    """One session as JSON: what deciding whose it is needs, plus the empty
+    `unit` and `why` to fill in and hand back through `--from`."""
+    said = (s.last_turn or {}).get("text") or ""
+    return {
+        "id": s.id,
+        "agent": s.agent,
+        "cwd": s.cwd,
+        "turns": s.turns,
+        "when": s.when,
+        "label": s.label,
+        "how": s.how,
+        "units": sorted(s.units),
+        "dismissed": s.dismissed,
+        "said": " ".join(said.split())[:200] or None,
+        "unit": "",
+        "why": "",
+    }
+
+
+def _triage(registry: Registry, rows: list) -> None:
+    """Walk the unclaimed sessions one at a time, newest first.
+
+    `attribute` one at a time is the only tool today and 169 invocations is
+    not a method. What makes this cheap is that everything needed to decide
+    is on screen — where it ran, what it said last — and the answer is a
+    unit name, `s` to skip or `d` to dismiss. Nothing is guessed: a session
+    at the docs root could be any of seventeen units, and proposing one
+    from its title is the containment mistake one layer up.
+    """
+    names = sorted(u.name for u in registry.units())
+    click.echo(f"{len(rows)} unclaimed. Units: {', '.join(names)}")
+    click.echo("A unit name (a unique prefix will do), `s` to skip, "
+               "`d` to dismiss, `q` to stop.\n")
+    for i, session in enumerate(rows, 1):
+        click.echo(f"[{i}/{len(rows)}] {_session_line(session)}")
+        click.echo(_session_detail(session))
+        answer = click.prompt("  unit", default="s", show_default=False).strip()
+        if answer in ("q", "quit"):
+            click.echo("stopped.")
+            return
+        if answer in ("", "s", "skip"):
+            continue
+        if answer in ("d", "dismiss"):
+            why = click.prompt("  why", default="", show_default=False).strip()
+            _dismiss(session.id, why or None)
+            click.echo("  dismissed")
+            continue
+        try:
+            unit = registry.resolve(answer)
+        except ValueError as exc:
+            click.echo(f"  {exc} — skipped")
+            continue
+        why = click.prompt("  why", default="", show_default=False).strip()
+        _attribute(session.id, unit.name, why or None)
+        click.echo(f"  attributed to {unit.name}")
+
+
+def _triage_from_file(registry: Registry, rows: list, path: str) -> None:
+    """The same decisions, made in an editor instead of at a prompt.
+
+    `sessions --none --json` out, a `unit` added per row, this back in —
+    for the person who would rather do fifty at once than answer fifty
+    prompts. A row with no `unit` is left undecided, which is how a file
+    can be filled in over several sittings.
+    """
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as exc:
+        click.echo(f"cannot read {path}: {exc}", err=True)
+        sys.exit(1)
+    # `list` is a command in this module and shadows the builtin, so the
+    # type has to be named explicitly. See the `[*x]` note in `find`.
+    if not isinstance(data, builtins.list):
+        click.echo(f"{path}: expected a list of session rows.", err=True)
+        sys.exit(1)
+
+    known = {s.id: s for s in rows}
+    done = skipped = 0
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("id") or row.get("session") or "")
+        unit_name = (row.get("unit") or "").strip()
+        if not sid or not unit_name:
+            skipped += 1
+            continue
+        if sid not in known:
+            click.echo(f"  {sid[:8]}: not in the unclaimed list — left alone")
+            skipped += 1
+            continue
+        why = (row.get("why") or "").strip() or None
+        if unit_name in ("d", "dismiss", "dismissed"):
+            _dismiss(sid, why)
+        else:
+            try:
+                unit = registry.resolve(unit_name)
+            except ValueError as exc:
+                click.echo(f"  {sid[:8]}: {exc}")
+                skipped += 1
+                continue
+            _attribute(sid, unit.name, why)
+        done += 1
+    click.echo(f"{done} decided, {skipped} left alone")
+
+
 @cli.command()
 @click.argument("session_id")
 @click.argument("unit_name")
-def attribute(session_id: str, unit_name: str):
+@click.option("--why", default=None,
+              help="What the session was for, in your words.")
+def attribute(session_id: str, unit_name: str, why: str | None):
     """Say which unit a session was for, after the fact.
 
     The same event `start` writes before a session's first turn. A later
@@ -1175,9 +1357,7 @@ def attribute(session_id: str, unit_name: str):
         click.echo(str(exc), err=True)
         sys.exit(1)
 
-    append(Event(kind="attributed", unit=unit.name, session=session.id,
-                 at=int(time.time()), machine=this_machine()),
-           root=EVENTS_DIR)
+    _attribute(session.id, unit.name, why)
     click.echo(f"attributed session {session.id} to {unit.name}")
 
 
@@ -1333,9 +1513,7 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         return
     session = record["session_id"]
 
-    append(Event(kind="attributed", unit=unit.name, session=session,
-                 at=int(time.time()), machine=this_machine()),
-           root=EVENTS_DIR)
+    _attribute(session, unit.name)
     click.echo(f"attributed session {session} to {unit.name}")
     # The session is running detached; say how to get back to it. scad
     # printed the pane on stderr, which is easy to miss, and never said

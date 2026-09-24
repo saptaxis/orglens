@@ -27,7 +27,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from orglens.events import attributions
+from orglens.events import attributions, dismissed
 from orglens.homes import repo_of
 from orglens.units import Registry
 
@@ -72,6 +72,8 @@ class Session:
     last_turn: dict | None = None
     #: An open question the session left, if any.
     needs: str | None = None
+    #: Why this session is nobody's, when someone has said so.
+    dismissed: str | None = None
 
     @property
     def open(self) -> bool:
@@ -131,11 +133,17 @@ def all_sessions(registry: Registry, events_root: Path) -> list[Session]:
     by hand in a terminal is not a row until scad's next reindex.
     """
     attributed = attributions(root=events_root)
+    gone = dismissed(root=events_root)
     prefixes = _prefixes(registry)
 
     def belongs(sid: str, cwd: str | None) -> tuple[frozenset[str], str | None]:
         if sid in attributed:
             return frozenset({attributed[sid]}), "attributed"
+        # A dismissal is an answer, so containment does not get to overrule
+        # it: a scratch session that happens to sit inside a home was still
+        # never that unit's work.
+        if sid in gone:
+            return frozenset(), "dismissed"
         units = frozenset(name for name, prefix in prefixes if cwd and _under(cwd, prefix))
         return units, ("containment" if units else None)
 
@@ -157,6 +165,7 @@ def all_sessions(registry: Registry, events_root: Path) -> list[Session]:
             outcome=row.get("outcome"), live=live is not None,
             units=units, how=how,
             last_turn=row.get("last_turn") or None, needs=row.get("needs") or None,
+            dismissed=gone.get(sid),
         ))
     out.sort(key=lambda s: (s.when or 0, s.id), reverse=True)
     return out
@@ -166,8 +175,11 @@ def for_unit(sessions: list[Session], name: str) -> list[Session]:
     return [s for s in sessions if name in s.units]
 
 
-def unattributed(sessions: list[Session]) -> list[Session]:
-    return [s for s in sessions if not s.units]
+def unattributed(sessions: list[Session], everything: bool = False) -> list[Session]:
+    """The sessions nobody has claimed. Dismissed ones are decided, not
+    undecided, so they leave the pile unless asked for."""
+    return [s for s in sessions
+            if not s.units and (everything or s.dismissed is None)]
 
 
 def listed(sessions: list[Session], everything: bool = False) -> list[Session]:

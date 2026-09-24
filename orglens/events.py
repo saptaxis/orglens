@@ -29,6 +29,10 @@ from orglens.config import ORGLENS_HOME
 EVENTS_DIR = ORGLENS_HOME / "events"
 
 
+#: What a session was: one unit's, or nobody's and never will be.
+ATTRIBUTED, DISMISSED = "attributed", "dismissed"
+
+
 @dataclass(frozen=True)
 class Event:
     kind: str
@@ -36,6 +40,10 @@ class Event:
     session: str | None
     at: int
     machine: str
+    #: Why, in the person's words. Optional, and never interpreted: the
+    #: index's title is often a `/rename` stand-in, and the person looking
+    #: at the session is the only one who knows what it was for.
+    why: str | None = None
 
 
 def this_machine() -> str:
@@ -88,9 +96,35 @@ def attributions(root: Path = EVENTS_DIR) -> dict[str, str]:
 
     Someone can change their mind, and both events stay on disk. What is read
     back is the latest; what is kept is the history of having changed it.
+
+    A later dismissal drops the session from this map, and a later
+    attribution takes it back: both are assertions and the newest wins.
     """
     out: dict[str, str] = {}
     for event in read_all(root):
-        if event.kind == "attributed" and event.session:
+        if not event.session:
+            continue
+        if event.kind == ATTRIBUTED:
             out[event.session] = event.unit
+        elif event.kind == DISMISSED:
+            out.pop(event.session, None)
+    return out
+
+
+def dismissed(root: Path = EVENTS_DIR) -> dict[str, str]:
+    """session id -> why it is nobody's, latest assertion winning.
+
+    Without this the pile never empties. A scratch session in `/tmp` was
+    never work, belongs to no unit and never will, and with only
+    `attributed` to say things with it is shown as undecided forever.
+    Attributing it afterwards takes it back off this list.
+    """
+    out: dict[str, str] = {}
+    for event in read_all(root):
+        if not event.session:
+            continue
+        if event.kind == DISMISSED:
+            out[event.session] = event.why or ""
+        elif event.kind == ATTRIBUTED:
+            out.pop(event.session, None)
     return out
