@@ -22,7 +22,7 @@ import re
 import time
 from pathlib import Path
 
-from orglens.activity import Activity, recency
+from orglens.activity import MENTIONS, Activity, recency
 from orglens.sessions import listed
 
 CSS = """
@@ -255,7 +255,17 @@ def _detail(row: dict, ctx: dict) -> str:
     if a.notes:
         out.append(f"<h4>Notes ({len(a.notes)})</h4><ol class='list'>")
         for n in a.notes[:8]:
-            where = "" if n["written_in"] == row["name"] else f" · written in {n['written_in']}"
+            # Why this note is here, when it is not simply the unit's own.
+            # `written in X` reads as provenance and was the only label;
+            # a note that merely names the unit now says so instead of
+            # borrowing that sentence.
+            how, wrote = n.get("how"), n["written_in"]
+            if how == MENTIONS:
+                where = f" · mentions this, from {wrote}" if wrote else " · mentions this"
+            elif wrote and wrote != row["name"]:
+                where = f" · written in {wrote}"
+            else:
+                where = ""
             when = f" · {ago(n['at'])}" if n.get("at") else ""
             out.append(
                 f"<li><b>{html.escape(str(n['topic']))}</b> — "

@@ -161,20 +161,23 @@ def _git_paths(registry: Registry, units: list) -> list[Path]:
     return out
 
 
-def _warm(registry: Registry, units: list) -> dict[str, list[dict]]:
+def _warm(registry: Registry, units: list, every: list) -> dict[str, list[dict]]:
     """Everything `status` and `view` will ask a subprocess or a file walk
     for, fetched at once: git per home and driver document, the newest
     mtime per home, and `scad notes ls --about` per unit. Independent and
     mostly waiting, so one pool runs them side by side; in series they were
     most of a 10s `status`. Returns the notes by unit; the rest is cached.
     """
+    # One read of scad's notes export for the whole tree, joined here. It
+    # was one `--about` subprocess per unit, which is 31 launches to read
+    # one file; the join itself needs the sessions, so the caller passes
+    # them in.
     notes: dict[str, list[dict]] = {}
 
-    def fetch(name: str) -> None:
-        notes[name] = activity.notes_about(name)
+    def fetch(_: None = None) -> None:
+        notes.update(activity.notes_by_unit([u.name for u in units], every))
 
-    activity.prefetch(_git_paths(registry, units),
-                      extra=[(fetch, unit.name) for unit in units])
+    activity.prefetch(_git_paths(registry, units), extra=[(fetch, None)])
     return notes
 
 
@@ -276,7 +279,7 @@ def status():
     units = registry.units()
 
     every, by_unit = _sessions_by_unit(registry)
-    notes = _warm(registry, units)
+    notes = _warm(registry, units, every)
     acts = {
         unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name],
                             notes=notes[unit.name])
@@ -906,7 +909,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
     ]
 
     every, by_unit = _sessions_by_unit(registry)
-    notes = _warm(registry, [u for us in by_kind.values() for u in us])
+    notes = _warm(registry, [u for us in by_kind.values() for u in us], every)
 
     groups = []
     for kind in sorted(by_kind):
@@ -1004,6 +1007,53 @@ def _session_detail(s) -> str:
     if said:
         line += f"  ·  {said}"
     return line
+
+
+@cli.command(name="notes")
+@click.argument("unit_name", required=False)
+@click.option("--mentions/--no-mentions", "want_mentions", default=True,
+              help="Include notes that only name the unit. On by default.")
+def notes_cmd(unit_name: str | None, want_mentions: bool):
+    """What was written down about a unit, newest first.
+
+    Three ways a note reaches a unit, shown per row. *written here* is the
+    exact one: the note's session is the unit's, by attribution or by
+    containment. *filed here* is scad's project for it, a directory name.
+    *mentions this* is the name in the note's topic, tags or entities —
+    the weakest, and the only one before this.
+
+    The notes themselves stay in scad; this reads its export and joins.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, EVENTS_DIR)
+
+    if unit_name:
+        try:
+            unit = registry.resolve(unit_name)
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+        names = [unit.name]
+    else:
+        names = [u.name for u in registry.units()]
+
+    found = activity.notes_by_unit(names, every)
+    shown = 0
+    for name in names:
+        rows = [n for n in found[name]
+                if want_mentions or n.get("how") != activity.MENTIONS]
+        if not rows:
+            continue
+        shown += len(rows)
+        click.echo(f"\n{name}:")
+        for n in rows:
+            when = _ago(n["at"]) if n.get("at") else "—"
+            click.echo(
+                f"  {str(n['topic'] or ''):<28} {when:>8}  "
+                f"{str(n.get('how') or ''):<13} {str(n['title'] or '')[:88]}"
+            )
+    if not shown:
+        click.echo(f"{unit_name or 'every unit'}: no notes")
 
 
 @cli.command(name="sessions")
