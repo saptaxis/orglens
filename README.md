@@ -82,10 +82,13 @@ replaces the bundled grammar.
 | `orglens snapshot [--stdout] [--check]` | Generate a topology snapshot (markdown); `--check` says whether the written one is older than any declaration or driver document, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
 | `orglens view` | Render where everything stands as a page, and open it: units banded by when they last moved, waiting first, a foldable card each; filter by band, kind, agent or text |
-| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--dry-run]` | Start a session for a unit, attributed before its first turn |
-| `orglens sessions [UNIT] [--none] [--all]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
-| `orglens resume UNIT\|SESSION-ID [--print]` | Resume a session, or a unit's newest open one, through `scad session resume` |
-| `orglens attribute SESSION-ID UNIT` | Say which unit a session was for, after the fact |
+| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window] [--no-name] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, named for the unit |
+| `orglens sessions [UNIT] [--none] [--all] [--json]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
+| `orglens sessions --triage`, `--from FILE` | Decide the unclaimed sessions one at a time, or apply a `--none --json` file you edited |
+| `orglens notes [UNIT] [--no-mentions]` | What was written down about a unit, and why each note is the unit's |
+| `orglens resume UNIT\|SESSION-ID [--prompt TEXT] [--print]` | Resume a session, or a unit's newest open one; `--prompt` sends a turn to it instead |
+| `orglens attribute SESSION-ID UNIT [--why TEXT]` | Say which unit a session was for, after the fact |
+| `orglens dismiss SESSION-ID [--why TEXT]` | Say a session belongs to no unit and never will |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 | `orglens where [NAME]` | Which roots are configured, and which unit a name or this directory resolves to |
 | `orglens workflow next\|done\|note\|goto PACKET` | Run a capability's workflow over a packet, one pass at a time, with a human between. See `capabilities/tutorial/README.md` |
@@ -196,7 +199,18 @@ repository with sixteen homes below it, that is most of the sessions.
 `orglens sessions --none` lists the ones that belong to no unit. `orglens resume`
 hands a session id, or a unit's newest open session, to `scad session resume`.
 `orglens attribute SESSION-ID UNIT` records an attribution after the fact, which
-is also how a shared-home session is narrowed to one unit.
+is also how a shared-home session is narrowed to one unit. `orglens dismiss`
+says a session is nobody's, which is what lets the unclaimed pile empty rather
+than grow; `sessions --triage` walks that pile one session at a time, and
+`sessions --from FILE` applies the same decisions written into a
+`--none --json` file. Neither proposes a unit: a session at a shared root could
+be any of the units under it, and guessing from its title is the containment
+mistake one layer up.
+
+`orglens notes UNIT` prints what was written down about it. A note is the
+unit's because the session that wrote it is (`written here`), because scad
+filed it there (`filed here`), or because it names the unit (`mentions this`);
+each row says which.
 
 `orglens start UNIT` records the unit before the session's first turn. It picks
 one of the unit's homes, asking with `--home` when more than one resolves,

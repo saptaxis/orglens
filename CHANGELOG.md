@@ -1,5 +1,38 @@
 # Changelog
 
+## [Unreleased]
+
+Everything a session or a note needs is reachable from orglens: a turn into an
+open pane, a name for the window it runs in, a loop over the unclaimed pile,
+and the notes a unit actually owns.
+
+- Notes are joined to units by the session that wrote them — the same rule
+  `sessions` uses — rather than by the unit's name appearing in the note. The
+  older name match survives as a weaker, labelled reason: each row says
+  `written here`, `filed here` or `mentions this`, and `view` shows it. One
+  read of `scad notes ls` for the whole tree replaces one `--about`
+  subprocess per unit: 0.25s against 8.47s on a 31-unit tree.
+- `orglens notes [UNIT]` prints what was written down about a unit, with
+  `--no-mentions` for the exact rows only.
+- `sessions --triage` walks the unclaimed sessions newest first and takes a
+  unit name, `s` to skip or `d` to dismiss. Nothing proposes a unit: a
+  session at a shared root could be any of the units under it.
+- `dismiss SESSION` records that a session belongs to no unit and never will,
+  so the pile can empty. A later `attribute` takes it back. `attribute` and
+  `dismiss` both accept `--why`.
+- `sessions --none --json` emits rows with an empty `unit` and `why` to fill
+  in; `sessions --from FILE` applies them.
+- `resume --prompt TEXT` sends a turn to the open session through
+  `scad session send` instead of attaching. `resume` also names the other
+  live processes on a session id before opening it, and `check` reports every
+  doubly held session: two writers on one transcript is how a session forks.
+- `start --window` lands the session as a window in the tmux you are already
+  in, named for the unit, and `--name` (on by default) names the session
+  itself at launch. Both need scad's `session launch --window/--name`.
+- Shell completion for unit names, document kinds and session ids, written by
+  `bootstrap`. The completers read the snapshot cache, never the tree, so a
+  tab is not a two-second pause.
+
 ## [0.3.0] — 2026-09-18
 
 A session belongs to a set of units: the one an attribution names, or every
