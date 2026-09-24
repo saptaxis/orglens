@@ -23,7 +23,8 @@ from pathlib import Path
 
 import click
 
-from orglens import activity, check as check_module, documents, reference, sessions, view
+from orglens import (activity, check as check_module, complete, documents,
+                     reference, sessions, view)
 from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
 from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
@@ -339,8 +340,8 @@ def status():
 
 
 @cli.command()
-@click.argument("artifact_type")
-@click.argument("unit_name", required=False)
+@click.argument("artifact_type", shell_complete=complete.kinds)
+@click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--in", "within", default=None, metavar="DIR",
               help="Scope to directories of this name instead of the kind's own container.")
 @click.option("--grep", "pattern", default=None, metavar="TEXT",
@@ -616,7 +617,7 @@ def _repo_line(home) -> str:
 
 
 @cli.command(name="where")
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=complete.units)
 def where_cmd(name: str | None):
     """Announce which roots, and which unit a name or this directory is in.
 
@@ -760,8 +761,10 @@ def check_cmd():
 @click.option("--stdout", is_flag=True, help="Print instead of writing")
 @click.option("--check", is_flag=True,
               help="Say whether the written snapshot is older than the tree; exit 1 if so.")
-@click.option("--type", "kind", default=None, help="Only units of this kind.")
-@click.option("--unit", "unit_name", default=None, help="Only this unit and its parts.")
+@click.option("--type", "kind", default=None, help="Only units of this kind.",
+              shell_complete=complete.kinds)
+@click.option("--unit", "unit_name", default=None, help="Only this unit and its parts.",
+              shell_complete=complete.units)
 def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None):
     """Generate a snapshot of what is in the tree.
 
@@ -848,7 +851,7 @@ def _repo_keys(unit: Unit) -> list[str]:
 
 
 @cli.command(name="config")
-@click.argument("unit_name")
+@click.argument("unit_name", shell_complete=complete.units)
 @click.option("--workdir", default=None, help="Which repository is the workdir.")
 @click.option("--out", default=None, help="Write here instead of ~/.scad/configs/<unit>.yml")
 def config_cmd(unit_name: str, workdir: str | None, out: str | None):
@@ -1018,7 +1021,7 @@ def _session_detail(s) -> str:
 
 
 @cli.command(name="notes")
-@click.argument("unit_name", required=False)
+@click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--mentions/--no-mentions", "want_mentions", default=True,
               help="Include notes that only name the unit. On by default.")
 def notes_cmd(unit_name: str | None, want_mentions: bool):
@@ -1065,7 +1068,7 @@ def notes_cmd(unit_name: str | None, want_mentions: bool):
 
 
 @cli.command(name="sessions")
-@click.argument("unit_name", required=False)
+@click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--none", "only_none", is_flag=True,
               help="Only the sessions that belong to no unit.")
 @click.option("--all", "everything", is_flag=True,
@@ -1149,7 +1152,7 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
 
 
 @cli.command()
-@click.argument("target")
+@click.argument("target", shell_complete=complete.units_or_sessions)
 @click.option("--prompt", default=None,
               help="Send this as the next turn instead of going in yourself.")
 @click.option("--print", "print_only", is_flag=True,
@@ -1232,7 +1235,7 @@ def _dismiss(session_id: str, why: str | None = None) -> None:
 
 
 @cli.command()
-@click.argument("session_id")
+@click.argument("session_id", shell_complete=complete.sessions)
 @click.option("--why", default=None, help="Why it is nobody's, in your words.")
 def dismiss(session_id: str, why: str | None):
     """Say a session belongs to no unit and never will.
@@ -1364,8 +1367,8 @@ def _triage_from_file(registry: Registry, rows: list, path: str) -> None:
 
 
 @cli.command()
-@click.argument("session_id")
-@click.argument("unit_name")
+@click.argument("session_id", shell_complete=complete.sessions)
+@click.argument("unit_name", shell_complete=complete.units)
 @click.option("--why", default=None,
               help="What the session was for, in your words.")
 def attribute(session_id: str, unit_name: str, why: str | None):

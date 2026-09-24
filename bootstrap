@@ -98,6 +98,36 @@ route_skills() {
     fi
 }
 
+write_completion() {
+    # click generates the script; this only decides where it goes and how
+    # the shell is told about it. Generated at install rather than shipped,
+    # because the script names every command and option and would otherwise
+    # go stale the first time one is added.
+    local shell_name script
+    shell_name="$(basename "${SHELL:-zsh}")"
+    case "$shell_name" in
+        zsh|bash) ;;
+        *) echo "  completion: $shell_name is not supported by click — skipped"; return ;;
+    esac
+    script="$SHARE_DIR/orglens/orglens-complete.$shell_name"
+    if [ "$DRY_RUN" = true ]; then
+        printf '  would write: %s\n' "$script"
+        return
+    fi
+    mkdir -p "$(dirname "$script")"
+    if ! _ORGLENS_COMPLETE="${shell_name}_source" "$LOCAL_BIN/orglens" > "$script" 2>/dev/null; then
+        echo "  completion: orglens could not generate it — skipped"
+        rm -f "$script"
+        return
+    fi
+    echo "  completion: wrote $script"
+    local rc="$HOME/.${shell_name}rc"
+    if [ -f "$rc" ] && ! grep -q "orglens-complete" "$rc"; then
+        echo "  completion: add this to $rc to enable it —"
+        echo "      . $script"
+    fi
+}
+
 # ── uninstall ──────────────────────────────────────────────────────────────
 #
 # `~/.agents/skills` is shared: skills from several repos, and ones installed
@@ -201,6 +231,9 @@ if [ -n "$EXTRAS" ]; then
         echo "extras: $EXTRAS does not exist — skipped" >&2
     fi
 fi
+
+echo
+write_completion
 
 echo
 if command -v scad >/dev/null 2>&1; then
