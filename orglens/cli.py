@@ -16,6 +16,7 @@ from __future__ import annotations
 import builtins
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -1451,6 +1452,37 @@ def _launch(cwd: Path, agent: str, prompt: str | None,
     return _launch_record(done.stdout)
 
 
+#: Session names follow what the person already writes by hand: a unit, an
+#: optional word or two of context, and the day. Nine of the eleven named
+#: sessions in the index on 2026-09-25 were shaped this way —
+#: `orglens-feats-sep23`, `cribsheet-sep18` — and the two on one day
+#: (`orglens-backlog-feats-sep11`, `orglens-writing-skill-sep11`) are told
+#: apart by the context, not the date.
+def _slug(text: str, words: int = 2) -> str:
+    """One or two lowercase words, safe in a name and in a tmux window."""
+    parts = re.findall(r"[A-Za-z0-9]+", text.lower())
+    return "-".join(parts[:words])
+
+
+def _session_name(unit: str, about: str | None, taken=(), now=None) -> str:
+    """`unit[-about]-sepDD`, uniquified.
+
+    The bare unit name is not enough and is worse than scad's own default,
+    which at least appends two characters: two sessions on one unit would
+    both be called `orglens` and neither listing nor `/resume` picker could
+    tell them apart. The date anchors, the context distinguishes.
+    """
+    stamp = time.strftime("%b%d", now or time.localtime()).lower()
+    middle = _slug(about) if about else ""
+    base = "-".join(x for x in (unit, middle, stamp) if x)
+    if base not in taken:
+        return base
+    n = 2
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
+
+
 def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
     """What the session is told before its first turn.
 
@@ -1496,11 +1528,17 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
 @click.option("--prompt", default=None, help="The session's first turn.")
 @click.option("--window", is_flag=True,
               help="Land it as a window in your tmux, named for the unit.")
-@click.option("--name/--no-name", default=True,
-              help="Name the session after the unit at launch. On by default.")
+@click.option("--about", default=None, metavar="WORDS",
+              help="A word or two of context, for the session's name and window.")
+@click.option("--name", default=None, metavar="TEXT",
+              help="The session's name. Composed from the unit, --about and the "
+                   "day when not given.")
+@click.option("--no-name", "no_name", is_flag=True,
+              help="Launch the session unnamed.")
 @click.option("--dry-run", is_flag=True, help="Say what would happen; launch nothing.")
 def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
-          window: bool, name: bool, dry_run: bool):
+          window: bool, about: str | None, name: str | None, no_name: bool,
+          dry_run: bool):
     """Start a session for a unit, attributed before its first turn.
 
     The unit is what you asked for and the working directory is a consequence,
@@ -1550,18 +1588,26 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         sys.exit(1)
 
     first_turn = prompt or _arrival(unit, chosen, registry)
+    if no_name:
+        chosen_name = None
+    else:
+        taken = {s.label for s in sessions.all_sessions(registry, EVENTS_DIR) if s.label}
+        chosen_name = name or _session_name(unit.name, about, taken)
+    window_name = (_slug(about) if about else unit.name) if window else None
+
     if dry_run:
+        where = f"as a window `{window_name}` in your tmux" if window else "detached in tmux"
         click.echo(f"would launch {agent} in {chosen.path} for {unit.name}, "
-                   "detached in tmux via `scad session launch`; this command "
+                   f"{where} via `scad session launch`; this command "
                    "returns at once and leaves your terminal alone.")
+        click.echo(f"session name: {chosen_name or '(unnamed)'}")
         click.echo("first turn:")
         for line in first_turn.splitlines():
             click.echo(f"  {line}")
         return
 
     record = _launch(chosen.path, agent, first_turn,
-                     window=unit.name if window else None,
-                     name=unit.name if name else None)
+                     window=window_name, name=chosen_name)
     if record is None:
         click.echo("scad returned no session id — the session is not attributed. "
                    "Attribute it later, or start it again through orglens.")

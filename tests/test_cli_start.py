@@ -301,6 +301,85 @@ def test_launch_returns_the_record_not_only_the_id(tmp_path, monkeypatch):
     assert got["session_id"] == "sess-launched" and got["tmux"] == "scad-cl-1:0.0"
 
 
+def _named(monkeypatch, tmp_path, seen, extra=()):
+    def fake_launch(cwd, agent, prompt, window=None, name=None):
+        seen.update(window=window, name=name)
+        return {"session_id": "s1"}
+    monkeypatch.setattr("orglens.cli._launch", fake_launch)
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+    return CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens", *extra])
+
+
+def test_the_composed_name_is_unit_context_and_day(tmp_path, monkeypatch,
+                                                   two_root_tree_config):
+    """What the person writes by hand: `orglens-backlog-feats-sep11`. The bare
+    unit name is worse than scad's own default, which at least appends two
+    characters — two sessions on one unit would both be `orglens`."""
+    import time
+    monkeypatch.setattr("orglens.cli.time.localtime",
+                        lambda *a: time.strptime("2026-09-25", "%Y-%m-%d"))
+    seen = {}
+    _named(monkeypatch, tmp_path, seen, ["--about", "backlog feats"])
+    assert seen["name"] == "orglens-backlog-feats-sep25"
+
+
+def test_without_context_it_is_unit_and_day(tmp_path, monkeypatch, two_root_tree_config):
+    import time
+    monkeypatch.setattr("orglens.cli.time.localtime",
+                        lambda *a: time.strptime("2026-09-25", "%Y-%m-%d"))
+    seen = {}
+    _named(monkeypatch, tmp_path, seen)
+    assert seen["name"] == "orglens-sep25"
+
+
+def test_only_two_words_of_context_survive(tmp_path, monkeypatch, two_root_tree_config):
+    import time
+    monkeypatch.setattr("orglens.cli.time.localtime",
+                        lambda *a: time.strptime("2026-09-25", "%Y-%m-%d"))
+    seen = {}
+    _named(monkeypatch, tmp_path, seen, ["--about", "org mode backend discussion"])
+    assert seen["name"] == "orglens-org-mode-sep25"
+
+
+def test_an_explicit_name_is_used_as_given(tmp_path, monkeypatch, two_root_tree_config):
+    seen = {}
+    _named(monkeypatch, tmp_path, seen, ["--name", "whatever-I-said"])
+    assert seen["name"] == "whatever-I-said"
+
+
+def test_no_name_launches_unnamed(tmp_path, monkeypatch, two_root_tree_config):
+    seen = {}
+    _named(monkeypatch, tmp_path, seen, ["--no-name"])
+    assert seen["name"] is None
+
+
+def test_a_name_already_in_the_index_is_uniquified(tmp_path, monkeypatch,
+                                                  two_root_tree_config):
+    """Two sessions on one unit on one day is ordinary; two with one name is
+    not, and the /resume picker is where that hurts."""
+    import time
+    from orglens.sessions import Session
+    monkeypatch.setattr("orglens.cli.time.localtime",
+                        lambda *a: time.strptime("2026-09-25", "%Y-%m-%d"))
+    monkeypatch.setattr("orglens.cli.sessions.all_sessions", lambda *a: [
+        Session(id="old", agent="claude", cwd=None, started=None, ended=None,
+                turns=1, label="orglens-sep25", outcome=None, live=False,
+                units=frozenset({"orglens"}), how="attributed"),
+    ])
+    seen = {}
+    _named(monkeypatch, tmp_path, seen)
+    assert seen["name"] == "orglens-sep25-2"
+
+
+def test_the_window_takes_the_context_when_there_is_one(tmp_path, monkeypatch,
+                                                        two_root_tree_config):
+    """A window name sits in the status bar, so it stays short: the context if
+    there is one, the unit otherwise, and never the date."""
+    seen = {}
+    _named(monkeypatch, tmp_path, seen, ["--window", "--about", "org mode"])
+    assert seen["window"] == "org-mode"
+
+
 def test_window_and_name_are_passed_to_scad(tmp_path, monkeypatch,
                                             two_root_tree_config):
     """The unit name is the one thing orglens knows and scad does not, so it
@@ -313,8 +392,11 @@ def test_window_and_name_are_passed_to_scad(tmp_path, monkeypatch,
 
     monkeypatch.setattr("orglens.cli._launch", fake_launch)
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+    import time
+    monkeypatch.setattr("orglens.cli.time.localtime",
+                        lambda *a: time.strptime("2026-09-25", "%Y-%m-%d"))
     CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens", "--window"])
-    assert seen == {"window": "orglens", "name": "orglens"}
+    assert seen == {"window": "orglens", "name": "orglens-sep25"}
 
 
 def test_no_name_leaves_the_session_unnamed(tmp_path, monkeypatch,

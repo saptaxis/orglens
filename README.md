@@ -82,7 +82,7 @@ replaces the bundled grammar.
 | `orglens snapshot [--stdout] [--check]` | Generate a topology snapshot (markdown); `--check` says whether the written one is older than any declaration or driver document, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
 | `orglens view` | Render where everything stands as a page, and open it: units banded by when they last moved, waiting first, a foldable card each; filter by band, kind, agent or text |
-| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window] [--no-name] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, named for the unit |
+| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window] [--about WORDS] [--name TEXT] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, and the session is named `unit[-context]-sepDD` |
 | `orglens sessions [UNIT] [--none] [--all] [--json]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
 | `orglens sessions --triage`, `--from FILE` | Decide the unclaimed sessions one at a time, or apply a `--none --json` file you edited |
 | `orglens notes [UNIT] [--no-mentions]` | What was written down about a unit, and why each note is the unit's |
