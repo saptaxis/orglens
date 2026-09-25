@@ -84,11 +84,11 @@ replaces the bundled grammar.
 | `orglens view` | Render where everything stands as a page, and open it: units banded by when they last moved, waiting first, a foldable card each; filter by band, kind, agent or text |
 | `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window] [--about WORDS] [--name TEXT] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, and the session is named `unit[-context]-sepDD` |
 | `orglens sessions [UNIT] [--none] [--all] [--json]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
-| `orglens sessions --triage`, `--from FILE` | Decide the unclaimed sessions one at a time, or apply a `--none --json` file you edited |
+| `orglens sessions --triage [--one-by-one]`, `--groups`, `--from FILE` | Decide the unclaimed sessions by directory, one at a time, or from a `--none --json` file you edited |
 | `orglens notes [UNIT] [--no-mentions]` | What was written down about a unit, and why each note is the unit's |
 | `orglens resume UNIT\|SESSION-ID [--prompt TEXT] [--print]` | Resume a session, or a unit's newest open one; `--prompt` sends a turn to it instead |
 | `orglens attribute SESSION-ID UNIT [--why TEXT]` | Say which unit a session was for, after the fact |
-| `orglens dismiss SESSION-ID [--why TEXT]` | Say a session belongs to no unit and never will |
+| `orglens dismiss SESSION-ID\|--under PATH [--why TEXT]` | Say a session, or every unclaimed one under a path, belongs to no unit |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 | `orglens where [NAME]` | Which roots are configured, and which unit a name or this directory resolves to |
 | `orglens workflow next\|done\|note\|goto PACKET` | Run a capability's workflow over a packet, one pass at a time, with a human between. See `capabilities/tutorial/README.md` |

@@ -16,6 +16,7 @@ from pathlib import Path
 
 import click
 
+from orglens import complete
 from orglens.workflow import session
 from orglens.workflow.definition import Workflow, WorkflowError, load_workflow
 from orglens.workflow.session import Position, State
@@ -66,7 +67,8 @@ def workflow():
 
 
 @workflow.command(name="next")
-@click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
+@click.argument("packet", type=click.Path(file_okay=False, path_type=Path),
+                shell_complete=complete.packets)
 @click.option("--workflow", "workflow_opt", default=None, help="Bind or override the workflow.")
 @click.option("--json", "as_json", is_flag=True)
 def next_cmd(packet: Path, workflow_opt: str | None, as_json: bool):
@@ -96,8 +98,9 @@ def next_cmd(packet: Path, workflow_opt: str | None, as_json: bool):
 
 
 @workflow.command()
-@click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
-@click.option("--node", required=True)
+@click.argument("packet", type=click.Path(file_okay=False, path_type=Path),
+                shell_complete=complete.packets)
+@click.option("--node", required=True, shell_complete=complete.nodes)
 @click.option("--agent", required=True, help="Who performed the program: claude, codex, ...")
 @click.option("--question", default=None, help="Ask the human before the next node.")
 @click.option("--workflow", "workflow_opt", default=None)
@@ -132,7 +135,8 @@ def done(packet: Path, node: str, agent: str, question: str | None,
 
 
 @workflow.command()
-@click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
+@click.argument("packet", type=click.Path(file_okay=False, path_type=Path),
+                shell_complete=complete.packets)
 @click.argument("text")
 def note(packet: Path, text: str):
     """Answer the open gate. The text is handed to the next program verbatim."""
@@ -146,8 +150,10 @@ def note(packet: Path, text: str):
 
 
 @workflow.command()
-@click.argument("packet", type=click.Path(file_okay=False, path_type=Path))
-@click.option("--node", required=True, help="The node to run next.")
+@click.argument("packet", type=click.Path(file_okay=False, path_type=Path),
+                shell_complete=complete.packets)
+@click.option("--node", required=True, help="The node to run next.",
+              shell_complete=complete.nodes)
 @click.option("--why", required=True)
 @click.option("--workflow", "workflow_opt", default=None)
 def goto(packet: Path, node: str, why: str, workflow_opt: str | None):

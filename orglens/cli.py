@@ -33,7 +33,7 @@ from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
 from orglens.homes import Home, repo_of
 from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
-from orglens.snapshot import generate_snapshot
+from orglens.snapshot import generate_snapshot, snapshot_data
 from orglens.state import read_status
 from orglens.units import Registry, Unit
 from orglens.workflow.cli import workflow as workflow_group
@@ -766,7 +766,10 @@ def check_cmd():
               shell_complete=complete.kinds)
 @click.option("--unit", "unit_name", default=None, help="Only this unit and its parts.",
               shell_complete=complete.units)
-def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None):
+@click.option("--json", "as_json", is_flag=True,
+              help="The same facts as data, for a program to compose with.")
+def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None,
+             as_json: bool):
     """Generate a snapshot of what is in the tree.
 
     `--type` and `--unit` narrow it; a narrowed snapshot goes to stdout,
@@ -778,6 +781,17 @@ def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None)
         sys.exit(_snapshot_check(registry, config))
     if kind is not None and kind not in {u.kind for u in registry.units()}:
         _unknown("kind", kind, sorted({u.kind for u in registry.units()}))
+    if as_json:
+        # Always to stdout: the cache holds the document a session reads, and
+        # a second file to keep in step with it would be one more thing that
+        # can be stale.
+        try:
+            data = snapshot_data(registry, config, kind=kind, unit=unit_name)
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+        click.echo(json.dumps(data, indent=2))
+        return
     if stdout or kind is not None or unit_name is not None:
         try:
             click.echo(generate_snapshot(registry, config, kind=kind, unit=unit_name))

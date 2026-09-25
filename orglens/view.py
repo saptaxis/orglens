@@ -309,8 +309,20 @@ def _detail(row: dict, ctx: dict) -> str:
 
 
 def _unattributed(loose: list) -> str:
-    """Sessions belonging to no unit, newest first, each with the command
-    that resumes it. The copy affordance takes any text, not only a path."""
+    """Sessions belonging to no unit, newest first, each with the commands
+    that resume it, claim it, or say it is nobody's.
+
+    Three affordances rather than one, because seeing the pile is not the
+    hard part — the hard part was that acting on a row meant retyping a uuid
+    into another terminal. `attribute` is offered unfinished, ending in a
+    space: **no unit is proposed.** A session here is contained in no home,
+    so the cwd suggests nothing by construction, and a unit guessed from a
+    title is the containment mistake one layer up. `dismiss --under` carries
+    the parent directory, since that is the decision that empties a pile
+    where six directories held ~95 of 201 rows.
+    """
+    from pathlib import Path
+
     from orglens.sessions import short_ids, where
     short = short_ids([s.id for s in loose])
     out = [f"<h2 class='grp'>Unattributed<span class='n'>{len(loose)}</span></h2>"
@@ -318,6 +330,10 @@ def _unattributed(loose: list) -> str:
     for s in loose:
         mark = " open" if s.open else (" live" if s.live else "")
         cmd = f"scad session resume {s.id} --print"
+        claim = f"orglens attribute {s.id} "
+        drop = f"orglens dismiss {s.id}"
+        parent = str(Path(s.cwd).parent) if s.cwd else None
+        sweep = f"orglens dismiss --under {parent}" if parent else None
         when = ago(s.when // 1000) if s.when else "—"
         said = " ".join(((s.last_turn or {}).get("text") or "").split())[:160]
         label = s.label or short[s.id]
@@ -328,7 +344,14 @@ def _unattributed(loose: list) -> str:
             f"<span class='when'> · {html.escape(s.agent)} · {s.turns:,} turns · {when}</span>"
             f"<span class='cp' data-path='{html.escape(cmd)}' title='copy resume command'>"
             "&#x2398;</span>"
-            f"<div class='where'>{html.escape(where(s.cwd))}</div>"
+            f"<span class='cp' data-path='{html.escape(claim)}' "
+            "title='copy attribute command (add the unit)'>&#x2295;</span>"
+            f"<span class='cp' data-path='{html.escape(drop)}' "
+            "title='copy dismiss command'>&#x2296;</span>"
+            + (f"<span class='cp' data-path='{html.escape(sweep)}' "
+               "title='copy dismiss --under for this directory'>&#x229f;</span>"
+               if sweep else "")
+            + f"<div class='where'>{html.escape(where(s.cwd))}</div>"
             + (f"<div class='said'>{html.escape(said)}</div>" if said else "")
             + "</li>"
         )

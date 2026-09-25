@@ -93,3 +93,87 @@ def test_resume_offers_units_and_sessions_both(monkeypatch):
                         lambda argv: [{"id": "orglens-session-id", "name": "x"}])
     values = [i.value for i in complete.units_or_sessions(None, None, "orglens")]
     assert values == ["orglens", "orglens-session-id"]
+
+
+WORKFLOW = """
+name: writing
+nodes:
+  - name: brief
+    program: write-the-brief
+    writes: brief.md
+  - name: draft
+    program: write-a-draft
+    writes: draft.md
+"""
+
+
+def test_nodes_come_from_the_workflow_the_packet_is_bound_to(tmp_path, monkeypatch):
+    """The packet is the command's own argument, so the workflow is knowable
+    without asking which."""
+    from orglens.workflow import session as ws
+
+    flow = tmp_path / "WORKFLOW.yaml"
+    flow.write_text(WORKFLOW)
+    for program in ("write-the-brief", "write-a-draft"):
+        (tmp_path / program).write_text("#!/bin/sh\n")
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    ws.bind(packet, flow)
+
+    class Ctx:
+        params = {"packet": str(packet)}
+
+    assert [i.value for i in complete.nodes(Ctx, None, "")] == ["brief", "draft"]
+    assert [i.value for i in complete.nodes(Ctx, None, "dr")] == ["draft"]
+    assert complete.nodes(Ctx, None, "")[0].help == "write-the-brief"
+
+
+def test_no_packet_on_the_line_is_no_nodes(tmp_path):
+    """Correct rather than unhelpful: which nodes exist depends on which
+    workflow, and nothing yet says which."""
+    class Ctx:
+        params = {}
+
+    assert complete.nodes(Ctx, None, "") == []
+
+
+def test_an_unbound_packet_is_no_nodes(tmp_path):
+    packet = tmp_path / "packet"
+    packet.mkdir()
+
+    class Ctx:
+        params = {"packet": str(packet)}
+
+    assert complete.nodes(Ctx, None, "") == []
+
+
+def test_packets_are_the_directories_holding_a_session_file(tmp_path, monkeypatch):
+    for name in ("one", "two/deeper", "three"):
+        (tmp_path / name).mkdir(parents=True)
+    (tmp_path / "one" / "session.jsonl").write_text("")
+    (tmp_path / "two" / "deeper" / "session.jsonl").write_text("")
+
+    class Cfg:
+        roots = [tmp_path]
+
+    monkeypatch.setattr("orglens.config.Config.load", staticmethod(lambda: Cfg()))
+    found = [i.value for i in complete.packets(None, None, "")]
+    assert found == sorted([str(tmp_path / "one"), str(tmp_path / "two" / "deeper")])
+
+
+def test_a_workflow_that_does_not_validate_still_completes(tmp_path):
+    """The loader requires each node's program to exist; a completer must not.
+    A workflow mid-edit would otherwise stop completing exactly when the node
+    names are what you are reaching for."""
+    from orglens.workflow import session as ws
+
+    flow = tmp_path / "WORKFLOW.yaml"
+    flow.write_text(WORKFLOW)          # programs deliberately absent
+    packet = tmp_path / "packet"
+    packet.mkdir()
+    ws.bind(packet, flow)
+
+    class Ctx:
+        params = {"packet": str(packet)}
+
+    assert [i.value for i in complete.nodes(Ctx, None, "")] == ["brief", "draft"]

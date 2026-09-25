@@ -14,9 +14,24 @@ and the notes a unit actually owns.
   subprocess per unit: 0.25s against 8.47s on a 31-unit tree.
 - `orglens notes [UNIT]` prints what was written down about a unit, with
   `--no-mentions` for the exact rows only.
-- `sessions --triage` walks the unclaimed sessions newest first and takes a
-  unit name, `s` to skip or `d` to dismiss. Nothing proposes a unit: a
+- `sessions --triage` decides the unclaimed sessions **by directory**, one
+  answer per group: 201 unclaimed on 2026-09-25 and six directories held ~95
+  of them. `e` takes a group one session at a time, `--one-by-one` skips the
+  grouping entirely, and `--groups` just counts. `dismiss --under PATH` clears
+  a whole tree, the unclaimed part of it only. Nothing proposes a unit: a
   session at a shared root could be any of the units under it.
+- `--why` is shown wherever a session is listed, and outranks the last turn on
+  an unclaimed row — it was written about the session, the turn merely
+  happened in it. `sessions --dismissed` lists what someone said belongs to no
+  unit, so a mistaken dismissal is visible rather than buried in the log.
+- The view's unattributed rows carry the commands that act on them: resume,
+  `attribute` (unfinished, ending in a space — no unit is proposed), `dismiss`,
+  and `dismiss --under` for the row's directory.
+- `snapshot --json` emits the same facts as data, narrowed by the same
+  `--type`/`--unit` selection as the document.
+- Completion reaches workflow nodes and packet paths. Node names survive a
+  workflow that does not validate, since a half-written one is when you most
+  need them.
 - `dismiss SESSION` records that a session belongs to no unit and never will,
   so the pile can empty. A later `attribute` takes it back. `attribute` and
   `dismiss` both accept `--why`.

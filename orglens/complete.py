@@ -100,6 +100,83 @@ def sessions(ctx, param, incomplete):
     return _items(session_ids(), incomplete)
 
 
+def packets(ctx, param, incomplete):
+    """Directories that hold a `session.jsonl`, under the roots.
+
+    A packet is not in the snapshot — it is a directory with a session file,
+    which nothing renders — so this is the one completer that looks at the
+    tree. It stays cheap by looking only for the session file itself rather
+    than walking every directory: `rglob` on one filename, and the roots are
+    a handful of trees.
+    """
+    from pathlib import Path
+
+    try:
+        from orglens.config import Config
+        from orglens.workflow.session import SESSION_FILE
+
+        roots = [Path(r).expanduser() for r in Config.load().roots]
+    except Exception:
+        return []
+    found = []
+    for root in roots:
+        try:
+            found += [str(p.parent) for p in root.rglob(SESSION_FILE)]
+        except OSError:
+            continue
+    return _items(((path, "") for path in sorted(set(found))), incomplete)
+
+
+def nodes(ctx, param, incomplete):
+    """The node names in the workflow this packet is bound to.
+
+    The packet is the command's own argument, so the workflow is knowable
+    without asking: read the binding fact out of its session file, load that
+    `WORKFLOW.yaml`, and offer its nodes. No packet on the line yet means no
+    completions, which is correct — the nodes depend on which workflow.
+    """
+    from pathlib import Path
+
+    packet = (ctx.params or {}).get("packet")
+    if not packet:
+        return []
+    try:
+        from orglens.workflow.definition import load_workflow
+        from orglens.workflow.session import read, workflow_path
+
+        bound = workflow_path(read(Path(packet)))
+        if bound is None:
+            return []
+    except Exception:
+        return []
+    try:
+        workflow = load_workflow(bound)
+        # `program` is resolved to an absolute path by the loader; the hint
+        # wants the word the workflow wrote, not a line of filesystem.
+        pairs = [(node.name, Path(node.program).name if node.program else "")
+                 for node in workflow.nodes]
+    except Exception:
+        # The loader validates — a node's program has to exist on disk — and
+        # that is right for the engine and wrong here: a workflow being edited
+        # would stop completing at the moment you most need the node names.
+        # Names come straight out of the YAML when validation fails.
+        pairs = _names_in(bound)
+    return _items(pairs, incomplete)
+
+
+def _names_in(path) -> list[tuple[str, str]]:
+    """Node names read without validating anything."""
+    try:
+        import yaml
+
+        raw = yaml.safe_load(open(path).read()) or {}
+        nodes = raw.get("nodes") or []
+        return [(str(n["name"]), str(n.get("program") or ""))
+                for n in nodes if isinstance(n, dict) and n.get("name")]
+    except Exception:
+        return []
+
+
 def units_or_sessions(ctx, param, incomplete):
     """`resume` takes either, so it offers both — units first, since a name
     is what someone types when they know what they are going back to."""
