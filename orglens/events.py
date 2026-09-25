@@ -111,6 +111,24 @@ def attributions(root: Path = EVENTS_DIR) -> dict[str, str]:
     return out
 
 
+def whys(root: Path = EVENTS_DIR) -> dict[str, str]:
+    """session id -> the words on its latest assertion, when there were any.
+
+    Recorded by `attribute --why` and `dismiss --why`, and read back beside
+    the session everywhere it is listed. A field the person is asked to fill
+    and never shown again is the write-only defect one layer down.
+    """
+    out: dict[str, str] = {}
+    for event in read_all(root):
+        if not event.session or event.kind not in (ATTRIBUTED, DISMISSED):
+            continue
+        if event.why:
+            out[event.session] = event.why
+        else:
+            out.pop(event.session, None)
+    return out
+
+
 def dismissed(root: Path = EVENTS_DIR) -> dict[str, str]:
     """session id -> why it is nobody's, latest assertion winning.
 

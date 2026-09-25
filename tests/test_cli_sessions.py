@@ -309,7 +309,8 @@ class TestTriage:
         ])
         # newest first: attribute, skip, dismiss.
         answers = "orglens\nbecause\ns\nd\nnever work\n"
-        out = CliRunner().invoke(cli, ["sessions", "--triage"], input=answers).output
+        out = CliRunner().invoke(cli, ["sessions", "--triage", "--one-by-one"],
+                                 input=answers).output
         assert "3 unclaimed" in out
         written = {e.session[:8]: (e.kind, e.why) for e in
                    events.read_all(root=tmp_path / "events")}
@@ -324,7 +325,8 @@ class TestTriage:
         _setup(tmp_path, monkeypatch, two_root_tree, [
             _row("0000aaaa-none", str(tmp_path / "nowhere"), name="orglens work"),
         ])
-        out = CliRunner().invoke(cli, ["sessions", "--triage"], input="q\n").output
+        out = CliRunner().invoke(cli, ["sessions", "--triage", "--one-by-one"],
+                                 input="q\n").output
         assert "stopped." in out
         assert events.read_all(root=tmp_path / "events") == []
 
@@ -334,7 +336,8 @@ class TestTriage:
         _setup(tmp_path, monkeypatch, two_root_tree, [
             _row("0000aaaa-none", str(tmp_path / "nowhere")),
         ])
-        CliRunner().invoke(cli, ["sessions", "--triage"], input="no-such-unit\nq\n")
+        CliRunner().invoke(cli, ["sessions", "--triage", "--one-by-one"],
+                           input="no-such-unit\nq\n")
         assert events.read_all(root=tmp_path / "events") == []
 
     def test_json_rows_carry_an_empty_unit_to_fill_in(
@@ -428,3 +431,91 @@ class TestResumePrompt:
         monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
         CliRunner().invoke(cli, ["resume", "abcd1234", "--prompt", "carry on"])
         assert seen == [["session", "send", "abcd1234-full-id", "carry on"]]
+
+
+class TestTriageInGroups:
+    """One decision per directory instead of one per session. Measured
+    2026-09-25: 201 unclaimed and six directories held ~95 of them."""
+
+    def _three_dirs(self, tmp_path, monkeypatch, two_root_tree):
+        return _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "scratch" / "one"), started=5000_000),
+            _row("0000bbbb-none", str(tmp_path / "scratch" / "two"), started=4000_000),
+            _row("0000cccc-none", str(tmp_path / "scratch" / "three"), started=3000_000),
+            _row("0000dddd-none", str(tmp_path / "elsewhere" / "x"), started=2000_000),
+        ])
+
+    def test_groups_are_counted_by_the_directory_above_the_cwd(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        out = CliRunner().invoke(cli, ["sessions", "--none", "--groups"]).output
+        assert "4 unclaimed in 2 directories" in out
+        assert "3" in out.split("scratch")[0].splitlines()[-1]
+
+    def test_one_answer_decides_the_whole_group(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        # biggest group first: three in scratch/ -> orglens; then elsewhere -> dismiss
+        out = CliRunner().invoke(cli, ["sessions", "--triage"],
+                                 input="orglens\nmine\nd\nscratch\n").output
+        assert "attributed 3 sessions to orglens" in out
+        written = {e.session[:8]: (e.kind, e.why) for e in
+                   events.read_all(root=tmp_path / "events")}
+        assert written == {
+            "0000aaaa": ("attributed", "mine"),
+            "0000bbbb": ("attributed", "mine"),
+            "0000cccc": ("attributed", "mine"),
+            "0000dddd": ("dismissed", "scratch"),
+        }
+
+    def test_each_falls_through_to_one_session_at_a_time(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        CliRunner().invoke(cli, ["sessions", "--triage"],
+                           input="e\norglens\n\ns\ns\nq\n")
+        written = {e.session[:8]: e.kind for e in
+                   events.read_all(root=tmp_path / "events")}
+        assert written == {"0000aaaa": "attributed"}
+
+    def test_dismiss_under_a_path_clears_a_whole_tree(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        out = CliRunner().invoke(cli, ["dismiss", "--under",
+                                       str(tmp_path / "scratch"), "--why", "tmp"]).output
+        assert "dismissed 3 sessions" in out
+        assert "0000dddd" in CliRunner().invoke(cli, ["sessions", "--none"]).output
+
+    def test_dismiss_under_leaves_an_attributed_session_alone(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """A path can contain a unit's home; dismissing what someone claimed
+        on purpose is not what this is for."""
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        run = CliRunner()
+        run.invoke(cli, ["attribute", "0000bbbb", "orglens"])
+        run.invoke(cli, ["dismiss", "--under", str(tmp_path / "scratch")])
+        assert "0000bbbb" in run.invoke(cli, ["sessions", "orglens"]).output
+
+    def test_why_is_shown_on_the_row_it_was_written_about(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """A field the person is asked to fill and never shown again is the
+        write-only defect one layer down."""
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere"),
+                 last_turn={"ts": 1, "role": "user", "text": "the last thing said"}),
+        ])
+        run = CliRunner()
+        run.invoke(cli, ["attribute", "0000aaaa", "orglens", "--why", "the release branch"])
+        assert "why: the release branch" in run.invoke(cli, ["sessions", "orglens"]).output
+
+        # On a dismissed row it outranks the last turn, which is only the
+        # newest thing said rather than something said about the session. A
+        # dismissal has to stay visible, or a mistaken one is unrecoverable.
+        run.invoke(cli, ["dismiss", "0000aaaa", "--why", "actually nobody's"])
+        out = run.invoke(cli, ["sessions", "--dismissed"]).output
+        assert "why: actually nobody's" in out and "the last thing said" not in out

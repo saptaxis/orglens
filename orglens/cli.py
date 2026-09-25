@@ -1010,13 +1010,31 @@ def _session_line(s, show_how: bool = True, short: dict | None = None) -> str:
     )
 
 
+def _why_line(s) -> str | None:
+    """The person's own words about this session, wherever it is listed.
+
+    `_session_detail` carries it for the unclaimed, where a second line is
+    always printed. An attributed session gets one line, so the why needs its
+    own or the field is visible only until it is answered — which is the
+    write-only defect it was added to fix.
+    """
+    return f"{'':<13}why: {s.why[:110]}" if s.why else None
+
+
 def _session_detail(s) -> str:
     """A second line for a session nobody has claimed: where it ran and
-    the last thing said, which is what deciding whose it is needs."""
+    the last thing said, which is what deciding whose it is needs.
+
+    A `--why` outranks the last turn when there is one. The person wrote it
+    about this session on purpose; the last turn is only the newest thing
+    that happened to be said.
+    """
     said = (s.last_turn or {}).get("text") or ""
     said = " ".join(said.split())[:110]
     line = f"{'':<13}{sessions.where(s.cwd)}"
-    if said:
+    if s.why:
+        line += f"  ·  why: {s.why[:110]}"
+    elif said:
         line += f"  ·  {said}"
     return line
 
@@ -1075,13 +1093,20 @@ def notes_cmd(unit_name: str | None, want_mentions: bool):
 @click.option("--all", "everything", is_flag=True,
               help="Include sessions with no turns yet.")
 @click.option("--triage", is_flag=True,
-              help="Walk the unclaimed sessions and decide them one by one.")
+              help="Decide the unclaimed sessions, grouped by directory.")
+@click.option("--one-by-one", "one_by_one", is_flag=True,
+              help="With --triage: a prompt per session instead of per group.")
+@click.option("--groups", "as_groups", is_flag=True,
+              help="Count the unclaimed by the directory they ran in.")
+@click.option("--dismissed", "only_dismissed", is_flag=True,
+              help="The sessions someone said belong to no unit.")
 @click.option("--from", "from_file", default=None, metavar="FILE",
               help="Apply decisions from a `--none --json` file you edited.")
 @click.option("--json", "as_json", is_flag=True,
               help="The rows as JSON, each with a `unit` to fill in.")
 def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
-                 triage: bool, from_file: str | None, as_json: bool):
+                 triage: bool, one_by_one: bool, as_groups: bool,
+                 only_dismissed: bool, from_file: str | None, as_json: bool):
     """List a unit's sessions, or every unit's, newest first.
 
     A session is a unit's because `orglens start` or `orglens attribute`
@@ -1095,15 +1120,35 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
     every = sessions.all_sessions(registry, EVENTS_DIR)
     short = sessions.short_ids([s.id for s in every])
 
-    if triage or from_file:
+    if only_dismissed:
+        # A dismissal is an assertion like any other and has to be auditable:
+        # without this, a mistaken one is invisible outside the event log, and
+        # `attribute` is the only way back from something you cannot see.
+        rows = [row for row in sessions.unattributed(every, everything=True)
+                if row.dismissed is not None]
+        if not rows:
+            click.echo("nothing dismissed")
+            return
+        for row in sessions.listed(rows, everything):
+            click.echo(_session_line(row, short=short))
+            click.echo(_session_detail(row))
+        return
+
+    if triage or from_file or as_groups:
         loose = sessions.listed(sessions.unattributed(every), everything)
         if not loose:
             click.echo("nothing unclaimed.")
             return
+        if as_groups:
+            groups = sessions.by_directory(loose)
+            click.echo(f"{len(loose)} unclaimed in {len(groups)} directories:")
+            for where, group in groups:
+                click.echo(f"  {len(group):>4}  {sessions.where(where)}")
+            return
         if from_file:
             _triage_from_file(registry, loose, from_file)
         else:
-            _triage(registry, loose)
+            _triage(registry, loose, by_group=not one_by_one)
         return
 
     if as_json:
@@ -1129,6 +1174,8 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
             return
         for s in rows:
             click.echo(_session_line(s, short=short))
+            if (why := _why_line(s)):
+                click.echo(why)
         return
 
     groups: list[tuple[str, list]] = []
@@ -1150,6 +1197,8 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
             click.echo(_session_line(s, show_how=not loose, short=short))
             if loose:
                 click.echo(_session_detail(s))
+            elif (why := _why_line(s)):
+                click.echo(why)
 
 
 @cli.command()
@@ -1236,9 +1285,11 @@ def _dismiss(session_id: str, why: str | None = None) -> None:
 
 
 @cli.command()
-@click.argument("session_id", shell_complete=complete.sessions)
+@click.argument("session_id", required=False, shell_complete=complete.sessions)
+@click.option("--under", default=None, metavar="PATH",
+              help="Dismiss every unclaimed session that ran at or below PATH.")
 @click.option("--why", default=None, help="Why it is nobody's, in your words.")
-def dismiss(session_id: str, why: str | None):
+def dismiss(session_id: str | None, under: str | None, why: str | None):
     """Say a session belongs to no unit and never will.
 
     Without this the pile never empties. A scratch session in `/tmp` was
@@ -1248,6 +1299,22 @@ def dismiss(session_id: str, why: str | None):
     """
     registry, _ = _load_registry()
     every = sessions.all_sessions(registry, EVENTS_DIR)
+
+    if under:
+        # Only the unclaimed: a path can contain a unit's home, and dismissing
+        # a session someone attributed on purpose is not what this is for.
+        rows = sessions.under(sessions.unattributed(every), under)
+        if not rows:
+            click.echo(f"nothing unclaimed under {under}")
+            return
+        for row in rows:
+            _dismiss(row.id, why)
+        click.echo(f"dismissed {_count(len(rows), 'session')} under {under}")
+        return
+    if not session_id:
+        click.echo("give a session id, or --under PATH.", err=True)
+        sys.exit(1)
+
     session, matches = _find_session(every, session_id)
     if session is None:
         if matches:
@@ -1281,20 +1348,64 @@ def _session_row(s) -> dict:
     }
 
 
-def _triage(registry: Registry, rows: list) -> None:
-    """Walk the unclaimed sessions one at a time, newest first.
+def _triage(registry: Registry, rows: list, by_group: bool = True) -> None:
+    """Walk the unclaimed sessions and decide them, in groups by default.
 
-    `attribute` one at a time is the only tool today and 169 invocations is
-    not a method. What makes this cheap is that everything needed to decide
-    is on screen — where it ran, what it said last — and the answer is a
-    unit name, `s` to skip or `d` to dismiss. Nothing is guessed: a session
-    at the docs root could be any of seventeen units, and proposing one
-    from its title is the containment mistake one layer up.
+    `attribute` one at a time is the only tool without this, and 201
+    invocations is not a method — the pile grows faster than that clears it.
+    Grouping by the directory above each cwd collapses most of it: six
+    directories held ~95 of 201 on 2026-09-25. What makes either cheap is
+    that everything needed to decide is on screen — where it ran, what was
+    said last. Nothing is guessed: a session at a shared root could be any
+    of seventeen units, and proposing one from its title is the containment
+    mistake one layer up.
     """
     names = sorted(u.name for u in registry.units())
     click.echo(f"{len(rows)} unclaimed. Units: {', '.join(names)}")
-    click.echo("A unit name (a unique prefix will do), `s` to skip, "
-               "`d` to dismiss, `q` to stop.\n")
+    if not by_group:
+        _triage_each(registry, rows)
+        return
+
+    groups = sessions.by_directory(rows)
+    click.echo(f"{len(groups)} directories. A unit name applies to the whole "
+               "group; `d` dismisses it, `s` skips, `e` takes the group one "
+               "session at a time, `q` stops.\n")
+    for i, (where, group) in enumerate(groups, 1):
+        click.echo(f"[{i}/{len(groups)}] {_count(len(group), 'session')}  "
+                   f"{sessions.where(where)}")
+        for session in group[:3]:
+            click.echo(f"    {_session_line(session)}")
+        if len(group) > 3:
+            click.echo(f"    … and {len(group) - 3} more")
+        answer = click.prompt("  unit", default="s", show_default=False).strip()
+        if answer in ("q", "quit"):
+            click.echo("stopped.")
+            return
+        if answer in ("", "s", "skip"):
+            continue
+        if answer in ("e", "each"):
+            _triage_each(registry, group)
+            continue
+        if answer in ("d", "dismiss"):
+            why = click.prompt("  why", default="", show_default=False).strip()
+            for session in group:
+                _dismiss(session.id, why or None)
+            click.echo(f"  dismissed {_count(len(group), 'session')}")
+            continue
+        try:
+            unit = registry.resolve(answer)
+        except ValueError as exc:
+            click.echo(f"  {exc} — skipped")
+            continue
+        why = click.prompt("  why", default="", show_default=False).strip()
+        for session in group:
+            _attribute(session.id, unit.name, why or None)
+        click.echo(f"  attributed {_count(len(group), 'session')} to {unit.name}")
+
+
+def _triage_each(registry: Registry, rows: list) -> None:
+    """One session at a time, newest first."""
+    click.echo("A unit name, `s` to skip, `d` to dismiss, `q` to stop.\n")
     for i, session in enumerate(rows, 1):
         click.echo(f"[{i}/{len(rows)}] {_session_line(session)}")
         click.echo(_session_detail(session))
