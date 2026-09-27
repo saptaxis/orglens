@@ -7,6 +7,7 @@ names a suffix.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from orglens.formats import markdown, org
@@ -72,12 +73,18 @@ def existing(directory: Path, name: str, prefer: str = "md") -> Path | None:
 
 
 def file_globs(pattern: str) -> list[str]:
-    """The globs a stem pattern means: one per registered suffix.
+    """The globs a pattern means: one per registered suffix.
 
-    `*` is `*.md` and `*.org`, never an image or a `.nav.yml` (R10). A
-    pattern that already carries a suffix no format registers (`*.txt`)
-    is left as written.
+    `*` is `*.md` and `*.org`, never an image or a `.nav.yml` (R10), and so
+    is `*.md` as a grammar may still write it. Decided on the pattern as
+    written: `*.draft.md` keeps its `.draft`, and `v1.2-*` is a stem, not a
+    file ending in `.2-*`. Only a pattern ending in a literal extension no
+    format registers (`*.txt`) is left as written.
     """
-    if Path(pattern).suffix:
+    suffix = Path(pattern).suffix
+    if suffix in SUFFIXES:
+        base = pattern[: -len(suffix)]
+        return [f"{base}{s}" for s in SUFFIXES]
+    if re.search(r"\.[A-Za-z0-9]+$", pattern):
         return [pattern]
     return [f"{pattern}{s}" for s in SUFFIXES]

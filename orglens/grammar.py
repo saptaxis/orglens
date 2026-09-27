@@ -71,8 +71,9 @@ class ArtifactType:
 
     @property
     def file_globs(self) -> list[str]:
-        """The globs this kind's files match, one per registered suffix."""
-        return formats.file_globs(self.pattern)
+        """The globs this kind's files match, one per registered suffix,
+        decided on the `find` as written rather than on its stem."""
+        return formats.file_globs(Path(self.find.rstrip("/")).name)
 
     @property
     def directory(self) -> str:

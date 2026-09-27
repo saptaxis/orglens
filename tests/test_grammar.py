@@ -164,3 +164,17 @@ def test_the_default_grammar_names_no_extension(grammar):
     for artifact in grammar.artifact_types.values():
         for find in artifact.finds:
             assert not find.endswith((".md", ".org")), find
+
+
+def test_a_pattern_with_a_dot_in_its_stem_keeps_it(tmp_path):
+    path = tmp_path / "g.yaml"
+    path.write_text(
+        "driver: overview\nentities: {}\nartifacts:\n"
+        "  draft:\n    find: notes/*.draft.md\n"
+        "  release:\n    find: logs/v1.2-*\n"
+        "  text:\n    find: notes/*.txt\n"
+    )
+    kinds = Grammar.from_yaml(path).artifact_types
+    assert sorted(kinds["draft"].file_globs) == ["*.draft.md", "*.draft.org"]
+    assert sorted(kinds["release"].file_globs) == ["v1.2-*.md", "v1.2-*.org"]
+    assert kinds["text"].file_globs == ["*.txt"]
