@@ -1050,6 +1050,19 @@ class TestSnapshotCommand:
         assert result.exit_code == 0, result.output
         assert "fresh" in result.output
 
+    def test_check_says_stale_when_the_json_is_missing_or_older(self, runner, cli_env):
+        runner.invoke(cli, ["snapshot"], env=cli_env)
+        md = Path(cli_env["ORGLENS_CONFIG"]).parent / "cache" / "snapshot.md"
+        data = md.with_suffix(".json")
+        data.unlink()
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 1 and "snapshot.json" in result.output
+        runner.invoke(cli, ["snapshot"], env=cli_env)
+        earlier = md.stat().st_mtime - 5
+        os.utime(data, (earlier, earlier))
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 1 and "snapshot.json" in result.output
+
     def test_snapshot_can_be_scoped_to_a_kind_or_a_unit(self, runner, cli_env):
         everything = runner.invoke(cli, ["snapshot", "--stdout"], env=cli_env).output
         assert "freightify" in everything and "clipcompose" in everything
@@ -1164,3 +1177,19 @@ class TestCountPluralisation:
 
         assert _count(0, "session") == "0 sessions"
         assert _count(2, "plan") == "2 plans"
+
+
+def test_new_writes_an_org_driver_when_the_grammar_says_org(runner, tmp_path):
+    import orglens
+    grammar = tmp_path / "grammar.yaml"
+    default = (Path(orglens.__file__).parent / "grammars" / "default.yaml").read_text()
+    grammar.write_text(default.replace("format: md", "format: org"))
+    docs = tmp_path / "docs"
+    (docs / "projects").mkdir(parents=True)
+    env = _roots_config(tmp_path, [docs], grammar)
+    result = runner.invoke(cli, ["new", str(docs / "projects" / "demo"), "--kind", "project"], env=env)
+    assert result.exit_code == 0, result.output
+    driver = docs / "projects" / "demo" / "overview.org"
+    assert driver.is_file()
+    assert driver.read_text().startswith("#+TITLE: Overview\n#+STATUS: Opened ")
+    assert not (docs / "projects" / "demo" / "overview.md").exists()

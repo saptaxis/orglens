@@ -171,3 +171,33 @@ class TestGoto:
 def test_the_chain_group_never_shipped_under_that_name():
     r = CliRunner().invoke(cli, ["chain", "--help"])
     assert r.exit_code != 0
+
+
+def test_a_stem_write_names_the_existing_file_in_any_format(tmp_path):
+    from orglens.workflow.cli import _output
+    (tmp_path / "draft.org").write_text("x")
+    assert _output(tmp_path, "draft").name == "draft.org"
+
+
+def test_a_stem_write_with_nothing_there_takes_the_grammars_format(tmp_path, monkeypatch):
+    from orglens.workflow import cli as wcli
+    monkeypatch.setattr(wcli, "_preferred_format", lambda: "org")
+    assert wcli._output(tmp_path, "draft").name == "draft.org"
+
+
+def test_a_write_with_a_suffix_is_used_as_written(tmp_path):
+    from orglens.workflow.cli import _output
+    assert _output(tmp_path, "draft.md").name == "draft.md"
+
+
+def test_the_preferred_format_is_the_configured_grammars(tmp_path, monkeypatch):
+    import orglens
+    from pathlib import Path
+    from orglens.workflow.cli import _preferred_format
+    grammar = tmp_path / "grammar.yaml"
+    default = (Path(orglens.__file__).parent / "grammars" / "default.yaml").read_text()
+    grammar.write_text(default.replace("format: md", "format: org"))
+    config = tmp_path / "config.yaml"
+    config.write_text(f"roots: [{tmp_path}]\ngrammar: {grammar}\n")
+    monkeypatch.setenv("ORGLENS_CONFIG", str(config))
+    assert _preferred_format() == "org"

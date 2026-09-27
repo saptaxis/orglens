@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from difflib import get_close_matches
 from pathlib import Path
 
-from orglens import activity, documents
+from orglens import activity, documents, formats
 from orglens.state import read_status
 from orglens.homes import Candidate, candidates_for
 from orglens.units import Registry
@@ -92,6 +92,17 @@ class Shared:
 #: directories held one file and nine held two; the 42 at three or more
 #: were the ones worth a word.
 UNDESCRIBED_FLOOR = 3
+
+
+@dataclass(frozen=True)
+class Twin:
+    """One document written twice, in two formats, side by side — an
+    `overview.md` beside an `overview.org`. Only one is read: the grammar's
+    format wins (R11). The other is either a leftover of a conversion or a
+    fork nobody meant, and a person decides which."""
+    unit: str
+    #: The shared stem, without a suffix.
+    path: Path
 
 
 @dataclass(frozen=True)
@@ -171,6 +182,8 @@ class Report:
     shared: list[Shared] = field(default_factory=list)
     #: Folders of documents the grammar has no word for.
     undescribed: list[Undescribed] = field(default_factory=list)
+    #: Documents written in two formats side by side (R11).
+    twins: list[Twin] = field(default_factory=list)
     #: Units an explicit parent nav does not list.
     unlisted: list[Unlisted] = field(default_factory=list)
     #: Status lines older than the unit's newest edit by more than a week.
@@ -188,6 +201,7 @@ class Report:
             or self.collisions
             or self.shared
             or self.undescribed
+            or self.twins
             or self.unlisted
             or self.stale
             or self.held
@@ -225,18 +239,23 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
                 continue
 
         missing = []
+        suffix = formats.get(registry.grammar.format).suffix
         for name in declared:
-            if any(name in present for present in present_by_home):
+            # A declared document is present in any registered format (R2);
+            # when absent it is named as `new` would write it.
+            written = {name} | {formats.stem(name) + s for s in formats.SUFFIXES}
+            if any(written & set(present) for present in present_by_home):
                 continue
+            shown = name if Path(name).suffix in formats.SUFFIXES else name + suffix
             # The file that resembles this one may live in a home that was
             # not the first checked, so the hint has to search all of them.
             close = None
             for present in present_by_home:
-                match = get_close_matches(name, present, n=1, cutoff=0.55)
+                match = get_close_matches(shown, present, n=1, cutoff=0.55)
                 if match:
                     close = match[0]
                     break
-            missing.append(Missing(name=name, resembles=close))
+            missing.append(Missing(name=shown, resembles=close))
         if missing:
             drifted.append(Drift(entity=unit.name, missing=missing))
 
@@ -356,9 +375,22 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
                     continue
                 if any(directory == c or c in directory.parents for c in claimed):
                     continue
-                count = sum(1 for p in directory.glob("*.md") if p.is_file())
+                count = sum(1 for p in documents._entries(directory)
+                            if p.is_file() and formats.is_document(p))
                 if count >= UNDESCRIBED_FLOOR:
                     undescribed.append(Undescribed(unit=unit.name, path=directory, count=count))
+
+    twins: list[Twin] = []
+    for unit in units:
+        for home in unit.paths:
+            for directory in (home, *documents._dirs_under(home)):
+                stems: dict[str, int] = {}
+                for p in documents._entries(directory):
+                    if p.is_file() and formats.is_document(p):
+                        key = formats.stem(p.name)
+                        stems[key] = stems.get(key, 0) + 1
+                twins += [Twin(unit=unit.name, path=directory / s)
+                          for s, n in sorted(stems.items()) if n > 1]
 
     unlisted = [
         Unlisted(unit=unit.name, nav=unit.declared_at.parent / ".nav.yml")
@@ -370,7 +402,7 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
     for unit in units:
         status = None
         for home in unit.paths:
-            status = read_status(home, grammar.documents_for(unit.kind))
+            status = read_status(home, grammar.documents_for(unit.kind), grammar.format)
             if status:
                 break
         if status is None or not status.edited:
@@ -395,6 +427,7 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
         collisions=collisions,
         shared=shared,
         undescribed=sorted(undescribed, key=lambda u: (u.unit, u.path)),
+        twins=twins,
         unlisted=unlisted,
         stale=stale,
         held=held,

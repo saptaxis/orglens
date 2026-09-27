@@ -7,32 +7,23 @@ that pin that down — no snapshot means no completions and no wait.
 
 from orglens import complete
 
-SNAPSHOT = """# Topology Snapshot
-
-**Kinds:** client (`clients/*`), project (`projects/*`), experiment (`expt-*`)
-
-**Documents:** plan (`plans/*.md`), spec (`specs/*.md`)
-
-## Projects
-
-### orglens — ` line in a unit's documents
-
-Homes: `/x/orglens`
-
-### cribsheet — P1 sourcing done
-
-## Clients
-
-### freightify
-"""
+DATA = {
+    "kinds": {"client": "clients/*", "project": "projects/*", "experiment": "expt-*"},
+    "documents": {"plan": "plans/*", "spec": "specs/*"},
+    "units": [
+        {"name": "orglens", "status": "` line in a unit's documents"},
+        {"name": "cribsheet", "status": "P1 sourcing done"},
+        {"name": "freightify", "status": None},
+    ],
+}
 
 
-def _snapshot(monkeypatch, text):
-    monkeypatch.setattr(complete, "_snapshot_text", lambda: text)
+def _snapshot(monkeypatch, data):
+    monkeypatch.setattr(complete, "_snapshot_data", lambda: data)
 
 
 def test_unit_names_come_from_the_snapshot_with_their_status(monkeypatch):
-    _snapshot(monkeypatch, SNAPSHOT)
+    _snapshot(monkeypatch, DATA)
     assert complete.unit_names() == [
         ("cribsheet", "P1 sourcing done"),
         ("freightify", ""),
@@ -41,7 +32,7 @@ def test_unit_names_come_from_the_snapshot_with_their_status(monkeypatch):
 
 
 def test_kinds_are_the_grammars_words_entity_and_document_alike(monkeypatch):
-    _snapshot(monkeypatch, SNAPSHOT)
+    _snapshot(monkeypatch, DATA)
     assert complete.kind_names() == [
         "client", "experiment", "plan", "project", "spec",
     ]
@@ -50,7 +41,7 @@ def test_kinds_are_the_grammars_words_entity_and_document_alike(monkeypatch):
 def test_no_snapshot_completes_to_nothing_rather_than_a_wait(monkeypatch):
     """The whole point of reading the cache. A completer that fell back to
     sweeping the roots would hang the prompt for seconds."""
-    _snapshot(monkeypatch, "")
+    _snapshot(monkeypatch, {})
     assert complete.unit_names() == [] and complete.kind_names() == []
 
 
@@ -60,19 +51,19 @@ def test_an_unreadable_config_or_snapshot_is_not_an_error(monkeypatch):
     def boom():
         raise OSError("gone")
 
-    monkeypatch.setattr("orglens.config.Config.load", staticmethod(boom))
+    monkeypatch.setattr("orglens.config.Config.current", staticmethod(boom))
     assert complete.unit_names() == [] and complete.kind_names() == []
 
 
 def test_matching_is_by_prefix_and_ignores_case(monkeypatch):
-    _snapshot(monkeypatch, SNAPSHOT)
+    _snapshot(monkeypatch, DATA)
     assert [i.value for i in complete.units(None, None, "cr")] == ["cribsheet"]
     assert [i.value for i in complete.units(None, None, "ORG")] == ["orglens"]
     assert [i.value for i in complete.units(None, None, "zz")] == []
 
 
 def test_the_status_line_rides_along_as_the_hint(monkeypatch):
-    _snapshot(monkeypatch, SNAPSHOT)
+    _snapshot(monkeypatch, DATA)
     assert complete.units(None, None, "cribsheet")[0].help == "P1 sourcing done"
 
 
@@ -88,7 +79,7 @@ def test_no_scad_is_no_sessions_not_a_failure(monkeypatch):
 
 
 def test_resume_offers_units_and_sessions_both(monkeypatch):
-    _snapshot(monkeypatch, SNAPSHOT)
+    _snapshot(monkeypatch, DATA)
     monkeypatch.setattr("orglens.sessions.run_scad",
                         lambda argv: [{"id": "orglens-session-id", "name": "x"}])
     values = [i.value for i in complete.units_or_sessions(None, None, "orglens")]

@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from orglens import formats
+
 
 @dataclass(frozen=True)
 class EntityType:
@@ -61,9 +63,17 @@ class ArtifactType:
 
     @property
     def pattern(self) -> str:
-        """What is matched inside the container: a file glob, or `*` for
-        the child directories themselves."""
-        return Path(self.find.rstrip("/")).name
+        """What is matched inside the container: a stem glob — `*`, not
+        `*.md` — or `*` for the child directories themselves. A registered
+        suffix the grammar still writes is dropped: the registry supplies
+        suffixes (R10)."""
+        return formats.stem(Path(self.find.rstrip("/")).name)
+
+    @property
+    def file_globs(self) -> list[str]:
+        """The globs this kind's files match, one per registered suffix,
+        decided on the `find` as written rather than on its stem."""
+        return formats.file_globs(Path(self.find.rstrip("/")).name)
 
     @property
     def directory(self) -> str:
@@ -82,6 +92,8 @@ class Grammar:
     #: engine may not know a noun — and one name per tree rather than per kind,
     #: which buys nothing technically and everything for a human browsing.
     driver: str
+    #: The format `new` writes (R3). Reading is every format, always (R2).
+    format: str = "md"
 
     def documents_for(self, kind: str | None = None) -> list[str]:
         """Where to look for an entity's status line, driver first.
@@ -130,9 +142,13 @@ class Grammar:
                 finds=finds,
             )
 
+        fmt = data.get("format", "md")
+        formats.get(fmt)  # refuses an unknown format with its name in the message
+
         return cls(
             version=data.get("version", 2),
             driver=data.get("driver"),
+            format=fmt,
             entity_types=entity_types,
             artifact_types=artifact_types,
         )

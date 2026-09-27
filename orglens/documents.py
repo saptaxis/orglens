@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from orglens import formats
 from orglens.units import Registry, Unit
 
 
@@ -61,13 +62,14 @@ def _claimed_by(registry: Registry, unit: Unit) -> list[Path]:
 def _containers(home: Path, directory: str) -> list[Path]:
     """Every directory under `home` that could hold this kind's documents.
 
-    A kind's `find` names a container (`plans`) and a file pattern (`*.md`).
+    A kind's `find` names a container (`plans`) and a file pattern (`*`,
+    tried once per registered suffix).
     `Path.rglob("plans/*.md")` only reaches one level below a directory
     literally named `plans` — it does not see `plans/archive/*.md`. So the
     container is matched by name at any depth, and each match is then
     searched for the file pattern at any depth in turn, which is what lets
     an archived plan still be found. When a kind has no container of its
-    own — `doc`, whose pattern is a bare `*.md` — the home itself is the
+    own — `doc`, whose pattern is a bare `*` — the home itself is the
     only container, which is also what keeps `doc` a catch-all rather than
     one more directory-bound kind.
     """
@@ -168,7 +170,10 @@ def find(
                 if artifact.is_directory:
                     matches = [p for p in sorted(container.glob(pattern)) if p.is_dir()]
                 else:
-                    matches = [p for p in sorted(container.rglob(pattern)) if p.is_file()]
+                    matches = sorted(
+                        {p for glob in artifact.file_globs
+                         for p in container.rglob(glob) if p.is_file()}
+                    )
                 for path in matches:
                     resolved = path.resolve()
                     if resolved in seen:
@@ -185,12 +190,13 @@ def find(
 
 
 def loose(unit: Unit) -> list[Path]:
-    """Top-level documents in each home — backlogs, handoffs, dated notes."""
+    """Top-level documents in each home — backlogs, handoffs, dated notes —
+    in whatever format they are written."""
     return sorted(
         p
         for home in unit.paths
-        for p in home.glob("*.md")
-        if p.is_file() and not p.name.startswith(".")
+        for p in _entries(home)
+        if p.is_file() and not p.name.startswith(".") and formats.is_document(p)
     )
 
 
@@ -233,11 +239,14 @@ def _entries(home: Path) -> list[Path]:
 
 
 def _files_of(found: Document) -> list[Path]:
-    """What a matcher reads: the file, or every markdown file in the
-    directory when the artifact is one."""
+    """What a matcher reads: the file, or every document in the directory
+    when the artifact is one."""
     if found.path.is_dir():
-        return sorted(p for p in found.path.rglob("*.md")
-                      if p.is_file() and not any(part.startswith(".") for part in p.relative_to(found.path).parts))
+        return sorted(
+            p for p in found.path.rglob("*")
+            if p.is_file() and formats.is_document(p)
+            and not any(part.startswith(".") for part in p.relative_to(found.path).parts)
+        )
     return [found.path]
 
 

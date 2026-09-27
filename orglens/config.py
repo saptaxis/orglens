@@ -22,6 +22,9 @@ class Config:
     roots: list[Path]
     grammar_name: str
     docs_base_url: str = "http://localhost:8000"
+    #: What a view link opens: `served` (the doc at `docs_base_url`) or
+    #: `file` (the file itself, for a tree read in an editor).
+    view_link: str = "served"
     _config_dir: Path | None = None
 
     @classmethod
@@ -45,8 +48,17 @@ class Config:
             # Where the tree is served. `mkdocs serve` by default; set it to a
             # published site and the same links work from anywhere.
             docs_base_url=(data.get("docs_base_url") or "http://localhost:8000").rstrip("/"),
+            view_link=data.get("view_link", "served"),
             _config_dir=path.parent,
         )
+
+    @classmethod
+    def current(cls) -> Config:
+        """The config in force: `ORGLENS_CONFIG` when set, else the default
+        location. What the CLI loads, for readers outside the CLI."""
+        import os
+        path = os.environ.get("ORGLENS_CONFIG")
+        return cls.from_yaml(Path(path).expanduser()) if path else cls.load()
 
     @classmethod
     def load(cls) -> Config:
@@ -76,3 +88,9 @@ class Config:
         cache_dir = config_dir / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir / "snapshot.md"
+
+    @property
+    def snapshot_json_path(self) -> Path:
+        """The snapshot as data, for programs: completion reads this rather
+        than parsing headings out of the markdown one."""
+        return self.snapshot_path.with_suffix(".json")

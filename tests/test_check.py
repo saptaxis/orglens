@@ -510,3 +510,32 @@ def test_a_status_line_older_than_the_tree_by_a_week_is_reported(declared_tree, 
 
 def test_a_status_line_as_fresh_as_the_tree_is_not_reported(declared_tree, grammar):
     assert check.run(Registry([declared_tree], grammar)).stale == []
+
+
+def test_a_declared_document_in_org_is_not_missing(declared_tree, grammar):
+    client = declared_tree / "clients" / "itus-capital"
+    _declare(client, "itus-capital", "client")
+    (client / "overview.org").write_text("#+STATUS: Active\n")
+    report = check.run(Registry([declared_tree], grammar))
+    assert not any(d.entity == "itus-capital" for d in report.drifted)
+
+
+def test_a_stem_in_two_formats_is_reported(declared_tree, grammar):
+    home = declared_tree / "clients" / "itus-capital"
+    _declare(home, "itus-capital", "client")
+    (home / "overview.md").write_text("> **Status:** Active\n")
+    (home / "overview.org").write_text("#+STATUS: Active\n")
+    report = check.run(Registry([declared_tree], grammar))
+    assert any(t.path == home / "overview" for t in report.twins)
+    assert bool(report)
+
+
+def test_undescribed_counts_org_documents(declared_tree, grammar):
+    home = declared_tree / "clients" / "itus-capital"
+    _declare(home, "itus-capital", "client")
+    folder = home / "scratchpad"
+    folder.mkdir()
+    for i in range(10):
+        (folder / f"n{i}.org").write_text("x\n")
+    report = check.run(Registry([declared_tree], grammar))
+    assert any(u.path == folder for u in report.undescribed)

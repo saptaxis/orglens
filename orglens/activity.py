@@ -206,8 +206,10 @@ def _newest_mtime(path: Path) -> int | None:
 
 
 def _latest_plan(path: Path) -> str | None:
-    """The highest-numbered plan, by filename. No file is opened."""
-    plans = sorted((path / "plans").glob("[0-9][0-9]-*.md"))
+    """The highest-numbered plan, by filename, in any format. No file is opened."""
+    from orglens import formats
+    plans = sorted(p for p in (path / "plans").glob("[0-9][0-9]-*")
+                   if formats.is_document(p))
     return plans[-1].name[:2] if plans else None
 
 

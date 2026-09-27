@@ -24,7 +24,7 @@ from pathlib import Path
 
 import click
 
-from orglens import (activity, check as check_module, complete, documents,
+from orglens import (activity, check as check_module, complete, documents, formats,
                      reference, sessions, view)
 from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
@@ -46,10 +46,7 @@ SCAD_CONFIGS_DIR = Path.home() / ".scad" / "configs"
 
 def _load_config() -> Config:
     """Load config from env var or default location."""
-    config_path = os.environ.get("ORGLENS_CONFIG")
-    if config_path:
-        return Config.from_yaml(Path(config_path))
-    return Config.load()
+    return Config.current()
 
 
 def _load_registry() -> tuple[Registry, Config]:
@@ -161,7 +158,10 @@ def _git_paths(registry: Registry, units: list) -> list[Path]:
     for unit in units:
         out.extend(unit.paths)
         for home in unit.paths:
-            out.extend(home / d for d in registry.grammar.documents_for(unit.kind))
+            for d in registry.grammar.documents_for(unit.kind):
+                found = formats.existing(home, d, registry.grammar.format)
+                if found is not None:
+                    out.append(found)
     return out
 
 
@@ -194,7 +194,7 @@ def _status_of(registry: Registry, unit):
     """
     declared = registry.grammar.documents_for(unit.kind)
     for path in unit.paths:
-        status = read_status(path, declared)
+        status = read_status(path, declared, registry.grammar.format)
         if status:
             return status
     return None
@@ -521,9 +521,13 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     homes = (mine,) + tuple(h for h in extra_homes if h != mine)
     _write_marker(target, home=mine, unit=target.name, kind=kind,
                   part_of=part_of, homes=homes)
-    driver = target / registry.grammar.driver
-    driver.write_text(_driver_stub(target.name, kind).replace(
-        "{title}", driver.stem.replace("-", " ").capitalize()))
+    # The driver in the grammar's format (R3, R12). The stub and the status
+    # reader come from the same format module, so they cannot drift (R8).
+    fmt = formats.get(registry.grammar.format)
+    base = formats.stem(registry.grammar.driver)
+    driver = target / f"{base}{fmt.suffix}"
+    driver.write_text(fmt.stub(base.replace("-", " ").capitalize(), target.name,
+                               time.strftime("%Y-%m-%d")))
     registered = _register_in_nav(target)
 
     click.echo(f"Created {kind or 'unit'}: {target}")
@@ -545,21 +549,6 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
             "standing inside it."
         )
     _refresh_snapshot(registry, config)
-
-
-def _driver_stub(name: str, kind: str | None) -> str:
-    """The driver document, with the shape a person fills in: the status
-    line `status` reads, and the two headings every real one carries. The
-    title is the document's own name, as the grammar declares it. Written
-    once by `new`; never touched again by anything."""
-    return (
-        "# {title}\n\n"
-        f"> **Status:** Opened {time.strftime('%Y-%m-%d')}. Nothing done yet.\n\n"
-        "## What it is\n\n"
-        f"What {name} is for, in a paragraph.\n\n"
-        "## State tracking\n\n"
-        "Where its state is written, and what to read to know where it stands.\n"
-    )
 
 
 def _register_in_nav(target: Path) -> str | bool | None:
@@ -754,6 +743,13 @@ def check_cmd():
             "has no word for; they are found, without a kind"
         )
 
+    for row in report.twins:
+        shown = _relative(row.path, registry.roots)
+        click.echo(
+            f"{row.unit}: {shown} is written in two formats; only the "
+            f"{registry.grammar.format} one is read — keep one"
+        )
+
     if not report:
         click.echo("No drift.")
 
@@ -799,8 +795,7 @@ def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None,
             click.echo(str(exc), err=True)
             sys.exit(1)
         return
-    output = config.snapshot_path
-    generate_snapshot(registry, config, output_path=output)
+    output = _write_snapshot(registry, config)
     click.echo(f"Snapshot written to {output}")
 
 
@@ -814,12 +809,17 @@ def _snapshot_check(registry: Registry, config: Config) -> int:
     if not output.exists():
         click.echo(f"stale: no snapshot at {output}")
         return 1
+    data = config.snapshot_json_path
+    if not data.exists() or data.stat().st_mtime < output.stat().st_mtime:
+        click.echo(f"stale: {data} is missing or older than {output}; completion reads it")
+        return 1
     written = output.stat().st_mtime
     newest: tuple[float, Path] | None = None
     for unit in registry.units():
         candidates = [unit.declared_at / MARKER]
-        candidates += [p / d for p in unit.paths
-                       for d in registry.grammar.documents_for(unit.kind)]
+        candidates += [f for p in unit.paths
+                       for d in registry.grammar.documents_for(unit.kind)
+                       if (f := formats.existing(p, d, registry.grammar.format)) is not None]
         for path in candidates:
             try:
                 mtime = path.stat().st_mtime
@@ -904,10 +904,19 @@ def config_cmd(unit_name: str, workdir: str | None, out: str | None):
     click.echo(str(path))
 
 
+def _write_snapshot(registry: Registry, config: Config) -> Path:
+    """The snapshot for sessions to read, and beside it the same facts as
+    JSON for completion to read (R14)."""
+    output = config.snapshot_path
+    generate_snapshot(registry, config, output_path=output)
+    config.snapshot_json_path.write_text(json.dumps(snapshot_data(registry, config)))
+    return output
+
+
 def _refresh_snapshot(registry: Registry, config: Config):
     """Silently refresh the snapshot after write operations."""
     try:
-        generate_snapshot(registry, config, output_path=config.snapshot_path)
+        _write_snapshot(registry, config)
     except Exception:
         pass  # Non-critical — don't fail the main operation
 
@@ -967,7 +976,8 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         if rows:
             groups.append((_heading(kind), rows))
 
-    ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url}
+    ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url,
+           "link": config.view_link}
     page = view.render(groups, ctx, unattributed=sessions.unattributed(every))
     path = view.write(page, Path(out))
     click.echo(f"wrote {path}")
@@ -1630,11 +1640,11 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
         here = "  <- you are here" if home.path == chosen.path else ""
         lines.append(f"  {home.name}  ->  {where}{here}")
 
-    driver = registry.grammar.driver
     for path in unit.paths:
-        if (path / driver).exists():
+        driver = formats.existing(path, registry.grammar.driver, registry.grammar.format)
+        if driver is not None:
             lines.append("")
-            lines.append(f"Read `{path / driver}` first — it says where this stands.")
+            lines.append(f"Read `{driver}` first — it says where this stands.")
             break
 
     status = _status_of(registry, unit)

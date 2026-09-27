@@ -101,6 +101,20 @@ Questions with no answer yet.
 Pointers — backlog, map, repo, anything holding detail.
 ```
 
+The driver keeps the format it is in. In org (`overview.org`) the same six
+sections are:
+
+```org
+#+TITLE: Overview
+#+STATUS: one sentence, present tense, what is true now
+
+* What it is
+* Where it stands
+* Next
+* Open
+* Elsewhere
+```
+
 Write the draft to a scratch path **outside the tree** and show it as a diff
 against the current file. Nothing is written in place yet.
 

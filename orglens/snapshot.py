@@ -164,7 +164,7 @@ def _heading(kind: str) -> str:
 def _status_of(registry: Registry, unit):
     declared = registry.grammar.documents_for(unit.kind)
     for path in unit.paths:
-        status = read_status(path, declared)
+        status = read_status(path, declared, registry.grammar.format)
         if status:
             return status
     return None

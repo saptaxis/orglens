@@ -22,6 +22,7 @@ import re
 import time
 from pathlib import Path
 
+from orglens import formats
 from orglens.activity import MENTIONS, Activity, recency
 from orglens.sessions import listed
 
@@ -149,7 +150,7 @@ def doc_url(path: Path, roots: Path | list[Path], base: str) -> str:
     """The served URL for a path in the tree.
 
     mkdocs with `directory_urls` — the default — publishes `a/b.md` at `/a/b/`
-    and `a/index.md` at `/a/`. The `docs/` prefix is the serving root and does
+    and `a/index.md` at `/a/`; `a/b.org` is given the same URL. The `docs/` prefix is the serving root and does
     not appear in the URL.
 
     A unit can span more than one root, so every root is tried in turn and
@@ -165,7 +166,7 @@ def doc_url(path: Path, roots: Path | list[Path], base: str) -> str:
             rel = resolved.relative_to(Path(root).resolve())
         except ValueError:
             continue
-        if rel.suffix == ".md":
+        if rel.suffix in formats.SUFFIXES:
             rel = rel.with_suffix("")
             if rel.name == "index":
                 rel = rel.parent
@@ -184,8 +185,13 @@ def _filedate(name: str) -> str:
 
 
 def _link(path, label: str, ctx: dict) -> str:
-    """Click opens the served doc; the copy affordance yields the real path."""
-    url = doc_url(path, ctx["docs_roots"], ctx["base_url"])
+    """Click opens the served doc, or the file itself when `view_link` is
+    `file` — the setting for a tree read in an editor rather than served.
+    The copy affordance always yields the real path."""
+    if ctx.get("link") == "file":
+        url = "file://" + str(path)
+    else:
+        url = doc_url(path, ctx["docs_roots"], ctx["base_url"])
     fs = html.escape(str(path))
     return (
         f"<a href='{html.escape(url)}' title='{fs}'>{html.escape(label)}</a>"

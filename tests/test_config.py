@@ -122,3 +122,18 @@ class TestOneHome:
         from orglens.events import EVENTS_DIR
         assert EVENTS_DIR == ORGLENS_HOME / "events"
         assert ORGLENS_HOME.name == ".orglens"
+
+
+def test_view_link_defaults_to_served_and_accepts_file(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("roots: [/tmp]\n")
+    assert Config.from_yaml(path).view_link == "served"
+    path.write_text("roots: [/tmp]\nview_link: file\n")
+    assert Config.from_yaml(path).view_link == "file"
+
+
+def test_current_honours_orglens_config(tmp_path, monkeypatch):
+    path = tmp_path / "config.yaml"
+    path.write_text("roots: [/somewhere]\n")
+    monkeypatch.setenv("ORGLENS_CONFIG", str(path))
+    assert Config.current().roots == [Path("/somewhere")]

@@ -67,7 +67,9 @@ it. The sweep goes three directories below each root; a marker deeper than
 that is found by listing its parent as a root too. A root that is itself a
 repository counts as a home candidate, so a checkout whose parent holds
 everything can be listed on its own. `grammar: /path/to/custom.yaml`
-replaces the bundled grammar.
+replaces the bundled grammar. `view_link: file` makes the view's document
+links open the files themselves, for a tree read in an editor; by default they
+point at the served site at `docs_base_url` (`http://localhost:8000`).
 
 ## CLI Reference
 
@@ -76,10 +78,10 @@ replaces the bundled grammar.
 | `orglens list [--type KIND]` | List all units, grouped by declared kind |
 | `orglens status` | Where every unit stands, across all of its homes |
 | `orglens find KIND [UNIT] [--in DIR] [--grep TEXT] [--since 2w] [--waiting] [--json]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own. `--in` scopes to a directory the grammar has no name for; `--grep` keeps the ones whose text matches and shows the lines |
-| `orglens new PATH [--kind KIND] [--part-of UNIT] [--home NAME]` | Create a unit: a directory, and the declaration that names it. `--home` is repeatable |
+| `orglens new PATH [--kind KIND] [--part-of UNIT] [--home NAME]` | Create a unit: a directory, the declaration that names it, and a stub driver document in the grammar's format. `--home` is repeatable |
 | `orglens declare PATH [--yes]` | Declare an existing directory as a unit, proposed from what it looks like |
-| `orglens check` | Report where the tree has drifted: missing driver documents, undeclared folders, weak or shared homes, kinds that match nothing, folders of documents the grammar has no word for. Reports only — never gates |
-| `orglens snapshot [--stdout] [--check]` | Generate a topology snapshot (markdown); `--check` says whether the written one is older than any declaration or driver document, exit 1 if so |
+| `orglens check` | Report where the tree has drifted: missing driver documents, undeclared folders, weak or shared homes, kinds that match nothing, folders of documents the grammar has no word for, a document written in two formats side by side. Reports only — never gates |
+| `orglens snapshot [--stdout] [--check] [--json]` | Generate a topology snapshot (markdown), with the same facts as JSON beside it for completion; `--json` prints the data instead. `--check` says whether the written one is older than any declaration or driver document, or the JSON lags it, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
 | `orglens view` | Render where everything stands as a page, and open it: units banded by when they last moved, waiting first, a foldable card each; filter by band, kind, agent or text |
 | `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window] [--about WORDS] [--name TEXT] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, and the session is named `unit[-context]-sepDD` |
@@ -150,21 +152,25 @@ holds an index that can be deleted and rebuilt.
 Documents are written directly, not through the CLI. Nothing parses a filename,
 so nothing can compute one.
 
-The grammar has three blocks and nothing else:
+The grammar has three blocks, and two lines above them: `driver`, the one
+document every unit carries, and `format`, the one `new` writes.
 
 ```yaml
+driver: overview
+format: md                    # or org: what `orglens new` writes
+
 entities:                     # what *might* be undeclared work, as a relative glob
   project: projects/*
   experiment: expt-*
 
 artifacts:                    # where documents live, and what to call new ones
   plan:
-    find: plans/*.md
-    means: A numbered unit of work, written before doing it. NN-topic-MonDDYYYY.md.
+    find: plans/*
+    means: A numbered unit of work, written before doing it. NN-topic-MonDDYYYY.
 
 structure:                    # what each part is for. Authoring, never discovery.
   project:
-    overview.md: What it is, its stack, and where its state lives.
+    overview: What it is, its stack, and where its state lives.
 ```
 
 The grammar is data. Adding a kind is one line and needs no Python change:
@@ -172,17 +178,27 @@ The grammar is data. Adding a kind is one line and needs no Python change:
 `capabilities/.orglens-grammar.yml`. A rendering of the grammar lives at
 `skills/orglens/references/grammar-reference.md`.
 
+## Formats
+
+orglens reads markdown and org, mixed in one tree. The grammar's `format:`
+(`md` by default, or `org`) decides only what `orglens new` writes. Patterns
+name no extension: `plans/*` matches `plans/01-x.md` and `plans/02-y.org`,
+and never an image or a `.nav.yml`. In org the status line is a `#+STATUS:`
+keyword; in markdown it is `> **Status:**`. When one document exists in both
+formats side by side, the grammar's format is read and `check` reports the pair.
+
 ## How Discovery Works
 
 1. **Positional patterns detect candidates.** A directory matching `projects/*`
    with no declaration is reported as undeclared work
 2. **Documents belong to a home by containment**, at any depth, minus whatever a
-   nested unit's home claims. A `.md` file matching an artifact's `find` glob
+   nested unit's home claims. A document (`.md` or `.org`) matching an artifact's `find` glob
    **is** a document of that kind, whatever it is called
 3. **Sessions join by where they ran.** A session in any of a unit's homes
    counts for that unit
 
-Status is the first `> **Status:**` line in a unit's documents, looking at the
+Status is the first status line (`> **Status:**` in markdown, `#+STATUS:` in
+org) in a unit's documents, looking at the
 ones `structure` names first. Nothing declares a state file, so
 moving the line into whichever document you actually maintain works. It is
 always reported with its age, since an authored sentence can go stale.
