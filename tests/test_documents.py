@@ -317,3 +317,37 @@ def test_a_kind_can_name_several_containers(tmp_path):
     assert sorted(d.name for d in found) == ["01-new.md", "01-old.md"]
     assert grammar.artifact_types["plan"].directories == ("plans", "plans2")
     assert grammar.artifact_types["plan"].find == "plans/*.md"
+
+
+def _registry(docs_tree, grammar):
+    """`docs_tree` declares nothing; declare the one unit these tests read."""
+    home = docs_tree / "projects" / "clipcompose"
+    (home / MARKER).write_text("unit: clipcompose\nkind: project\n")
+    return Registry([docs_tree], grammar)
+
+
+def test_a_kind_finds_markdown_and_org_side_by_side(docs_tree, grammar):
+    plans = docs_tree / "projects" / "clipcompose" / "plans"
+    (plans / "02-release-Mar012026.org").write_text("#+TITLE: 02\n")
+    registry = _registry(docs_tree, grammar)
+    names = sorted(d.name for d in documents.find(registry, "plan", "clipcompose"))
+    assert "01-packaging-Feb252026.md" in names
+    assert "02-release-Mar012026.org" in names
+
+
+def test_the_catch_all_never_returns_what_is_not_a_document(docs_tree, grammar):
+    home = docs_tree / "projects" / "clipcompose"
+    (home / "figure.png").write_bytes(b"\x89PNG")
+    (home / ".nav.yml").write_text("nav: []\n")
+    (home / "notes").mkdir()
+    (home / "notes" / "session.jsonl").write_text("{}\n")
+    registry = _registry(docs_tree, grammar)
+    found = {d.path.name for d in documents.find(registry, "doc", "clipcompose")}
+    assert not found & {"figure.png", ".nav.yml", "session.jsonl"}
+
+
+def test_loose_documents_include_org(docs_tree, grammar):
+    home = docs_tree / "projects" / "clipcompose"
+    (home / "backlog.org").write_text("* TODO x\n")
+    unit = _registry(docs_tree, grammar).resolve("clipcompose")
+    assert "backlog.org" in {p.name for p in documents.loose(unit)}
