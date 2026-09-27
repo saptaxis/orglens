@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A unit's status is read from its driver in any home before any other
+  document in any home. Home by home, a code repository listed first answered
+  from its README or changelog, which may quote `**Status:**` while describing
+  something else: on a 31-unit tree two units showed a line from their code
+  repository (one of them seven months old, one a fragment of orglens's own
+  changelog) instead of their `overview`.
+
 ## [0.5.0] — 2026-09-28
 
 orglens reads org beside markdown, mixed in one tree, and markdown stays

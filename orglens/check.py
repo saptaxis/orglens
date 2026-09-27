@@ -27,7 +27,7 @@ from difflib import get_close_matches
 from pathlib import Path
 
 from orglens import activity, documents, formats
-from orglens.state import read_status
+from orglens.state import unit_status
 from orglens.homes import Candidate, candidates_for
 from orglens.units import Registry
 
@@ -400,11 +400,7 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
 
     stale: list[Stale] = []
     for unit in units:
-        status = None
-        for home in unit.paths:
-            status = read_status(home, grammar.documents_for(unit.kind), grammar.format)
-            if status:
-                break
+        status = unit_status(unit.paths, grammar.documents_for(unit.kind), grammar.format)
         if status is None or not status.edited:
             continue
         newest = max((activity._newest_mtime(p) or 0) for p in unit.paths)
