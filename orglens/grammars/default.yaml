@@ -1,10 +1,14 @@
 version: 2
 
+# The format `orglens new` writes. Reading is every format, mixed, always:
+# a tree may hold markdown and org side by side. `md` or `org`.
+format: md
+
 # The one document that says where an entity stands, whatever kind it is.
 # Declared here rather than known by the engine, and the same name for every
 # kind so nothing has to look it up. Long identity documents — a research
 # question, an experiment's design — stay separate and are pointed at from it.
-driver: overview.md
+driver: overview
 
 # What exists. Every pattern is relative: matched at the docs root, then inside
 # every entity found, until nothing new turns up. Depth is never declared — an
@@ -23,35 +27,28 @@ entities:
 # ending in `/` names directories rather than the files in them.
 artifacts:
   plan:
-    find: plans/*.md
+    find: plans/*
     means: >
       A numbered unit of work, written before doing it. Name them
-      NN-topic-MonDDYYYY.md — e.g. 05-data-collection-Feb062026.md. The log
-      with the same number and topic is its record.
+      NN-topic-MonDDYYYY — e.g. 05-data-collection-Feb062026 — with the
+      format's extension. The log with the same number and topic is its record.
   log:
-    find: logs/*.md
+    find: logs/*
     means: >
       What actually happened executing the plan of the same number, written
-      during or after. NN-topic-MonDDYYYY-log.md.
+      during or after. NN-topic-MonDDYYYY-log.
   doc:
-    find: "*.md"
+    find: "*"
     means: >
       A document belonging to the entity as a whole rather than to a phase of
       work — a backlog, a handoff, a dated note, a requirements sheet. The
       catch-all: kinds are independent globs, so naming a narrower kind later
       costs nothing and moves nothing.
   spec:
-    find: specs/*.md
+    find: specs/*
     means: >
       A durable design document — what a thing is and why, not when. Named for
       its topic. Outlives the plans that implement it.
-  article:
-    find: articles/*/
-    means: >
-      A piece of public writing, one directory each, named for its slug. The
-      directory is the packet the writing workflow runs over: brief, claims,
-      skeleton, draft, critique, audit. A trailing slash in `find` means the
-      artifact is the directory, not the files in it.
   article:
     find: articles/*/
     means: >
@@ -65,22 +62,22 @@ artifacts:
 # what drifts, so a missing entry here hides nothing.
 structure:
   client:
-    overview.md: Who they are and the state of the engagement.
+    overview: Who they are and the state of the engagement.
   project:
-    overview.md: What it is, its stack, and where its state lives.
+    overview: What it is, its stack, and where its state lives.
     specs/: Durable design documents for this project.
     plans/: Numbered units of work.
     logs/: What happened executing each plan.
   research-program:
-    overview.md: Where the program stands, what is next, what is open.
-    research-question.md: The question the program exists to answer. Often long; pointed at, not inlined.
+    overview: Where the program stands, what is next, what is open.
+    research-question: The question the program exists to answer. Often long; pointed at, not inlined.
     specs/: Design documents for the program's shared machinery.
     literature/: Papers and notes on prior work.
     directions/: Candidate directions not yet promoted to experiments.
     brainstorms/: Exploratory thinking, dated, not durable.
   experiment:
-    overview.md: Where the experiment stands, what is next, what is open.
-    design.md: What this experiment tests and how. Often long; pointed at, not inlined.
+    overview: Where the experiment stands, what is next, what is open.
+    design: What this experiment tests and how. Often long; pointed at, not inlined.
     plans/: Numbered units of work, scoped to this experiment.
     logs/: What happened executing each plan.
     findings/: What the experiment actually showed.

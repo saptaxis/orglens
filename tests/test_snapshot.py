@@ -68,7 +68,7 @@ def snapshot(registry, config):
 class TestWhatItContains:
     def test_it_names_the_kinds_the_grammar_declares(self, snapshot):
         assert "research-program (`research/*`)" in snapshot
-        assert "plan (`plans/*.md`)" in snapshot
+        assert "plan (`plans/*`)" in snapshot
 
     def test_every_unit_appears_under_its_kind(self, snapshot):
         assert "## Projects" in snapshot

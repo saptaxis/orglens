@@ -51,7 +51,7 @@ def vocabulary() -> set[str]:
         words.add(entity_type.pattern.split("*")[0].strip("/"))
     for artifact_type in grammar.artifact_types.values():
         words.add(artifact_type.find.split("/")[0])
-    return {w for w in words if w}
+    return {w for w in words if w and not set(w) <= set("*?[]")}
 
 
 def face_sources() -> list[Path]:
@@ -118,16 +118,17 @@ def test_every_module_in_the_face_is_accounted_for():
     )
 
 
-def test_the_grammar_is_three_blocks_and_two_scalars():
+def test_the_grammar_is_three_blocks_and_three_scalars():
     """Nine keys became three blocks. Anything more needs an argument, in a diff.
 
-    `driver` is the one scalar that earned its place: every entity has one
-    document saying where it stands, and the engine may not know its name.
+    `driver` earned its place: every entity has one document saying where it
+    stands, and the engine may not know its name. `format` earned its place:
+    it is what `new` writes, and nothing else could say it (org-support R3).
     """
     import yaml
 
     data = yaml.safe_load((ENGINE / "grammars" / "default.yaml").read_text())
-    assert set(data) == {"version", "driver", "entities", "artifacts", "structure"}
+    assert set(data) == {"version", "driver", "format", "entities", "artifacts", "structure"}
 
 
 def test_entity_patterns_are_relative_so_nesting_is_never_declared():

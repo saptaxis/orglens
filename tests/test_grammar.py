@@ -17,17 +17,17 @@ class TestLoading:
 
     def test_artifact_types_carry_a_glob_and_prose(self, grammar):
         plan = grammar.artifact_types["plan"]
-        assert plan.find == "plans/*.md"
-        assert "NN-topic-MonDDYYYY.md" in plan.means
+        assert plan.find == "plans/*"
+        assert "NN-topic-MonDDYYYY" in plan.means
 
     def test_structure_is_attached_to_its_entity_type(self, grammar):
         structure = grammar.entity_types["project"].structure
-        assert structure["overview.md"]
-        assert set(structure) == {"overview.md", "specs/", "plans/", "logs/"}
+        assert structure["overview"]
+        assert set(structure) == {"overview", "specs/", "plans/", "logs/"}
 
     def test_files_and_directories_are_told_apart_by_the_trailing_slash(self, grammar):
         project = grammar.entity_types["project"]
-        assert set(project.files) == {"overview.md"}
+        assert set(project.files) == {"overview"}
         assert set(project.directories) == {"specs/", "plans/", "logs/"}
 
 
@@ -126,3 +126,41 @@ def test_a_missing_find_is_an_error_not_a_silent_empty_kind(tmp_path):
 
     with pytest.raises(KeyError):
         Grammar.from_yaml(path)
+
+
+def test_a_grammar_without_format_writes_markdown(tmp_path):
+    path = tmp_path / "g.yaml"
+    path.write_text("driver: overview\nentities: {}\nartifacts: {}\n")
+    assert Grammar.from_yaml(path).format == "md"
+
+
+def test_a_grammar_can_name_org(tmp_path):
+    path = tmp_path / "g.yaml"
+    path.write_text("driver: overview\nformat: org\nentities: {}\nartifacts: {}\n")
+    assert Grammar.from_yaml(path).format == "org"
+
+
+def test_an_unknown_format_is_refused_at_load(tmp_path):
+    path = tmp_path / "g.yaml"
+    path.write_text("driver: overview\nformat: rst\nentities: {}\nartifacts: {}\n")
+    with pytest.raises(ValueError, match="unknown format 'rst'"):
+        Grammar.from_yaml(path)
+
+
+def test_a_pattern_is_a_stem_whether_or_not_the_grammar_wrote_a_suffix(tmp_path):
+    path = tmp_path / "g.yaml"
+    path.write_text(
+        "driver: overview\nentities: {}\nartifacts:\n"
+        "  old:\n    find: plans/*.md\n  new:\n    find: plans/*\n"
+    )
+    grammar = Grammar.from_yaml(path)
+    assert grammar.artifact_types["old"].pattern == "*"
+    assert grammar.artifact_types["new"].pattern == "*"
+    assert sorted(grammar.artifact_types["new"].file_globs) == ["*.md", "*.org"]
+
+
+def test_the_default_grammar_names_no_extension(grammar):
+    assert grammar.driver == "overview"
+    for artifact in grammar.artifact_types.values():
+        for find in artifact.finds:
+            assert not find.endswith((".md", ".org")), find

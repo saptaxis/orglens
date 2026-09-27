@@ -8,7 +8,7 @@ and read the snapshot rather than scanning directories.
 
 ## Where anything stands
 
-Every entity carries **`overview.md`** — one document, same name for every
+Every entity carries **`overview`** — one document, same name for every
 kind, saying where that entity stands and what is next. It is the first thing
 to read and the first place a status line is looked for.
 
@@ -35,10 +35,10 @@ reports the gap and changes nothing.
 
 | Kind | Found at | What it is |
 |------|----------|------------|
-| `plan` | `plans/*.md` | A numbered unit of work, written before doing it. Name them NN-topic-MonDDYYYY.md — e.g. 05-data-collection-Feb062026.md. The log with the same number and topic is its record. |
-| `log` | `logs/*.md` | What actually happened executing the plan of the same number, written during or after. NN-topic-MonDDYYYY-log.md. |
-| `doc` | `*.md` | A document belonging to the entity as a whole rather than to a phase of work — a backlog, a handoff, a dated note, a requirements sheet. The catch-all: kinds are independent globs, so naming a narrower kind later costs nothing and moves nothing. |
-| `spec` | `specs/*.md` | A durable design document — what a thing is and why, not when. Named for its topic. Outlives the plans that implement it. |
+| `plan` | `plans/*` | A numbered unit of work, written before doing it. Name them NN-topic-MonDDYYYY — e.g. 05-data-collection-Feb062026 — with the format's extension. The log with the same number and topic is its record. |
+| `log` | `logs/*` | What actually happened executing the plan of the same number, written during or after. NN-topic-MonDDYYYY-log. |
+| `doc` | `*` | A document belonging to the entity as a whole rather than to a phase of work — a backlog, a handoff, a dated note, a requirements sheet. The catch-all: kinds are independent globs, so naming a narrower kind later costs nothing and moves nothing. |
+| `spec` | `specs/*` | A durable design document — what a thing is and why, not when. Named for its topic. Outlives the plans that implement it. |
 | `article` | `articles/*/` | A piece of public writing, one directory each, named for its slug. The directory is the packet the writing workflow runs over: brief, claims, skeleton, draft, critique, audit. A trailing slash in `find` means the artifact is the directory, not the files in it. |
 
 Names are a convention, not a rule the engine enforces — nothing parses a
@@ -51,13 +51,13 @@ either way.
 
 | Path | What it is for |
 |------|----------------|
-| `overview.md` | Who they are and the state of the engagement. |
+| `overview` | Who they are and the state of the engagement. |
 
 ### project — `projects/*`
 
 | Path | What it is for |
 |------|----------------|
-| `overview.md` | What it is, its stack, and where its state lives. |
+| `overview` | What it is, its stack, and where its state lives. |
 | `specs/` | Durable design documents for this project. |
 | `plans/` | Numbered units of work. |
 | `logs/` | What happened executing each plan. |
@@ -66,8 +66,8 @@ either way.
 
 | Path | What it is for |
 |------|----------------|
-| `overview.md` | Where the program stands, what is next, what is open. |
-| `research-question.md` | The question the program exists to answer. Often long; pointed at, not inlined. |
+| `overview` | Where the program stands, what is next, what is open. |
+| `research-question` | The question the program exists to answer. Often long; pointed at, not inlined. |
 | `specs/` | Design documents for the program's shared machinery. |
 | `literature/` | Papers and notes on prior work. |
 | `directions/` | Candidate directions not yet promoted to experiments. |
@@ -77,8 +77,8 @@ either way.
 
 | Path | What it is for |
 |------|----------------|
-| `overview.md` | Where the experiment stands, what is next, what is open. |
-| `design.md` | What this experiment tests and how. Often long; pointed at, not inlined. |
+| `overview` | Where the experiment stands, what is next, what is open. |
+| `design` | What this experiment tests and how. Often long; pointed at, not inlined. |
 | `plans/` | Numbered units of work, scoped to this experiment. |
 | `logs/` | What happened executing each plan. |
 | `findings/` | What the experiment actually showed. |
