@@ -1,52 +1,74 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] — 2026-09-27
 
 Everything a session or a note needs is reachable from orglens: a turn into an
-open pane, a name for the window it runs in, a loop over the unclaimed pile,
-and the notes a unit actually owns.
+open pane, a name for the window it runs in, a decision per directory over the
+unclaimed pile, and the notes a unit actually owns.
 
-- Notes are joined to units by the session that wrote them — the same rule
-  `sessions` uses — rather than by the unit's name appearing in the note. The
-  older name match survives as a weaker, labelled reason: each row says
-  `written here`, `filed here` or `mentions this`, and `view` shows it. One
-  read of `scad notes ls` for the whole tree replaces one `--about`
-  subprocess per unit: 0.25s against 8.47s on a 31-unit tree.
-- `orglens notes [UNIT]` prints what was written down about a unit, with
-  `--no-mentions` for the exact rows only.
+### Notes
+
+- Notes are joined to units by **the session that wrote them** — attribution,
+  else containment, the rule `sessions` already decides — rather than by the
+  unit's name appearing in the note. The old name match survives as a weaker,
+  labelled reason: every row says `written here`, `filed here` or
+  `mentions this`, and `view` prints it. One read of `scad notes ls` for the
+  whole tree replaces one `--about` subprocess per unit: **0.25s against
+  8.47s on a 31-unit tree**. Measured on that tree: 42 exact links, 13 filed,
+  62 mentions, and none the name match had missed — the correctness this
+  fixes had not yet gone wrong, and the join no longer depends on tagging.
+- `orglens notes [UNIT]`, with `--no-mentions` for the exact rows only.
+
+### The unclaimed pile
+
 - `sessions --triage` decides the unclaimed sessions **by directory**, one
   answer per group: 201 unclaimed on 2026-09-25 and six directories held ~95
   of them. `e` takes a group one session at a time, `--one-by-one` skips the
-  grouping entirely, and `--groups` just counts. `dismiss --under PATH` clears
-  a whole tree, the unclaimed part of it only. Nothing proposes a unit: a
-  session at a shared root could be any of the units under it.
-- `--why` is shown wherever a session is listed, and outranks the last turn on
-  an unclaimed row — it was written about the session, the turn merely
-  happened in it. `sessions --dismissed` lists what someone said belongs to no
-  unit, so a mistaken dismissal is visible rather than buried in the log.
+  grouping, `--groups` just counts. Nothing proposes a unit: a session at a
+  shared root could be any of the units under it.
+- `dismiss SESSION` records that a session belongs to no unit and never will,
+  so the pile can empty; a later `attribute` takes it back. `dismiss --under
+  PATH` clears a tree, the unclaimed part of it only. `sessions --dismissed`
+  lists them, so a mistaken dismissal is visible.
+- `attribute` and `dismiss` take `--why`, and it is shown wherever the session
+  is listed, outranking the last turn.
+- `sessions --none --json` emits rows with an empty `unit` and `why` to fill
+  in; `sessions --from FILE` applies them.
 - The view's unattributed rows carry the commands that act on them: resume,
   `attribute` (unfinished, ending in a space — no unit is proposed), `dismiss`,
   and `dismiss --under` for the row's directory.
+
+### Sessions
+
+- `resume --prompt TEXT` sends a turn to an open session through `scad session
+  send` instead of attaching.
+- `resume` names the other live processes on a session id before opening it,
+  and `check` reports every doubly held session: two writers on one transcript
+  is how a session forks. Five were doubly held when this landed.
+- `start --window` lands the session as a window in the tmux you are already
+  in, and the session is named `unit[-context]-sepDD` — the shape these names
+  already had by hand, where the day anchors and `--about WORDS` distinguishes
+  two sessions on one unit on one day. A name already in the index gets a
+  `-2`. `--name TEXT` overrides, `--no-name` suppresses, `--dry-run` says what
+  both would be. Both flags need scad's `session launch --window/--name`.
+
+### The skill, and installing
+
+- The operator card (`skills/orglens/SKILL.md`) learns the new verbs: `notes`,
+  `--why`, `resume --prompt`, `start --window` and `--about`, `snapshot --json`,
+  and that clearing the unclaimed pile is the person's to run, not an agent's.
+  Re-run `bootstrap` to pick it up; the installed copy is a file, not a link.
+- `bootstrap --uninstall` removes the completion script it wrote. The line
+  sourcing it from a shell rc is the person's own and is left alone.
+
+### Snapshot and completion
+
 - `snapshot --json` emits the same facts as data, narrowed by the same
   `--type`/`--unit` selection as the document.
-- Completion reaches workflow nodes and packet paths. Node names survive a
-  workflow that does not validate, since a half-written one is when you most
-  need them.
-- `dismiss SESSION` records that a session belongs to no unit and never will,
-  so the pile can empty. A later `attribute` takes it back. `attribute` and
-  `dismiss` both accept `--why`.
-- `sessions --none --json` emits rows with an empty `unit` and `why` to fill
-  in; `sessions --from FILE` applies them.
-- `resume --prompt TEXT` sends a turn to the open session through
-  `scad session send` instead of attaching. `resume` also names the other
-  live processes on a session id before opening it, and `check` reports every
-  doubly held session: two writers on one transcript is how a session forks.
-- `start --window` lands the session as a window in the tmux you are already
-  in, named for the unit, and `--name` (on by default) names the session
-  itself at launch. Both need scad's `session launch --window/--name`.
-- Shell completion for unit names, document kinds and session ids, written by
-  `bootstrap`. The completers read the snapshot cache, never the tree, so a
-  tab is not a two-second pause.
+- Shell completion for unit names (with each one's status as the hint),
+  document kinds, session ids, workflow nodes and packet paths, written by
+  `bootstrap`. The completers read a cache, never the tree, so a tab is not a
+  two-second pause; node names survive a workflow that does not validate.
 
 ## [0.3.0] — 2026-09-18
 

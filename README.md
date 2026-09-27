@@ -200,8 +200,8 @@ repository with sixteen homes below it, that is most of the sessions.
 hands a session id, or a unit's newest open session, to `scad session resume`.
 `orglens attribute SESSION-ID UNIT` records an attribution after the fact, which
 is also how a shared-home session is narrowed to one unit. `orglens dismiss`
-says a session is nobody's, which is what lets the unclaimed pile empty rather
-than grow; `sessions --triage` walks that pile one session at a time, and
+says a session is nobody's, which is what lets the unclaimed pile empty;
+`sessions --triage` walks that pile by directory, one answer per group, and
 `sessions --from FILE` applies the same decisions written into a
 `--none --json` file. Neither proposes a unit: a session at a shared root could
 be any of the units under it, and guessing from its title is the containment
