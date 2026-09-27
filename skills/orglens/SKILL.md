@@ -172,7 +172,7 @@ add — a marker, a grammar word, a nav entry — not something to work around.
 **Start work on a unit:** `where <unit>` → `status | grep <unit>` → `start <unit> --home <name>`.
 
 **Write a plan:** `find plan <unit>` for what exists and the highest number →
-write `plans/NN-topic-MonDDYYYY.md` by hand → `snapshot`.
+write `plans/NN-topic-MonDDYYYY` in the grammar's format (`.org` or `.md`) by hand → `snapshot`.
 
 **What needs attention:** `view`, or `sessions --none` and `check`.
 

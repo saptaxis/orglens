@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Org beside markdown.** A format registry (`orglens/formats/`) reads both,
+  mixed in one tree; the grammar's `format:` decides what `new` writes. Grammar
+  patterns and the driver name no extension. Org status is `#+STATUS:`.
+- `check` reports a document written in two formats side by side, and finds a
+  declared document in either format.
+- `view_link: file` in config links the view's documents to the files.
+- Completion reads `~/.orglens/cache/snapshot.json`, written with the snapshot;
+  `snapshot --check` reports it stale when it lags.
+- A workflow node's `writes:` may name a stem; the file takes the grammar's format.
+- Readers outside the CLI (completion, the workflow engine) honour `ORGLENS_CONFIG`.
+
 ## [0.4.0] — 2026-09-27
 
 Everything a session or a note needs is reachable from orglens: a turn into an
