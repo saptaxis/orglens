@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from difflib import get_close_matches
 from pathlib import Path
 
-from orglens import activity, documents
+from orglens import activity, documents, formats
 from orglens.state import read_status
 from orglens.homes import Candidate, candidates_for
 from orglens.units import Registry
@@ -225,18 +225,23 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
                 continue
 
         missing = []
+        suffix = formats.get(registry.grammar.format).suffix
         for name in declared:
-            if any(name in present for present in present_by_home):
+            # A declared document is present in any registered format (R2);
+            # when absent it is named as `new` would write it.
+            written = {name} | {formats.stem(name) + s for s in formats.SUFFIXES}
+            if any(written & set(present) for present in present_by_home):
                 continue
+            shown = name if Path(name).suffix in formats.SUFFIXES else name + suffix
             # The file that resembles this one may live in a home that was
             # not the first checked, so the hint has to search all of them.
             close = None
             for present in present_by_home:
-                match = get_close_matches(name, present, n=1, cutoff=0.55)
+                match = get_close_matches(shown, present, n=1, cutoff=0.55)
                 if match:
                     close = match[0]
                     break
-            missing.append(Missing(name=name, resembles=close))
+            missing.append(Missing(name=shown, resembles=close))
         if missing:
             drifted.append(Drift(entity=unit.name, missing=missing))
 
@@ -370,7 +375,7 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
     for unit in units:
         status = None
         for home in unit.paths:
-            status = read_status(home, grammar.documents_for(unit.kind))
+            status = read_status(home, grammar.documents_for(unit.kind), grammar.format)
             if status:
                 break
         if status is None or not status.edited:

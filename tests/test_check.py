@@ -510,3 +510,11 @@ def test_a_status_line_older_than_the_tree_by_a_week_is_reported(declared_tree, 
 
 def test_a_status_line_as_fresh_as_the_tree_is_not_reported(declared_tree, grammar):
     assert check.run(Registry([declared_tree], grammar)).stale == []
+
+
+def test_a_declared_document_in_org_is_not_missing(declared_tree, grammar):
+    client = declared_tree / "clients" / "itus-capital"
+    _declare(client, "itus-capital", "client")
+    (client / "overview.org").write_text("#+STATUS: Active\n")
+    report = check.run(Registry([declared_tree], grammar))
+    assert not any(d.entity == "itus-capital" for d in report.drifted)

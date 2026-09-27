@@ -1164,3 +1164,19 @@ class TestCountPluralisation:
 
         assert _count(0, "session") == "0 sessions"
         assert _count(2, "plan") == "2 plans"
+
+
+def test_new_writes_an_org_driver_when_the_grammar_says_org(runner, tmp_path):
+    import orglens
+    grammar = tmp_path / "grammar.yaml"
+    default = (Path(orglens.__file__).parent / "grammars" / "default.yaml").read_text()
+    grammar.write_text(default.replace("format: md", "format: org"))
+    docs = tmp_path / "docs"
+    (docs / "projects").mkdir(parents=True)
+    env = _roots_config(tmp_path, [docs], grammar)
+    result = runner.invoke(cli, ["new", str(docs / "projects" / "demo"), "--kind", "project"], env=env)
+    assert result.exit_code == 0, result.output
+    driver = docs / "projects" / "demo" / "overview.org"
+    assert driver.is_file()
+    assert driver.read_text().startswith("#+TITLE: Overview\n#+STATUS: Opened ")
+    assert not (docs / "projects" / "demo" / "overview.md").exists()

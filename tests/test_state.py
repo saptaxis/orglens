@@ -90,3 +90,33 @@ class TestWhichDocumentTheLineComesFrom:
         (tmp_path / "overview.md").write_text("> **Status:** Active\n")
 
         assert read_status(tmp_path, ["specs/", "overview.md"]).text == "Active"
+
+
+def test_status_is_read_from_an_org_driver(tmp_path):
+    (tmp_path / "overview.org").write_text("#+TITLE: X\n#+STATUS: Active\n")
+    status = read_status(tmp_path, ["overview"])
+    assert status.text == "Active"
+    assert status.source.name == "overview.org"
+
+
+def test_the_grammars_format_wins_when_the_driver_exists_twice(tmp_path):
+    (tmp_path / "overview.md").write_text("> **Status:** Old\n")
+    (tmp_path / "overview.org").write_text("#+STATUS: New\n")
+    assert read_status(tmp_path, ["overview"], prefer="org").text == "New"
+    assert read_status(tmp_path, ["overview"], prefer="md").text == "Old"
+
+
+def test_a_driver_declared_with_a_suffix_still_finds_an_org_file(tmp_path):
+    (tmp_path / "overview.org").write_text("#+STATUS: Active\n")
+    assert read_status(tmp_path, ["overview.md"]).text == "Active"
+
+
+def test_other_documents_are_scanned_in_every_format(tmp_path):
+    (tmp_path / "notes.org").write_text("#+STATUS: From notes\n")
+    assert read_status(tmp_path, ["overview"]).text == "From notes"
+
+
+def test_the_backlog_is_not_preferred_over_the_driver_by_name(tmp_path):
+    (tmp_path / "backlog.org").write_text("#+STATUS: Backlog\n")
+    (tmp_path / "overview.org").write_text("#+STATUS: Driver\n")
+    assert read_status(tmp_path, ["overview"]).text == "Driver"
