@@ -967,7 +967,8 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         if rows:
             groups.append((_heading(kind), rows))
 
-    ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url}
+    ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url,
+           "link": config.view_link}
     page = view.render(groups, ctx, unattributed=sessions.unattributed(every))
     path = view.write(page, Path(out))
     click.echo(f"wrote {path}")

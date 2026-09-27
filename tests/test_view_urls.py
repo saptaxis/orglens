@@ -56,3 +56,25 @@ def test_a_document_under_neither_root_falls_back_to_the_filesystem():
     assert doc_url(
         Path("/elsewhere/notes.md"), [ROOT, Path("/code")], BASE
     ).startswith("file://")
+
+
+def test_an_org_document_gets_the_same_served_url_as_markdown(tmp_path):
+    root = tmp_path / "docs"
+    (root / "a").mkdir(parents=True)
+    org = root / "a" / "b.org"
+    org.write_text("x")
+    assert doc_url(org, root, "http://localhost:8000") == "http://localhost:8000/a/b/"
+
+
+def test_file_mode_links_the_file_itself(tmp_path):
+    from orglens import view
+    path = tmp_path / "docs" / "a.org"
+    ctx = {"docs_roots": [tmp_path / "docs"], "base_url": "http://x", "link": "file"}
+    assert "href='file://" in view._link(path, "a", ctx)
+
+
+def test_served_mode_is_the_default(tmp_path):
+    from orglens import view
+    path = tmp_path / "docs" / "a.org"
+    ctx = {"docs_roots": [tmp_path / "docs"], "base_url": "http://x"}
+    assert "href='http://x/a/'" in view._link(path, "a", ctx)

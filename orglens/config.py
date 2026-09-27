@@ -22,6 +22,9 @@ class Config:
     roots: list[Path]
     grammar_name: str
     docs_base_url: str = "http://localhost:8000"
+    #: What a view link opens: `served` (the doc at `docs_base_url`) or
+    #: `file` (the file itself, for a tree read in an editor).
+    view_link: str = "served"
     _config_dir: Path | None = None
 
     @classmethod
@@ -45,6 +48,7 @@ class Config:
             # Where the tree is served. `mkdocs serve` by default; set it to a
             # published site and the same links work from anywhere.
             docs_base_url=(data.get("docs_base_url") or "http://localhost:8000").rstrip("/"),
+            view_link=data.get("view_link", "served"),
             _config_dir=path.parent,
         )
 
