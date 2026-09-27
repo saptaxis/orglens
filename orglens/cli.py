@@ -34,7 +34,7 @@ from orglens.homes import Home, repo_of
 from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot, snapshot_data
-from orglens.state import read_status
+from orglens.state import unit_status
 from orglens.units import Registry, Unit
 from orglens.workflow.cli import workflow as workflow_group
 
@@ -186,18 +186,15 @@ def _warm(registry: Registry, units: list, every: list) -> dict[str, list[dict]]
 
 
 def _status_of(registry: Registry, unit):
-    """The authored line for a unit, checked across every home in turn.
+    """The authored line for a unit: the driver in any home first, then any
+    other document (`state.unit_status`).
 
     A kind the grammar has never heard of still gets the driver document
     looked for — `documents_for` only adds detail beyond that when the
     grammar actually describes the kind.
     """
     declared = registry.grammar.documents_for(unit.kind)
-    for path in unit.paths:
-        status = read_status(path, declared, registry.grammar.format)
-        if status:
-            return status
-    return None
+    return unit_status(unit.paths, declared, registry.grammar.format)
 
 
 def _relative(path: Path, roots: list[Path]) -> Path:

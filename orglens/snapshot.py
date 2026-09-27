@@ -17,7 +17,7 @@ from pathlib import Path
 
 from orglens import documents
 from orglens.config import Config
-from orglens.state import read_status
+from orglens.state import unit_status
 from orglens.units import Registry
 
 
@@ -163,8 +163,4 @@ def _heading(kind: str) -> str:
 
 def _status_of(registry: Registry, unit):
     declared = registry.grammar.documents_for(unit.kind)
-    for path in unit.paths:
-        status = read_status(path, declared, registry.grammar.format)
-        if status:
-            return status
-    return None
+    return unit_status(unit.paths, declared, registry.grammar.format)
