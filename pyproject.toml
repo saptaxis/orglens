@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "orglens"
-version = "0.3.0"
+version = "0.4.0"
 description = "Organizational lens for AI agents — units of work, and the sessions that belong to them"
 readme = "README.md"
 license = "MIT"

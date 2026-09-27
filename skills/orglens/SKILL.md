@@ -40,6 +40,7 @@ that is the writing capability's; this card only says where the file goes.
 orglens snapshot --check || orglens snapshot   # refresh only when stale
 orglens snapshot --stdout --type project        # scope it: a projects task need not load every client and experiment
 orglens snapshot --stdout --unit <name>         # one unit and its parts
+orglens snapshot --json [--unit <name>]         # the same facts as data, to compose with
 ```
 
 The snapshot is the tree as one document. `--type`/`--unit` narrow it; the
@@ -97,6 +98,12 @@ nothing. Several homes → name one with `--home`. The `[scad] project: …` lin
 scad prints is scad's own filing by directory; the `attributed … to <unit>`
 line after it is orglens's, and both are right.
 
+`--window` lands it as a window in the tmux you are already in instead of a
+detached one, so the person can switch to it rather than attach. The session is
+named `<unit>-<mon><dd>`; `--about "two words"` puts context in the middle,
+which is what tells two sessions on one unit on one day apart. Both need a scad
+that has `session launch --window`.
+
 ## Sessions
 
 ```bash
@@ -105,13 +112,32 @@ orglens sessions                                # every unit's, grouped; unattri
 orglens sessions --none                         # belong to no unit: where they ran, last thing said
 orglens resume <unit>                           # its newest open session, through scad
 orglens resume <session-id>                     # by id or unique prefix
-orglens attribute <session-id> <unit>           # say whose it was, after the fact
+orglens attribute <session-id> <unit> --why "…" # say whose it was, and what for
+orglens resume <unit> --prompt "…"              # hand a turn to the open session
+orglens notes <unit>                            # what was written down about it
+orglens sessions --none --groups                # the unclaimed, counted by directory
 ```
 
 A session belongs to every unit with a home containing where it ran, or to
 the one an attribution names, which wins. A shared home shows the session on
 both units; `attribute` narrows it to one. A session started by hand is listed
 after scad's next reindex.
+
+`--why` is the person's own words about a session and is shown wherever it is
+listed; ask for it rather than inventing one. `resume --prompt` delivers a turn
+to a pane that is already open, which is not the same as resuming — and `resume`
+names any other live process on that session id before opening it, because two
+writers on one transcript is how a session forks.
+
+`orglens notes <unit>` says why each note is the unit's: `written here` (the
+session that wrote it belongs to the unit), `filed here` (scad's project for
+it), or `mentions this` (the name appears in it). `--no-mentions` drops the
+weakest, `--kind` is not there yet.
+
+**Clearing the unclaimed pile is the person's, not yours.** `sessions --triage`
+walks it by directory and takes a unit name, `d` to dismiss, `s` to skip. It is
+interactive and it never proposes a unit, because a session above every home
+could be any of the units under it. Offer it; do not run it.
 
 ## Workflow
 

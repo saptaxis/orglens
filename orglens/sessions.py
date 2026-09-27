@@ -27,7 +27,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from orglens.events import attributions
+from orglens.events import attributions, dismissed, whys
 from orglens.homes import repo_of
 from orglens.units import Registry
 
@@ -72,6 +72,14 @@ class Session:
     last_turn: dict | None = None
     #: An open question the session left, if any.
     needs: str | None = None
+    #: Why this session is nobody's, when someone has said so.
+    dismissed: str | None = None
+    #: What the person said the session was for, on `attribute`/`dismiss --why`.
+    why: str | None = None
+    #: The other live processes on this same session id, when scad reports
+    #: any: [{pid, name, pane}]. Two writers on one transcript is how a
+    #: session forks, so anything that opens one has to know.
+    also_held_by: tuple = ()
 
     @property
     def open(self) -> bool:
@@ -131,11 +139,18 @@ def all_sessions(registry: Registry, events_root: Path) -> list[Session]:
     by hand in a terminal is not a row until scad's next reindex.
     """
     attributed = attributions(root=events_root)
+    gone = dismissed(root=events_root)
+    said = whys(root=events_root)
     prefixes = _prefixes(registry)
 
     def belongs(sid: str, cwd: str | None) -> tuple[frozenset[str], str | None]:
         if sid in attributed:
             return frozenset({attributed[sid]}), "attributed"
+        # A dismissal is an answer, so containment does not get to overrule
+        # it: a scratch session that happens to sit inside a home was still
+        # never that unit's work.
+        if sid in gone:
+            return frozenset(), "dismissed"
         units = frozenset(name for name, prefix in prefixes if cwd and _under(cwd, prefix))
         return units, ("containment" if units else None)
 
@@ -157,6 +172,8 @@ def all_sessions(registry: Registry, events_root: Path) -> list[Session]:
             outcome=row.get("outcome"), live=live is not None,
             units=units, how=how,
             last_turn=row.get("last_turn") or None, needs=row.get("needs") or None,
+            dismissed=gone.get(sid), why=said.get(sid),
+            also_held_by=tuple((live or {}).get("also_held_by") or ()),
         ))
     out.sort(key=lambda s: (s.when or 0, s.id), reverse=True)
     return out
@@ -166,8 +183,36 @@ def for_unit(sessions: list[Session], name: str) -> list[Session]:
     return [s for s in sessions if name in s.units]
 
 
-def unattributed(sessions: list[Session]) -> list[Session]:
-    return [s for s in sessions if not s.units]
+def unattributed(sessions: list[Session], everything: bool = False) -> list[Session]:
+    """The sessions nobody has claimed. Dismissed ones are decided, not
+    undecided, so they leave the pile unless asked for."""
+    return [s for s in sessions
+            if not s.units and (everything or s.dismissed is None)]
+
+
+def by_directory(sessions: list[Session]) -> list[tuple[str, list[Session]]]:
+    """The sessions grouped by the directory above where each ran, biggest
+    group first.
+
+    One decision per group instead of one per session. Measured 2026-09-25:
+    201 unclaimed sessions, and six directories held ~95 of them — 22 in
+    `/private`, 20 on the Desktop, 13 in the home directory, the rest in two
+    rooms of one interior-visualization tree. Answering those six is most of
+    the pile. The grouping is by the *parent*, because a tree of per-room or
+    per-branch working directories is one answer, not fourteen.
+    """
+    groups: dict[str, list[Session]] = {}
+    for session in sessions:
+        parent = str(Path(session.cwd).parent) if session.cwd else "(nowhere)"
+        groups.setdefault(parent, []).append(session)
+    return sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+
+
+def under(sessions: list[Session], path: str) -> list[Session]:
+    """Every session that ran at or below `path`, by either spelling of a
+    symlinked root — the same tolerance `_under` gives containment."""
+    prefix = str(Path(path).expanduser())
+    return [s for s in sessions if s.cwd and _under(s.cwd, prefix)]
 
 
 def listed(sessions: list[Session], everything: bool = False) -> list[Session]:

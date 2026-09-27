@@ -260,26 +260,85 @@ def _json_list(raw: str | None) -> list[str]:
     return [str(v) for v in value] if isinstance(value, list) else []
 
 
-def notes_about(name: str) -> list[dict]:
-    """Notes about the unit, from `scad notes ls --about NAME`.
+#: How a note reached a unit, strongest first. `written here` is the only
+#: one that is exact: it is the unit the note's own session belongs to.
+WRITTEN, FILED, MENTIONS = "written here", "filed here", "mentions this"
 
-    A note is *about* a unit when its name is in the tags or entities, is
-    the topic, or is the project it was filed under — scad does that match.
-    A note about X is often written in Y, so `written_in` is carried. One
-    subprocess per unit; `cli` runs them concurrently across units.
+
+def all_notes(limit: int = 2000) -> list[dict]:
+    """Every note scad has, newest first, in one call.
+
+    One subprocess for the whole tree rather than one per unit: `--about
+    NAME` answered a single unit, so a 31-unit tree paid 31 launches to
+    read the same file. The export carries `session_id`, `entities`,
+    `tags` and `project`, which is everything the join below needs.
     """
-    out = []
-    # Looked up through the module so a test can replace it in one place.
-    for note in sessions_mod.run_scad(["notes", "ls", "--about", name]):
-        topic = note.get("topic")
-        out.append({
-            "topic": topic,
-            "title": note.get("title"),
-            "at": _epoch(note.get("ts")),
-            "written_in": note.get("project"),
-            "about": name in _json_list_or_list(note.get("tags")) or topic == name,
-        })
+    return sessions_mod.run_scad(["notes", "ls", "--limit", str(limit)])
+
+
+def _mentions(note: dict, name: str) -> bool:
+    """scad's own `--about` rule, applied here: the name is in the tags or
+    the entities, or it is the topic."""
+    if note.get("topic") == name:
+        return True
+    named = _json_list_or_list(note.get("tags")) + _json_list_or_list(note.get("entities"))
+    return name in named
+
+
+def _shape(note: dict, how: str) -> dict:
+    return {
+        "topic": note.get("topic"),
+        "title": note.get("title"),
+        "at": _epoch(note.get("ts")),
+        "written_in": note.get("project"),
+        "session": note.get("session_id"),
+        "how": how,
+        # Kept for callers that predate `how`: true unless the only reason
+        # this note reached the unit was the session it was written in.
+        "about": how != WRITTEN or _mentions(note, note.get("project") or ""),
+    }
+
+
+def notes_by_unit(names, sessions: list[Session] | None = None,
+                  notes: list[dict] | None = None) -> dict[str, list[dict]]:
+    """Every named unit's notes, from one read of scad's export.
+
+    Three ways a note reaches a unit, and the strongest wins. **Written
+    here** is the exact one: the note's session belongs to the unit, by
+    attribution or by containment — the same rule `sessions` already
+    decides, and the only one that does not depend on someone having
+    tagged the note. **Filed here** is scad's project for it, which is a
+    directory name and so answers only for the units whose name is their
+    repository's. **Mentions this** is the old `--about` match, kept as a
+    weaker source rather than the only one.
+
+    Passing `sessions` is what makes the first rule work; without it this
+    degrades to what `--about` did.
+    """
+    names = list(names)
+    rows = all_notes() if notes is None else notes
+    by_session: dict[str, frozenset[str]] = {
+        s.id: s.units for s in (sessions or []) if s.units
+    }
+    out: dict[str, list[dict]] = {name: [] for name in names}
+    wanted = set(names)
+    for note in rows:
+        written = by_session.get(str(note.get("session_id") or "")) or frozenset()
+        filed = note.get("project")
+        for name in wanted:
+            if name in written:
+                out[name].append(_shape(note, WRITTEN))
+            elif name == filed:
+                out[name].append(_shape(note, FILED))
+            elif _mentions(note, name):
+                out[name].append(_shape(note, MENTIONS))
     return out
+
+
+def notes_about(name: str, sessions: list[Session] | None = None,
+                notes: list[dict] | None = None) -> list[dict]:
+    """One unit's notes. See `notes_by_unit`, which this is a slice of."""
+    return notes_by_unit([name], sessions, notes)[name]
 
 
 def _json_list_or_list(raw) -> list[str]:
@@ -404,5 +463,6 @@ def read(
     activity.blocked = sum(blocked for _, blocked in packets)
     for key, value in _from_sessions(sessions).items():
         setattr(activity, key, value)
-    activity.notes = notes_about(name) if notes is None else notes
+    # The session join needs the unit's sessions, which are in hand here.
+    activity.notes = notes_about(name, sessions) if notes is None else notes
     return activity

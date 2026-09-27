@@ -1,6 +1,6 @@
 import json
 
-from orglens.events import Event, append, attributions, read_all
+from orglens.events import dismissed, Event, append, attributions, read_all
 
 
 def test_an_event_round_trips(tmp_path):
@@ -55,4 +55,25 @@ def test_an_event_never_records_a_path(tmp_path):
     # A path makes an event untrue on the machine that reads it.
     append(Event("attributed", "orglens", "s1", 100, "ribosome"), root=tmp_path)
     written = json.loads((tmp_path / "s1.jsonl").read_text().strip())
-    assert set(written) == {"kind", "unit", "session", "at", "machine"}
+    assert set(written) == {"kind", "unit", "session", "at", "machine", "why"}
+
+
+def test_a_dismissal_takes_a_session_out_of_the_attributions(tmp_path):
+    append(Event("attributed", "orglens", "s1", 100, "ribosome"), root=tmp_path)
+    append(Event("dismissed", "", "s1", 200, "ribosome", why="scratch"), root=tmp_path)
+    assert attributions(root=tmp_path) == {}
+    assert dismissed(root=tmp_path) == {"s1": "scratch"}
+
+
+def test_attributing_a_dismissed_session_takes_it_back(tmp_path):
+    """Both are assertions, so the newest wins either way."""
+    append(Event("dismissed", "", "s1", 100, "ribosome", why="scratch"), root=tmp_path)
+    append(Event("attributed", "orglens", "s1", 200, "ribosome"), root=tmp_path)
+    assert attributions(root=tmp_path) == {"s1": "orglens"}
+    assert dismissed(root=tmp_path) == {}
+
+
+def test_why_is_kept_as_written(tmp_path):
+    append(Event("attributed", "orglens", "s1", 100, "ribosome",
+                 why="the release branch"), root=tmp_path)
+    assert [e.why for e in read_all(root=tmp_path)] == ["the release branch"]

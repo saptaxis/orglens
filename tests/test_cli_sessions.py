@@ -260,3 +260,262 @@ class TestAttribute:
         result = CliRunner().invoke(cli, ["attribute", "abcd1234", "no-such-unit"])
         assert result.exit_code == 1
         assert events.read_all(root=tmp_path / "events") == []
+
+
+class TestTriage:
+    """Deciding the unclaimed pile: at a prompt, or over a file. Neither
+    proposes a unit — the person assigns, the tool records."""
+
+    def test_a_dismissed_session_leaves_the_unclaimed_pile(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere")),
+        ])
+        run = CliRunner()
+        assert "0000aaaa" in run.invoke(cli, ["sessions", "--none"]).output
+        run.invoke(cli, ["dismiss", "0000aaaa", "--why", "scratch"])
+        assert "0000aaaa" not in run.invoke(cli, ["sessions", "--none"]).output
+
+    def test_attributing_a_dismissed_session_brings_it_back(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere")),
+        ])
+        run = CliRunner()
+        run.invoke(cli, ["dismiss", "0000aaaa"])
+        run.invoke(cli, ["attribute", "0000aaaa", "orglens"])
+        assert "0000aaaa" in run.invoke(cli, ["sessions", "orglens"]).output
+
+    def test_why_is_recorded_on_the_attribution(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere")),
+        ])
+        CliRunner().invoke(cli, ["attribute", "0000aaaa", "orglens",
+                                 "--why", "the release branch"])
+        written = events.read_all(root=tmp_path / "events")
+        assert [(e.unit, e.why) for e in written] == [("orglens", "the release branch")]
+
+    def test_triage_takes_a_unit_a_skip_and_a_dismissal_in_turn(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere"), started=3000_000),
+            _row("0000bbbb-none", str(tmp_path / "nowhere"), started=2000_000),
+            _row("0000cccc-none", str(tmp_path / "nowhere"), started=1000_000),
+        ])
+        # newest first: attribute, skip, dismiss.
+        answers = "orglens\nbecause\ns\nd\nnever work\n"
+        out = CliRunner().invoke(cli, ["sessions", "--triage", "--one-by-one"],
+                                 input=answers).output
+        assert "3 unclaimed" in out
+        written = {e.session[:8]: (e.kind, e.why) for e in
+                   events.read_all(root=tmp_path / "events")}
+        assert written == {"0000aaaa": ("attributed", "because"),
+                           "0000cccc": ("dismissed", "never work")}
+
+    def test_triage_never_proposes_a_unit(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """A session at a shared root could be any of the units under it;
+        guessing from its title is the containment mistake one layer up."""
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere"), name="orglens work"),
+        ])
+        out = CliRunner().invoke(cli, ["sessions", "--triage", "--one-by-one"],
+                                 input="q\n").output
+        assert "stopped." in out
+        assert events.read_all(root=tmp_path / "events") == []
+
+    def test_an_unknown_unit_is_refused_not_recorded(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere")),
+        ])
+        CliRunner().invoke(cli, ["sessions", "--triage", "--one-by-one"],
+                           input="no-such-unit\nq\n")
+        assert events.read_all(root=tmp_path / "events") == []
+
+    def test_json_rows_carry_an_empty_unit_to_fill_in(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        import json
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere")),
+        ])
+        rows = json.loads(CliRunner().invoke(
+            cli, ["sessions", "--none", "--json"]).output)
+        assert [r["unit"] for r in rows] == [""]
+        assert rows[0]["id"].startswith("0000aaaa")
+
+    def test_from_file_applies_the_units_written_into_it(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        import json
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere")),
+            _row("0000bbbb-none", str(tmp_path / "nowhere")),
+            _row("0000cccc-none", str(tmp_path / "nowhere")),
+        ])
+        edited = tmp_path / "pile.json"
+        edited.write_text(json.dumps([
+            {"id": "0000aaaa-none", "unit": "orglens", "why": "mine"},
+            {"id": "0000bbbb-none", "unit": "d", "why": "scratch"},
+            {"id": "0000cccc-none", "unit": ""},
+        ]))
+        res = CliRunner().invoke(cli, ["sessions", "--from", str(edited)])
+        assert res.exception is None, res.exception
+        out = res.output
+        assert "2 decided, 1 left alone" in out
+        written = {e.session[:8]: e.kind for e in
+                   events.read_all(root=tmp_path / "events")}
+        assert written == {"0000aaaa": "attributed", "0000bbbb": "dismissed"}
+
+
+class TestHeldTwice:
+    """A session id with two live processes on it. scad reports the other
+    holders; orglens is the surface that would otherwise open a third."""
+
+    def _held(self, tmp_path, monkeypatch, two_root_tree):
+        home = tmp_path / "code" / "orglens"
+        return _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("abcd1234-full-id", str(home), live={
+                "pid": 1, "name": "mine", "status": "idle", "waiting_for": "",
+                "also_held_by": [{"pid": 2, "name": "older",
+                                  "pane": "scad-cl-1128:0.0"}]}),
+        ])
+
+    def test_resume_says_where_the_other_process_is(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._held(tmp_path, monkeypatch, two_root_tree)
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: 0)
+        out = CliRunner().invoke(cli, ["resume", "abcd1234"]).output
+        assert "scad-cl-1128:0.0" in out and "pid 2" in out
+
+    def test_check_reports_it_and_does_not_gate(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._held(tmp_path, monkeypatch, two_root_tree)
+        result = CliRunner().invoke(cli, ["check"])
+        assert "more than one process" in result.output
+        assert result.exit_code == 0
+
+    def test_a_single_holder_is_not_reported(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("abcd1234-full-id", str(home), live={
+                "pid": 1, "name": "mine", "status": "idle",
+                "waiting_for": "", "also_held_by": []}),
+        ])
+        assert "more than one process" not in CliRunner().invoke(cli, ["check"]).output
+
+
+class TestResumePrompt:
+    def test_a_prompt_goes_to_scad_session_send(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """Not a terminal to type in: the turn is delivered to the open pane.
+        orglens builds no tmux transport of its own."""
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("abcd1234-full-id", str(home)),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+        CliRunner().invoke(cli, ["resume", "abcd1234", "--prompt", "carry on"])
+        assert seen == [["session", "send", "abcd1234-full-id", "carry on"]]
+
+
+class TestTriageInGroups:
+    """One decision per directory instead of one per session. Measured
+    2026-09-25: 201 unclaimed and six directories held ~95 of them."""
+
+    def _three_dirs(self, tmp_path, monkeypatch, two_root_tree):
+        return _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "scratch" / "one"), started=5000_000),
+            _row("0000bbbb-none", str(tmp_path / "scratch" / "two"), started=4000_000),
+            _row("0000cccc-none", str(tmp_path / "scratch" / "three"), started=3000_000),
+            _row("0000dddd-none", str(tmp_path / "elsewhere" / "x"), started=2000_000),
+        ])
+
+    def test_groups_are_counted_by_the_directory_above_the_cwd(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        out = CliRunner().invoke(cli, ["sessions", "--none", "--groups"]).output
+        assert "4 unclaimed in 2 directories" in out
+        assert "3" in out.split("scratch")[0].splitlines()[-1]
+
+    def test_one_answer_decides_the_whole_group(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        # biggest group first: three in scratch/ -> orglens; then elsewhere -> dismiss
+        out = CliRunner().invoke(cli, ["sessions", "--triage"],
+                                 input="orglens\nmine\nd\nscratch\n").output
+        assert "attributed 3 sessions to orglens" in out
+        written = {e.session[:8]: (e.kind, e.why) for e in
+                   events.read_all(root=tmp_path / "events")}
+        assert written == {
+            "0000aaaa": ("attributed", "mine"),
+            "0000bbbb": ("attributed", "mine"),
+            "0000cccc": ("attributed", "mine"),
+            "0000dddd": ("dismissed", "scratch"),
+        }
+
+    def test_each_falls_through_to_one_session_at_a_time(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        CliRunner().invoke(cli, ["sessions", "--triage"],
+                           input="e\norglens\n\ns\ns\nq\n")
+        written = {e.session[:8]: e.kind for e in
+                   events.read_all(root=tmp_path / "events")}
+        assert written == {"0000aaaa": "attributed"}
+
+    def test_dismiss_under_a_path_clears_a_whole_tree(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        out = CliRunner().invoke(cli, ["dismiss", "--under",
+                                       str(tmp_path / "scratch"), "--why", "tmp"]).output
+        assert "dismissed 3 sessions" in out
+        assert "0000dddd" in CliRunner().invoke(cli, ["sessions", "--none"]).output
+
+    def test_dismiss_under_leaves_an_attributed_session_alone(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """A path can contain a unit's home; dismissing what someone claimed
+        on purpose is not what this is for."""
+        self._three_dirs(tmp_path, monkeypatch, two_root_tree)
+        run = CliRunner()
+        run.invoke(cli, ["attribute", "0000bbbb", "orglens"])
+        run.invoke(cli, ["dismiss", "--under", str(tmp_path / "scratch")])
+        assert "0000bbbb" in run.invoke(cli, ["sessions", "orglens"]).output
+
+    def test_why_is_shown_on_the_row_it_was_written_about(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """A field the person is asked to fill and never shown again is the
+        write-only defect one layer down."""
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("0000aaaa-none", str(tmp_path / "nowhere"),
+                 last_turn={"ts": 1, "role": "user", "text": "the last thing said"}),
+        ])
+        run = CliRunner()
+        run.invoke(cli, ["attribute", "0000aaaa", "orglens", "--why", "the release branch"])
+        assert "why: the release branch" in run.invoke(cli, ["sessions", "orglens"]).output
+
+        # On a dismissed row it outranks the last turn, which is only the
+        # newest thing said rather than something said about the session. A
+        # dismissal has to stay visible, or a mistaken one is unrecoverable.
+        run.invoke(cli, ["dismiss", "0000aaaa", "--why", "actually nobody's"])
+        out = run.invoke(cli, ["sessions", "--dismissed"]).output
+        assert "why: actually nobody's" in out and "the last thing said" not in out

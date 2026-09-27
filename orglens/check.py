@@ -128,6 +128,18 @@ class Stale:
 
 
 @dataclass(frozen=True)
+class Held:
+    """One session id with more than one live process on it. Two writers on
+    one transcript is how a session forks: of the six doubly held on this
+    machine three stayed clean, two forked outright and one needed seven
+    interrupted-turn repairs. Reported, never gated — which pane to keep is
+    the person's call."""
+    session: str
+    label: str | None
+    panes: tuple
+
+
+@dataclass(frozen=True)
 class Report:
     drifted: list[Drift] = field(default_factory=list)
     #: Directories that look like work and have not declared themselves. The
@@ -163,6 +175,8 @@ class Report:
     unlisted: list[Unlisted] = field(default_factory=list)
     #: Status lines older than the unit's newest edit by more than a week.
     stale: list[Stale] = field(default_factory=list)
+    #: Sessions with two live processes on one id.
+    held: list[Held] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(
@@ -176,10 +190,11 @@ class Report:
             or self.undescribed
             or self.unlisted
             or self.stale
+            or self.held
         )
 
 
-def run(registry: Registry) -> Report:
+def run(registry: Registry, sessions: list | None = None) -> Report:
     units = registry.units()
     drifted = []
 
@@ -364,6 +379,13 @@ def run(registry: Registry) -> Report:
         if newest - status.edited > 7 * 86400:
             stale.append(Stale(unit=unit.name, days=int((newest - status.edited) // 86400)))
 
+    held = [
+        Held(session=s.id, label=s.label,
+             panes=tuple(h.get("pane") or f"pid {h.get('pid')}"
+                         for h in s.also_held_by))
+        for s in (sessions or []) if getattr(s, "also_held_by", ())
+    ]
+
     return Report(
         drifted=drifted,
         undeclared=registry.candidates(),
@@ -375,6 +397,7 @@ def run(registry: Registry) -> Report:
         undescribed=sorted(undescribed, key=lambda u: (u.unit, u.path)),
         unlisted=unlisted,
         stale=stale,
+        held=held,
     )
 
 

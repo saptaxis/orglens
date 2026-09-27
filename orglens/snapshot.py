@@ -58,12 +58,7 @@ def generate_snapshot(
         "",
     ]
 
-    units = registry.units()
-    if kind is not None:
-        units = [u for u in units if u.kind == kind]
-    if unit is not None:
-        chosen = registry.resolve(unit)
-        units = [u for u in units if u.name == chosen.name or u.part_of == chosen.name]
+    units = _selected(registry, kind, unit)
     by_kind: dict[str, list] = {}
     for u in units:
         by_kind.setdefault(u.kind, []).append(u)
@@ -106,6 +101,60 @@ def generate_snapshot(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(snapshot)
     return snapshot
+
+
+def _selected(registry: Registry, kind: str | None, unit: str | None) -> list:
+    """The units a snapshot covers. One selection, so the markdown and the
+    JSON can never disagree about what `--unit` means."""
+    units = registry.units()
+    if kind is not None:
+        units = [u for u in units if u.kind == kind]
+    if unit is not None:
+        chosen = registry.resolve(unit)
+        units = [u for u in units if u.name == chosen.name or u.part_of == chosen.name]
+    return units
+
+
+def snapshot_data(
+    registry: Registry, config: Config,
+    kind: str | None = None, unit: str | None = None,
+) -> dict:
+    """The same facts `generate_snapshot` renders, as data.
+
+    Two readers, one selection. The markdown is for a session to read and the
+    JSON is for a program to compose with — and the narrowing is the reason
+    this is worth having: a caller that wants one unit's homes and documents
+    should not parse headings out of 637 lines of prose to get them.
+    """
+    units = _selected(registry, kind, unit)
+    return {
+        "generated": datetime.now().isoformat(timespec="seconds"),
+        "roots": [str(Path(r).expanduser().resolve()) for r in registry.roots],
+        "kinds": {name: et.pattern
+                  for name, et in registry.grammar.entity_types.items()},
+        "documents": {name: at.find
+                      for name, at in registry.grammar.artifact_types.items()},
+        "units": [_unit_data(registry, u) for u in units],
+    }
+
+
+def _unit_data(registry: Registry, unit) -> dict:
+    status = _status_of(registry, unit)
+    return {
+        "name": unit.name,
+        "kind": unit.kind,
+        "part_of": unit.part_of,
+        "status": status.text if status else None,
+        "homes": [str(p) for p in unit.paths],
+        "contains": [c.name for c in registry.parts_of(unit)],
+        "directories": [d.name for d in documents.subdirectories(unit)],
+        "documents": [d.name for d in documents.loose(unit)],
+        "artifacts": {
+            artifact_kind: [a.name for a in held]
+            for artifact_kind in registry.grammar.artifact_types
+            if (held := documents.find(registry, artifact_kind, unit))
+        },
+    }
 
 
 def _heading(kind: str) -> str:

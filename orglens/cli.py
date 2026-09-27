@@ -13,8 +13,10 @@ declaration does.
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -22,14 +24,16 @@ from pathlib import Path
 
 import click
 
-from orglens import activity, check as check_module, documents, reference, sessions, view
+from orglens import (activity, check as check_module, complete, documents,
+                     reference, sessions, view)
 from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
-from orglens.events import EVENTS_DIR, Event, append, this_machine
+from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
+                            this_machine)
 from orglens.homes import Home, repo_of
 from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
-from orglens.snapshot import generate_snapshot
+from orglens.snapshot import generate_snapshot, snapshot_data
 from orglens.state import read_status
 from orglens.units import Registry, Unit
 from orglens.workflow.cli import workflow as workflow_group
@@ -161,20 +165,23 @@ def _git_paths(registry: Registry, units: list) -> list[Path]:
     return out
 
 
-def _warm(registry: Registry, units: list) -> dict[str, list[dict]]:
+def _warm(registry: Registry, units: list, every: list) -> dict[str, list[dict]]:
     """Everything `status` and `view` will ask a subprocess or a file walk
     for, fetched at once: git per home and driver document, the newest
     mtime per home, and `scad notes ls --about` per unit. Independent and
     mostly waiting, so one pool runs them side by side; in series they were
     most of a 10s `status`. Returns the notes by unit; the rest is cached.
     """
+    # One read of scad's notes export for the whole tree, joined here. It
+    # was one `--about` subprocess per unit, which is 31 launches to read
+    # one file; the join itself needs the sessions, so the caller passes
+    # them in.
     notes: dict[str, list[dict]] = {}
 
-    def fetch(name: str) -> None:
-        notes[name] = activity.notes_about(name)
+    def fetch(_: None = None) -> None:
+        notes.update(activity.notes_by_unit([u.name for u in units], every))
 
-    activity.prefetch(_git_paths(registry, units),
-                      extra=[(fetch, unit.name) for unit in units])
+    activity.prefetch(_git_paths(registry, units), extra=[(fetch, None)])
     return notes
 
 
@@ -276,7 +283,7 @@ def status():
     units = registry.units()
 
     every, by_unit = _sessions_by_unit(registry)
-    notes = _warm(registry, units)
+    notes = _warm(registry, units, every)
     acts = {
         unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name],
                             notes=notes[unit.name])
@@ -334,8 +341,8 @@ def status():
 
 
 @cli.command()
-@click.argument("artifact_type")
-@click.argument("unit_name", required=False)
+@click.argument("artifact_type", shell_complete=complete.kinds)
+@click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--in", "within", default=None, metavar="DIR",
               help="Scope to directories of this name instead of the kind's own container.")
 @click.option("--grep", "pattern", default=None, metavar="TEXT",
@@ -611,7 +618,7 @@ def _repo_line(home) -> str:
 
 
 @cli.command(name="where")
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=complete.units)
 def where_cmd(name: str | None):
     """Announce which roots, and which unit a name or this directory is in.
 
@@ -673,7 +680,7 @@ def where_cmd(name: str | None):
 def check_cmd():
     """Report where the tree has drifted from the grammar. Changes nothing."""
     registry, _ = _load_registry()
-    report = check_module.run(registry)
+    report = check_module.run(registry, sessions.all_sessions(registry, EVENTS_DIR))
 
     for drift in report.drifted:
         names = ", ".join(m.name for m in drift.missing)
@@ -734,6 +741,12 @@ def check_cmd():
             "rewrite it if it is no longer true"
         )
 
+    for row in report.held:
+        click.echo(
+            f"{row.session[:8]}: open in more than one process "
+            f"({', '.join(row.panes)}); two writers on one transcript fork it"
+        )
+
     for row in report.undescribed:
         shown = _relative(row.path, registry.roots)
         click.echo(
@@ -749,9 +762,14 @@ def check_cmd():
 @click.option("--stdout", is_flag=True, help="Print instead of writing")
 @click.option("--check", is_flag=True,
               help="Say whether the written snapshot is older than the tree; exit 1 if so.")
-@click.option("--type", "kind", default=None, help="Only units of this kind.")
-@click.option("--unit", "unit_name", default=None, help="Only this unit and its parts.")
-def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None):
+@click.option("--type", "kind", default=None, help="Only units of this kind.",
+              shell_complete=complete.kinds)
+@click.option("--unit", "unit_name", default=None, help="Only this unit and its parts.",
+              shell_complete=complete.units)
+@click.option("--json", "as_json", is_flag=True,
+              help="The same facts as data, for a program to compose with.")
+def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None,
+             as_json: bool):
     """Generate a snapshot of what is in the tree.
 
     `--type` and `--unit` narrow it; a narrowed snapshot goes to stdout,
@@ -763,6 +781,17 @@ def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None)
         sys.exit(_snapshot_check(registry, config))
     if kind is not None and kind not in {u.kind for u in registry.units()}:
         _unknown("kind", kind, sorted({u.kind for u in registry.units()}))
+    if as_json:
+        # Always to stdout: the cache holds the document a session reads, and
+        # a second file to keep in step with it would be one more thing that
+        # can be stale.
+        try:
+            data = snapshot_data(registry, config, kind=kind, unit=unit_name)
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+        click.echo(json.dumps(data, indent=2))
+        return
     if stdout or kind is not None or unit_name is not None:
         try:
             click.echo(generate_snapshot(registry, config, kind=kind, unit=unit_name))
@@ -837,7 +866,7 @@ def _repo_keys(unit: Unit) -> list[str]:
 
 
 @cli.command(name="config")
-@click.argument("unit_name")
+@click.argument("unit_name", shell_complete=complete.units)
 @click.option("--workdir", default=None, help="Which repository is the workdir.")
 @click.option("--out", default=None, help="Write here instead of ~/.scad/configs/<unit>.yml")
 def config_cmd(unit_name: str, workdir: str | None, out: str | None):
@@ -906,7 +935,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
     ]
 
     every, by_unit = _sessions_by_unit(registry)
-    notes = _warm(registry, [u for us in by_kind.values() for u in us])
+    notes = _warm(registry, [u for us in by_kind.values() for u in us], every)
 
     groups = []
     for kind in sorted(by_kind):
@@ -995,33 +1024,157 @@ def _session_line(s, show_how: bool = True, short: dict | None = None) -> str:
     )
 
 
+def _why_line(s) -> str | None:
+    """The person's own words about this session, wherever it is listed.
+
+    `_session_detail` carries it for the unclaimed, where a second line is
+    always printed. An attributed session gets one line, so the why needs its
+    own or the field is visible only until it is answered — which is the
+    write-only defect it was added to fix.
+    """
+    return f"{'':<13}why: {s.why[:110]}" if s.why else None
+
+
 def _session_detail(s) -> str:
     """A second line for a session nobody has claimed: where it ran and
-    the last thing said, which is what deciding whose it is needs."""
+    the last thing said, which is what deciding whose it is needs.
+
+    A `--why` outranks the last turn when there is one. The person wrote it
+    about this session on purpose; the last turn is only the newest thing
+    that happened to be said.
+    """
     said = (s.last_turn or {}).get("text") or ""
     said = " ".join(said.split())[:110]
     line = f"{'':<13}{sessions.where(s.cwd)}"
-    if said:
+    if s.why:
+        line += f"  ·  why: {s.why[:110]}"
+    elif said:
         line += f"  ·  {said}"
     return line
 
 
+@cli.command(name="notes")
+@click.argument("unit_name", required=False, shell_complete=complete.units)
+@click.option("--mentions/--no-mentions", "want_mentions", default=True,
+              help="Include notes that only name the unit. On by default.")
+def notes_cmd(unit_name: str | None, want_mentions: bool):
+    """What was written down about a unit, newest first.
+
+    Three ways a note reaches a unit, shown per row. *written here* is the
+    exact one: the note's session is the unit's, by attribution or by
+    containment. *filed here* is scad's project for it, a directory name.
+    *mentions this* is the name in the note's topic, tags or entities —
+    the weakest, and the only one before this.
+
+    The notes themselves stay in scad; this reads its export and joins.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, EVENTS_DIR)
+
+    if unit_name:
+        try:
+            unit = registry.resolve(unit_name)
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+        names = [unit.name]
+    else:
+        names = [u.name for u in registry.units()]
+
+    found = activity.notes_by_unit(names, every)
+    shown = 0
+    for name in names:
+        rows = [n for n in found[name]
+                if want_mentions or n.get("how") != activity.MENTIONS]
+        if not rows:
+            continue
+        shown += len(rows)
+        click.echo(f"\n{name}:")
+        for n in rows:
+            when = _ago(n["at"]) if n.get("at") else "—"
+            click.echo(
+                f"  {str(n['topic'] or ''):<28} {when:>8}  "
+                f"{str(n.get('how') or ''):<13} {str(n['title'] or '')[:88]}"
+            )
+    if not shown:
+        click.echo(f"{unit_name or 'every unit'}: no notes")
+
+
 @cli.command(name="sessions")
-@click.argument("unit_name", required=False)
+@click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--none", "only_none", is_flag=True,
               help="Only the sessions that belong to no unit.")
 @click.option("--all", "everything", is_flag=True,
               help="Include sessions with no turns yet.")
-def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
+@click.option("--triage", is_flag=True,
+              help="Decide the unclaimed sessions, grouped by directory.")
+@click.option("--one-by-one", "one_by_one", is_flag=True,
+              help="With --triage: a prompt per session instead of per group.")
+@click.option("--groups", "as_groups", is_flag=True,
+              help="Count the unclaimed by the directory they ran in.")
+@click.option("--dismissed", "only_dismissed", is_flag=True,
+              help="The sessions someone said belong to no unit.")
+@click.option("--from", "from_file", default=None, metavar="FILE",
+              help="Apply decisions from a `--none --json` file you edited.")
+@click.option("--json", "as_json", is_flag=True,
+              help="The rows as JSON, each with a `unit` to fill in.")
+def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
+                 triage: bool, one_by_one: bool, as_groups: bool,
+                 only_dismissed: bool, from_file: str | None, as_json: bool):
     """List a unit's sessions, or every unit's, newest first.
 
     A session is a unit's because `orglens start` or `orglens attribute`
     said so, or because it ran inside one of the unit's homes. A home
     shared by two units lists its sessions under both.
+
+    `--triage` and `--from` decide the unclaimed ones: at a prompt, or in
+    an editor over the JSON. Neither proposes a unit; both only record.
     """
     registry, _ = _load_registry()
     every = sessions.all_sessions(registry, EVENTS_DIR)
     short = sessions.short_ids([s.id for s in every])
+
+    if only_dismissed:
+        # A dismissal is an assertion like any other and has to be auditable:
+        # without this, a mistaken one is invisible outside the event log, and
+        # `attribute` is the only way back from something you cannot see.
+        rows = [row for row in sessions.unattributed(every, everything=True)
+                if row.dismissed is not None]
+        if not rows:
+            click.echo("nothing dismissed")
+            return
+        for row in sessions.listed(rows, everything):
+            click.echo(_session_line(row, short=short))
+            click.echo(_session_detail(row))
+        return
+
+    if triage or from_file or as_groups:
+        loose = sessions.listed(sessions.unattributed(every), everything)
+        if not loose:
+            click.echo("nothing unclaimed.")
+            return
+        if as_groups:
+            groups = sessions.by_directory(loose)
+            click.echo(f"{len(loose)} unclaimed in {len(groups)} directories:")
+            for where, group in groups:
+                click.echo(f"  {len(group):>4}  {sessions.where(where)}")
+            return
+        if from_file:
+            _triage_from_file(registry, loose, from_file)
+        else:
+            _triage(registry, loose, by_group=not one_by_one)
+        return
+
+    if as_json:
+        if only_none:
+            rows = sessions.unattributed(every)
+        elif unit_name is not None:
+            rows = sessions.for_unit(every, registry.resolve(unit_name).name)
+        else:
+            rows = every
+        click.echo(json.dumps(
+            [_session_row(s) for s in sessions.listed(rows, everything)], indent=2))
+        return
 
     if unit_name is not None and not only_none:
         try:
@@ -1035,6 +1188,8 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
             return
         for s in rows:
             click.echo(_session_line(s, short=short))
+            if (why := _why_line(s)):
+                click.echo(why)
         return
 
     groups: list[tuple[str, list]] = []
@@ -1056,13 +1211,17 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool):
             click.echo(_session_line(s, show_how=not loose, short=short))
             if loose:
                 click.echo(_session_detail(s))
+            elif (why := _why_line(s)):
+                click.echo(why)
 
 
 @cli.command()
-@click.argument("target")
+@click.argument("target", shell_complete=complete.units_or_sessions)
+@click.option("--prompt", default=None,
+              help="Send this as the next turn instead of going in yourself.")
 @click.option("--print", "print_only", is_flag=True,
               help="Print the resume command instead of running it.")
-def resume(target: str, print_only: bool):
+def resume(target: str, prompt: str | None, print_only: bool):
     """Resume a session by id, or a unit's newest open session.
 
     Hands the id to `scad session resume`, which knows where the session
@@ -1092,14 +1251,253 @@ def resume(target: str, print_only: bool):
             sys.exit(1)
         session = open_[0]
 
+    if prompt:
+        # A turn into the open pane, rather than a terminal to type it in.
+        # scad pastes and submits it; `send-keys` is not a substitute, it
+        # lost the first 200 characters of a 1.4k prompt.
+        sys.exit(_scad(["session", "send", session.id, prompt]))
+
+    _warn_if_held_twice(session)
     argv = ["session", "resume", session.id] + (["--print"] if print_only else [])
     sys.exit(_scad(argv))
 
 
+def _warn_if_held_twice(session) -> None:
+    """Say so when another process already has this session open.
+
+    Measured on this machine 2026-09-24: six ids each held by two live
+    processes, two of the transcripts genuinely forked and one carrying
+    seven interrupted-turn repairs. scad refuses a second process where it
+    can; this is the case it cannot see from one id, and a person about to
+    resume is the one who can decide.
+    """
+    held = getattr(session, "also_held_by", ()) or ()
+    if not held:
+        return
+    click.echo(f"{session.id[:8]} is already open in "
+               f"{len(held)} other process(es):", err=True)
+    for holder in held:
+        where = holder.get("pane") or "pane unknown"
+        click.echo(f"  pid {holder.get('pid')}  {where}  "
+                   f"{holder.get('name') or ''}".rstrip(), err=True)
+    click.echo("Go to that one rather than opening a second writer on it.",
+               err=True)
+
+
+def _attribute(session_id: str, unit: str, why: str | None = None) -> None:
+    """One attribution, the single writer for every path that makes one."""
+    append(Event(kind=ATTRIBUTED, unit=unit, session=session_id,
+                 at=int(time.time()), machine=this_machine(), why=why),
+           root=EVENTS_DIR)
+
+
+def _dismiss(session_id: str, why: str | None = None) -> None:
+    """Say a session is nobody's. The unit is empty because there is none."""
+    append(Event(kind=DISMISSED, unit="", session=session_id,
+                 at=int(time.time()), machine=this_machine(), why=why),
+           root=EVENTS_DIR)
+
+
 @cli.command()
-@click.argument("session_id")
-@click.argument("unit_name")
-def attribute(session_id: str, unit_name: str):
+@click.argument("session_id", required=False, shell_complete=complete.sessions)
+@click.option("--under", default=None, metavar="PATH",
+              help="Dismiss every unclaimed session that ran at or below PATH.")
+@click.option("--why", default=None, help="Why it is nobody's, in your words.")
+def dismiss(session_id: str | None, under: str | None, why: str | None):
+    """Say a session belongs to no unit and never will.
+
+    Without this the pile never empties. A scratch session in `/tmp` was
+    never anyone's work, and with only `attribute` to say things with it
+    sits in `sessions --none` forever, asked about every time. A later
+    `attribute` takes it back.
+    """
+    registry, _ = _load_registry()
+    every = sessions.all_sessions(registry, EVENTS_DIR)
+
+    if under:
+        # Only the unclaimed: a path can contain a unit's home, and dismissing
+        # a session someone attributed on purpose is not what this is for.
+        rows = sessions.under(sessions.unattributed(every), under)
+        if not rows:
+            click.echo(f"nothing unclaimed under {under}")
+            return
+        for row in rows:
+            _dismiss(row.id, why)
+        click.echo(f"dismissed {_count(len(rows), 'session')} under {under}")
+        return
+    if not session_id:
+        click.echo("give a session id, or --under PATH.", err=True)
+        sys.exit(1)
+
+    session, matches = _find_session(every, session_id)
+    if session is None:
+        if matches:
+            click.echo(f"'{session_id}' matches more than one session:", err=True)
+            for s in matches:
+                click.echo(_session_line(s), err=True)
+        else:
+            click.echo(f"No session '{session_id}' in the index.", err=True)
+        sys.exit(1)
+    _dismiss(session.id, why)
+    click.echo(f"dismissed session {session.id}")
+
+
+def _session_row(s) -> dict:
+    """One session as JSON: what deciding whose it is needs, plus the empty
+    `unit` and `why` to fill in and hand back through `--from`."""
+    said = (s.last_turn or {}).get("text") or ""
+    return {
+        "id": s.id,
+        "agent": s.agent,
+        "cwd": s.cwd,
+        "turns": s.turns,
+        "when": s.when,
+        "label": s.label,
+        "how": s.how,
+        "units": sorted(s.units),
+        "dismissed": s.dismissed,
+        "said": " ".join(said.split())[:200] or None,
+        "unit": "",
+        "why": "",
+    }
+
+
+def _triage(registry: Registry, rows: list, by_group: bool = True) -> None:
+    """Walk the unclaimed sessions and decide them, in groups by default.
+
+    `attribute` one at a time is the only tool without this, and 201
+    invocations is not a method — the pile grows faster than that clears it.
+    Grouping by the directory above each cwd collapses most of it: six
+    directories held ~95 of 201 on 2026-09-25. What makes either cheap is
+    that everything needed to decide is on screen — where it ran, what was
+    said last. Nothing is guessed: a session at a shared root could be any
+    of seventeen units, and proposing one from its title is the containment
+    mistake one layer up.
+    """
+    names = sorted(u.name for u in registry.units())
+    click.echo(f"{len(rows)} unclaimed. Units: {', '.join(names)}")
+    if not by_group:
+        _triage_each(registry, rows)
+        return
+
+    groups = sessions.by_directory(rows)
+    click.echo(f"{len(groups)} directories. A unit name applies to the whole "
+               "group; `d` dismisses it, `s` skips, `e` takes the group one "
+               "session at a time, `q` stops.\n")
+    for i, (where, group) in enumerate(groups, 1):
+        click.echo(f"[{i}/{len(groups)}] {_count(len(group), 'session')}  "
+                   f"{sessions.where(where)}")
+        for session in group[:3]:
+            click.echo(f"    {_session_line(session)}")
+        if len(group) > 3:
+            click.echo(f"    … and {len(group) - 3} more")
+        answer = click.prompt("  unit", default="s", show_default=False).strip()
+        if answer in ("q", "quit"):
+            click.echo("stopped.")
+            return
+        if answer in ("", "s", "skip"):
+            continue
+        if answer in ("e", "each"):
+            _triage_each(registry, group)
+            continue
+        if answer in ("d", "dismiss"):
+            why = click.prompt("  why", default="", show_default=False).strip()
+            for session in group:
+                _dismiss(session.id, why or None)
+            click.echo(f"  dismissed {_count(len(group), 'session')}")
+            continue
+        try:
+            unit = registry.resolve(answer)
+        except ValueError as exc:
+            click.echo(f"  {exc} — skipped")
+            continue
+        why = click.prompt("  why", default="", show_default=False).strip()
+        for session in group:
+            _attribute(session.id, unit.name, why or None)
+        click.echo(f"  attributed {_count(len(group), 'session')} to {unit.name}")
+
+
+def _triage_each(registry: Registry, rows: list) -> None:
+    """One session at a time, newest first."""
+    click.echo("A unit name, `s` to skip, `d` to dismiss, `q` to stop.\n")
+    for i, session in enumerate(rows, 1):
+        click.echo(f"[{i}/{len(rows)}] {_session_line(session)}")
+        click.echo(_session_detail(session))
+        answer = click.prompt("  unit", default="s", show_default=False).strip()
+        if answer in ("q", "quit"):
+            click.echo("stopped.")
+            return
+        if answer in ("", "s", "skip"):
+            continue
+        if answer in ("d", "dismiss"):
+            why = click.prompt("  why", default="", show_default=False).strip()
+            _dismiss(session.id, why or None)
+            click.echo("  dismissed")
+            continue
+        try:
+            unit = registry.resolve(answer)
+        except ValueError as exc:
+            click.echo(f"  {exc} — skipped")
+            continue
+        why = click.prompt("  why", default="", show_default=False).strip()
+        _attribute(session.id, unit.name, why or None)
+        click.echo(f"  attributed to {unit.name}")
+
+
+def _triage_from_file(registry: Registry, rows: list, path: str) -> None:
+    """The same decisions, made in an editor instead of at a prompt.
+
+    `sessions --none --json` out, a `unit` added per row, this back in —
+    for the person who would rather do fifty at once than answer fifty
+    prompts. A row with no `unit` is left undecided, which is how a file
+    can be filled in over several sittings.
+    """
+    try:
+        data = json.loads(Path(path).read_text())
+    except (OSError, ValueError) as exc:
+        click.echo(f"cannot read {path}: {exc}", err=True)
+        sys.exit(1)
+    # `list` is a command in this module and shadows the builtin, so the
+    # type has to be named explicitly. See the `[*x]` note in `find`.
+    if not isinstance(data, builtins.list):
+        click.echo(f"{path}: expected a list of session rows.", err=True)
+        sys.exit(1)
+
+    known = {s.id: s for s in rows}
+    done = skipped = 0
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("id") or row.get("session") or "")
+        unit_name = (row.get("unit") or "").strip()
+        if not sid or not unit_name:
+            skipped += 1
+            continue
+        if sid not in known:
+            click.echo(f"  {sid[:8]}: not in the unclaimed list — left alone")
+            skipped += 1
+            continue
+        why = (row.get("why") or "").strip() or None
+        if unit_name in ("d", "dismiss", "dismissed"):
+            _dismiss(sid, why)
+        else:
+            try:
+                unit = registry.resolve(unit_name)
+            except ValueError as exc:
+                click.echo(f"  {sid[:8]}: {exc}")
+                skipped += 1
+                continue
+            _attribute(sid, unit.name, why)
+        done += 1
+    click.echo(f"{done} decided, {skipped} left alone")
+
+
+@cli.command()
+@click.argument("session_id", shell_complete=complete.sessions)
+@click.argument("unit_name", shell_complete=complete.units)
+@click.option("--why", default=None,
+              help="What the session was for, in your words.")
+def attribute(session_id: str, unit_name: str, why: str | None):
     """Say which unit a session was for, after the fact.
 
     The same event `start` writes before a session's first turn. A later
@@ -1125,9 +1523,7 @@ def attribute(session_id: str, unit_name: str):
         click.echo(str(exc), err=True)
         sys.exit(1)
 
-    append(Event(kind="attributed", unit=unit.name, session=session.id,
-                 at=int(time.time()), machine=this_machine()),
-           root=EVENTS_DIR)
+    _attribute(session.id, unit.name, why)
     click.echo(f"attributed session {session.id} to {unit.name}")
 
 
@@ -1149,12 +1545,21 @@ def _launch_record(output: str) -> dict | None:
     return record
 
 
-def _launch(cwd: Path, agent: str, prompt: str | None) -> dict | None:
+def _launch(cwd: Path, agent: str, prompt: str | None,
+            window: str | None = None, name: str | None = None) -> dict | None:
     """Start a session through scad and return its launch record — at least
     `session_id`, and the `tmux` pane when scad names one. Never raises."""
     argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd), "--json"]
     if prompt:
         argv += ["--prompt", prompt]
+    # The unit name is the one thing orglens knows and scad does not, so it
+    # is what the window and the session are called. `--window` lands the
+    # pane in the tmux session the person is already watching instead of a
+    # detached sibling; without it scad behaves as before.
+    if window:
+        argv += ["--window", window]
+    if name:
+        argv += ["--name", name]
     try:
         done = subprocess.run(argv, capture_output=True, text=True, timeout=120)
     except (OSError, subprocess.SubprocessError):
@@ -1170,6 +1575,37 @@ def _launch(cwd: Path, agent: str, prompt: str | None) -> dict | None:
     if done.returncode != 0:
         return None
     return _launch_record(done.stdout)
+
+
+#: Session names follow what the person already writes by hand: a unit, an
+#: optional word or two of context, and the day. Nine of the eleven named
+#: sessions in the index on 2026-09-25 were shaped this way —
+#: `orglens-feats-sep23`, `cribsheet-sep18` — and the two on one day
+#: (`orglens-backlog-feats-sep11`, `orglens-writing-skill-sep11`) are told
+#: apart by the context, not the date.
+def _slug(text: str, words: int = 2) -> str:
+    """One or two lowercase words, safe in a name and in a tmux window."""
+    parts = re.findall(r"[A-Za-z0-9]+", text.lower())
+    return "-".join(parts[:words])
+
+
+def _session_name(unit: str, about: str | None, taken=(), now=None) -> str:
+    """`unit[-about]-sepDD`, uniquified.
+
+    The bare unit name is not enough and is worse than scad's own default,
+    which at least appends two characters: two sessions on one unit would
+    both be called `orglens` and neither listing nor `/resume` picker could
+    tell them apart. The date anchors, the context distinguishes.
+    """
+    stamp = time.strftime("%b%d", now or time.localtime()).lower()
+    middle = _slug(about) if about else ""
+    base = "-".join(x for x in (unit, middle, stamp) if x)
+    if base not in taken:
+        return base
+    n = 2
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
 
 
 def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
@@ -1215,8 +1651,18 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
               type=click.Choice(["claude", "codex", "kimi"]),
               help="Which agent family to launch.")
 @click.option("--prompt", default=None, help="The session's first turn.")
+@click.option("--window", is_flag=True,
+              help="Land it as a window in your tmux, named for the unit.")
+@click.option("--about", default=None, metavar="WORDS",
+              help="A word or two of context, for the session's name and window.")
+@click.option("--name", default=None, metavar="TEXT",
+              help="The session's name. Composed from the unit, --about and the "
+                   "day when not given.")
+@click.option("--no-name", "no_name", is_flag=True,
+              help="Launch the session unnamed.")
 @click.option("--dry-run", is_flag=True, help="Say what would happen; launch nothing.")
 def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
+          window: bool, about: str | None, name: str | None, no_name: bool,
           dry_run: bool):
     """Start a session for a unit, attributed before its first turn.
 
@@ -1267,25 +1713,33 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         sys.exit(1)
 
     first_turn = prompt or _arrival(unit, chosen, registry)
+    if no_name:
+        chosen_name = None
+    else:
+        taken = {s.label for s in sessions.all_sessions(registry, EVENTS_DIR) if s.label}
+        chosen_name = name or _session_name(unit.name, about, taken)
+    window_name = (_slug(about) if about else unit.name) if window else None
+
     if dry_run:
+        where = f"as a window `{window_name}` in your tmux" if window else "detached in tmux"
         click.echo(f"would launch {agent} in {chosen.path} for {unit.name}, "
-                   "detached in tmux via `scad session launch`; this command "
+                   f"{where} via `scad session launch`; this command "
                    "returns at once and leaves your terminal alone.")
+        click.echo(f"session name: {chosen_name or '(unnamed)'}")
         click.echo("first turn:")
         for line in first_turn.splitlines():
             click.echo(f"  {line}")
         return
 
-    record = _launch(chosen.path, agent, first_turn)
+    record = _launch(chosen.path, agent, first_turn,
+                     window=window_name, name=chosen_name)
     if record is None:
         click.echo("scad returned no session id — the session is not attributed. "
                    "Attribute it later, or start it again through orglens.")
         return
     session = record["session_id"]
 
-    append(Event(kind="attributed", unit=unit.name, session=session,
-                 at=int(time.time()), machine=this_machine()),
-           root=EVENTS_DIR)
+    _attribute(session, unit.name)
     click.echo(f"attributed session {session} to {unit.name}")
     # The session is running detached; say how to get back to it. scad
     # printed the pane on stderr, which is easy to miss, and never said
