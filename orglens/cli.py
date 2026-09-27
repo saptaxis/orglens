@@ -46,10 +46,7 @@ SCAD_CONFIGS_DIR = Path.home() / ".scad" / "configs"
 
 def _load_config() -> Config:
     """Load config from env var or default location."""
-    config_path = os.environ.get("ORGLENS_CONFIG")
-    if config_path:
-        return Config.from_yaml(Path(config_path))
-    return Config.load()
+    return Config.current()
 
 
 def _load_registry() -> tuple[Registry, Config]:
@@ -798,8 +795,7 @@ def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None,
             click.echo(str(exc), err=True)
             sys.exit(1)
         return
-    output = config.snapshot_path
-    generate_snapshot(registry, config, output_path=output)
+    output = _write_snapshot(registry, config)
     click.echo(f"Snapshot written to {output}")
 
 
@@ -812,6 +808,10 @@ def _snapshot_check(registry: Registry, config: Config) -> int:
     output = config.snapshot_path
     if not output.exists():
         click.echo(f"stale: no snapshot at {output}")
+        return 1
+    data = config.snapshot_json_path
+    if not data.exists() or data.stat().st_mtime < output.stat().st_mtime:
+        click.echo(f"stale: {data} is missing or older than {output}; completion reads it")
         return 1
     written = output.stat().st_mtime
     newest: tuple[float, Path] | None = None
@@ -904,10 +904,19 @@ def config_cmd(unit_name: str, workdir: str | None, out: str | None):
     click.echo(str(path))
 
 
+def _write_snapshot(registry: Registry, config: Config) -> Path:
+    """The snapshot for sessions to read, and beside it the same facts as
+    JSON for completion to read (R14)."""
+    output = config.snapshot_path
+    generate_snapshot(registry, config, output_path=output)
+    config.snapshot_json_path.write_text(json.dumps(snapshot_data(registry, config)))
+    return output
+
+
 def _refresh_snapshot(registry: Registry, config: Config):
     """Silently refresh the snapshot after write operations."""
     try:
-        generate_snapshot(registry, config, output_path=config.snapshot_path)
+        _write_snapshot(registry, config)
     except Exception:
         pass  # Non-critical — don't fail the main operation
 

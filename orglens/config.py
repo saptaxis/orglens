@@ -53,6 +53,14 @@ class Config:
         )
 
     @classmethod
+    def current(cls) -> Config:
+        """The config in force: `ORGLENS_CONFIG` when set, else the default
+        location. What the CLI loads, for readers outside the CLI."""
+        import os
+        path = os.environ.get("ORGLENS_CONFIG")
+        return cls.from_yaml(Path(path).expanduser()) if path else cls.load()
+
+    @classmethod
     def load(cls) -> Config:
         """Load config from the default location."""
         config_path = ORGLENS_HOME / "config.yaml"
@@ -80,3 +88,9 @@ class Config:
         cache_dir = config_dir / "cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         return cache_dir / "snapshot.md"
+
+    @property
+    def snapshot_json_path(self) -> Path:
+        """The snapshot as data, for programs: completion reads this rather
+        than parsing headings out of the markdown one."""
+        return self.snapshot_path.with_suffix(".json")

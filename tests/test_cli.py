@@ -1050,6 +1050,19 @@ class TestSnapshotCommand:
         assert result.exit_code == 0, result.output
         assert "fresh" in result.output
 
+    def test_check_says_stale_when_the_json_is_missing_or_older(self, runner, cli_env):
+        runner.invoke(cli, ["snapshot"], env=cli_env)
+        md = Path(cli_env["ORGLENS_CONFIG"]).parent / "cache" / "snapshot.md"
+        data = md.with_suffix(".json")
+        data.unlink()
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 1 and "snapshot.json" in result.output
+        runner.invoke(cli, ["snapshot"], env=cli_env)
+        earlier = md.stat().st_mtime - 5
+        os.utime(data, (earlier, earlier))
+        result = runner.invoke(cli, ["snapshot", "--check"], env=cli_env)
+        assert result.exit_code == 1 and "snapshot.json" in result.output
+
     def test_snapshot_can_be_scoped_to_a_kind_or_a_unit(self, runner, cli_env):
         everything = runner.invoke(cli, ["snapshot", "--stdout"], env=cli_env).output
         assert "freightify" in everything and "clipcompose" in everything
