@@ -16,7 +16,7 @@ from pathlib import Path
 
 import click
 
-from orglens import complete
+from orglens import complete, formats
 from orglens.workflow import session
 from orglens.workflow.definition import Workflow, WorkflowError, load_workflow
 from orglens.workflow.session import Position, State
@@ -51,12 +51,33 @@ def _load(packet: Path, workflow_opt: str | None) -> tuple[Workflow, list[dict]]
     raise AssertionError("unreachable")
 
 
+def _preferred_format() -> str:
+    """The format new packet files are written in: the configured grammar's.
+    Markdown when there is no config, as in a test or a fresh machine."""
+    try:
+        from orglens.config import Config
+        return Config.current().load_grammar().format
+    except Exception:
+        return "md"
+
+
+def _output(packet: Path, writes: str) -> Path:
+    """The file a node writes. A name with a suffix is used as written, as
+    every workflow did before R24. A stem is the file that exists in any
+    format, else a new one in the grammar's format."""
+    if Path(writes).suffix in formats.SUFFIXES:
+        return packet / writes
+    prefer = _preferred_format()
+    found = formats.existing(packet, writes, prefer)
+    return found if found is not None else packet / f"{writes}{formats.get(prefer).suffix}"
+
+
 def _describe(packet: Path, pos: Position) -> dict:
     return {
         "state": pos.state.value,
         "node": pos.node.name if pos.node else None,
         "program": str(pos.node.program) if pos.node else None,
-        "write": str(packet / pos.node.writes) if pos.node else None,
+        "write": str(_output(packet, pos.node.writes)) if pos.node else None,
         "note": pos.note,
     }
 
@@ -86,7 +107,7 @@ def next_cmd(packet: Path, workflow_opt: str | None, as_json: bool):
     if pos.state == State.RUNNABLE:
         click.echo(f"node: {pos.node.name}")
         click.echo(f"program: {pos.node.program}")
-        click.echo(f"write: {packet / pos.node.writes}")
+        click.echo(f"write: {_output(packet, pos.node.writes)}")
         if pos.note:
             click.echo(f"note:  {json.dumps(pos.note)}")
     elif pos.state == State.WAITING:
@@ -124,8 +145,9 @@ def done(packet: Path, node: str, agent: str, question: str | None,
             on = pos.node.name if pos.node else pos.after
             _fail(f"the workflow is on {on}, not {node}; --force records it anyway")
 
+    out = _output(packet, target.writes)
     fact = {"type": "done", "node": node, "agent": agent,
-            "wrote": [target.writes] if (packet / target.writes).exists() else []}
+            "wrote": [out.name] if out.exists() else []}
     if question:
         fact["question"] = question
     if force:
