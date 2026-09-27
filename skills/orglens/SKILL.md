@@ -71,12 +71,17 @@ orglens new <path> --kind project [--part-of <unit>] [--home <name>]
 ```
 
 `new` makes the directory, its marker, a stub driver document (the grammar's
-name for it; status line, *What it is*, *State tracking*), and adds the unit to the parent's
+name for it, in the grammar's format; status line, *What it is*, *State tracking*), and adds the unit to the parent's
 `.nav.yml` when that lists children by name. It prints the next steps. The path
 given is exactly where it lands; `--home` is repeatable and names another place
 the work lives (a code repository). Then write the driver document — `orglens-adapt`
 is the skill for shaping one. Documents are written by hand, following the
 reference's naming; nothing parses a filename.
+
+A tree may hold markdown and org side by side, and both are read. Write a new
+document in the grammar's `format` (the reference says which); keep an existing
+one in the format it is in. The status line is `#+STATUS: …` under `#+TITLE:` in
+org, `> **Status:** …` in markdown. `check` reports a document written in both.
 
 ```bash
 orglens declare <path> [--yes]                  # a folder that exists and looks like a unit but never said so
@@ -158,7 +163,7 @@ The tutorial at `capabilities/tutorial/README.md` walks all of it.
 ## Check
 
 ```bash
-orglens check                                   # drift: missing driver docs, undeclared folders, weak or shared homes, a unit its parent nav omits, folders the grammar has no word for
+orglens check                                   # drift: missing driver docs, undeclared folders, weak or shared homes, a unit its parent nav omits, folders the grammar has no word for, a document in two formats
 orglens view                                    # the page: waiting and running first, then a card per unit; filter by unit, agent, text
 orglens config <unit> [--workdir <repo>]        # the repos: block scad reads for a container
 orglens reference --out <path>                  # regenerate the grammar reference

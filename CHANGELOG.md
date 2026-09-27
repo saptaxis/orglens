@@ -1,17 +1,68 @@
 # Changelog
 
-## Unreleased
+## [0.5.0] — 2026-09-28
 
-- **Org beside markdown.** A format registry (`orglens/formats/`) reads both,
-  mixed in one tree; the grammar's `format:` decides what `new` writes. Grammar
-  patterns and the driver name no extension. Org status is `#+STATUS:`.
-- `check` reports a document written in two formats side by side, and finds a
-  declared document in either format.
-- `view_link: file` in config links the view's documents to the files.
-- Completion reads `~/.orglens/cache/snapshot.json`, written with the snapshot;
-  `snapshot --check` reports it stale when it lags.
-- A workflow node's `writes:` may name a stem; the file takes the grammar's format.
-- Readers outside the CLI (completion, the workflow engine) honour `ORGLENS_CONFIG`.
+orglens reads org beside markdown, mixed in one tree, and markdown stays
+supported. A grammar says which format `new` writes; everything else reads both.
+Measured on a 769-document tree converted from markdown to org: the same units,
+the same documents per kind and a status wherever there was one, before and
+after.
+
+### Formats
+
+- A format registry, `orglens/formats/`: one module per format (its suffix, how
+  to read the status line, the driver `new` writes), and every glob and status
+  read in the engine goes through it. A contract test runs once per format.
+- The grammar declares `format: md` or `format: org`, and it decides only what
+  `new` writes. Absent, it is `md`, so an existing grammar behaves as before.
+- Patterns and the driver name no extension: `driver: overview`, `plans/*`.
+  `*` matches `.md` and `.org` files and never an image, a `.nav.yml` or a
+  `session.jsonl`. A grammar that still writes `plans/*.md` reads both formats
+  the same way; a pattern ending in an extension no format registers
+  (`*.txt`) is left as written.
+- In org the status line is a `#+STATUS:` keyword; in markdown it is still
+  `> **Status:**`.
+- `new` writes the driver in the grammar's format: `#+TITLE:` and `#+STATUS:`
+  in org.
+
+### check
+
+- A document written in both formats side by side (`overview.md` beside
+  `overview.org`) is reported; the grammar's format is the one read.
+- A declared document counts as present in either format, and one that is
+  missing is named as `new` would write it.
+- Folders of undescribed documents count org files too.
+
+### view, completion, workflows
+
+- `view_link: file` in config links the view's documents to the files, for a
+  tree read in an editor. The default is unchanged: the served site at
+  `docs_base_url`.
+- `.org` documents get the same served URL as markdown ones.
+- Completion reads `snapshot.json`, written beside the markdown snapshot,
+  rather than parsing the snapshot's headings. `snapshot --check` reports it
+  stale when it lags.
+- Completion and the workflow engine honour `ORGLENS_CONFIG`, as the CLI did.
+  Before, they always read `~/.orglens/config.yaml`.
+- A workflow node's `writes:` may name a stem (`writes: draft`): the file that
+  exists in either format, else a new one in the grammar's format. A name with
+  a suffix is used as written.
+
+### The skills
+
+- The operator card and the generated vocabulary reference say which format
+  to write and what the org status line is; `orglens-adapt` gives the driver's
+  shape in org. Re-run `bootstrap` to pick them up.
+
+### Not yet
+
+- A name the grammar writes with a suffix (`driver: overview.md`) is tried
+  before the grammar's format, so under `format: org` a pair is read from the
+  markdown one while `check` says the org one is read.
+- Completion shows a status's org markup as it is written.
+- `new` still offers to add the unit to a parent `.nav.yml`, a MkDocs habit.
+- `view_link` has `served` and `file`; a GitHub link and a URL template are
+  not built.
 
 ## [0.4.0] — 2026-09-27
 

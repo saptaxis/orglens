@@ -15,6 +15,12 @@ to read and the first place a status line is looked for.
 Long documents it refers to stay separate and are pointed at from it, so it
 can be read in a screen.
 
+## Formats
+
+Documents are markdown or org, mixed in one tree, and every name here is
+a stem: `overview` is `overview.md` or `overview.org`.
+Write a new document in **markdown** (`.md`); keep an existing one in the format it is in.
+
 ## What exists
 
 Patterns are relative: matched at the docs root, then inside every entity
