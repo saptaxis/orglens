@@ -184,3 +184,11 @@ class TestGitCostsOncePerRepo:
         assert activity._dirty(repo, a) == 2
         assert activity._dirty(repo, b) == 1
         assert calls.count("status") == 1
+
+
+def test_latest_plan_counts_org_plans(tmp_path):
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    (plans / "01-a-Jan012026.md").write_text("x")
+    (plans / "02-b-Feb012026.org").write_text("x")
+    assert activity._latest_plan(tmp_path) == "02"

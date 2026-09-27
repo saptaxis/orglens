@@ -746,6 +746,13 @@ def check_cmd():
             "has no word for; they are found, without a kind"
         )
 
+    for row in report.twins:
+        shown = _relative(row.path, registry.roots)
+        click.echo(
+            f"{row.unit}: {shown} is written in two formats; only the "
+            f"{registry.grammar.format} one is read — keep one"
+        )
+
     if not report:
         click.echo("No drift.")
 

@@ -95,6 +95,17 @@ UNDESCRIBED_FLOOR = 3
 
 
 @dataclass(frozen=True)
+class Twin:
+    """One document written twice, in two formats, side by side — an
+    `overview.md` beside an `overview.org`. Only one is read: the grammar's
+    format wins (R11). The other is either a leftover of a conversion or a
+    fork nobody meant, and a person decides which."""
+    unit: str
+    #: The shared stem, without a suffix.
+    path: Path
+
+
+@dataclass(frozen=True)
 class Undescribed:
     """A directory holding documents that no kind's container and no
     entity's structure names. Everything in it is still found by the
@@ -171,6 +182,8 @@ class Report:
     shared: list[Shared] = field(default_factory=list)
     #: Folders of documents the grammar has no word for.
     undescribed: list[Undescribed] = field(default_factory=list)
+    #: Documents written in two formats side by side (R11).
+    twins: list[Twin] = field(default_factory=list)
     #: Units an explicit parent nav does not list.
     unlisted: list[Unlisted] = field(default_factory=list)
     #: Status lines older than the unit's newest edit by more than a week.
@@ -188,6 +201,7 @@ class Report:
             or self.collisions
             or self.shared
             or self.undescribed
+            or self.twins
             or self.unlisted
             or self.stale
             or self.held
@@ -361,9 +375,22 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
                     continue
                 if any(directory == c or c in directory.parents for c in claimed):
                     continue
-                count = sum(1 for p in directory.glob("*.md") if p.is_file())
+                count = sum(1 for p in documents._entries(directory)
+                            if p.is_file() and formats.is_document(p))
                 if count >= UNDESCRIBED_FLOOR:
                     undescribed.append(Undescribed(unit=unit.name, path=directory, count=count))
+
+    twins: list[Twin] = []
+    for unit in units:
+        for home in unit.paths:
+            for directory in (home, *documents._dirs_under(home)):
+                stems: dict[str, int] = {}
+                for p in documents._entries(directory):
+                    if p.is_file() and formats.is_document(p):
+                        key = formats.stem(p.name)
+                        stems[key] = stems.get(key, 0) + 1
+                twins += [Twin(unit=unit.name, path=directory / s)
+                          for s, n in sorted(stems.items()) if n > 1]
 
     unlisted = [
         Unlisted(unit=unit.name, nav=unit.declared_at.parent / ".nav.yml")
@@ -400,6 +427,7 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
         collisions=collisions,
         shared=shared,
         undescribed=sorted(undescribed, key=lambda u: (u.unit, u.path)),
+        twins=twins,
         unlisted=unlisted,
         stale=stale,
         held=held,
