@@ -1652,7 +1652,7 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
 
 
 @cli.command()
-@click.argument("unit_name")
+@click.argument("unit_name", shell_complete=complete.units)
 @click.option("--home", default=None, help="Which home to work in.")
 @click.option("--agent", default="claude",
               type=click.Choice(["claude", "codex", "kimi"]),

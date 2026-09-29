@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `orglens start <TAB>` completes unit names, as `resume`, `where` and `find`
+  already did; its argument had no completer.
 - A unit's status is read from its driver in any home before any other
   document in any home. Home by home, a code repository listed first answered
   from its README or changelog, which may quote `**Status:**` while describing

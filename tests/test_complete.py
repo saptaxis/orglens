@@ -168,3 +168,15 @@ def test_a_workflow_that_does_not_validate_still_completes(tmp_path):
         params = {"packet": str(packet)}
 
     assert [i.value for i in complete.nodes(Ctx, None, "")] == ["brief", "draft"]
+
+
+def test_every_argument_that_takes_a_unit_completes_unit_names():
+    """`start <TAB>` offered nothing while `resume <TAB>` offered units."""
+    from orglens.cli import cli
+    missing = [
+        name for name, command in cli.commands.items()
+        for param in command.params
+        if param.param_type_name == "argument" and param.name in ("unit_name", "unit")
+        and getattr(param, "_custom_shell_complete", None) is None
+    ]
+    assert missing == []
