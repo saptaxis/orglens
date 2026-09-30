@@ -22,7 +22,7 @@ import re
 import time
 from pathlib import Path
 
-from orglens import formats
+from orglens import formats, tree
 from orglens.activity import MENTIONS, Activity, recency
 from orglens.sessions import listed
 
@@ -499,7 +499,8 @@ def _placed(a: Activity, now: float) -> str:
     return " · ".join(bits)
 
 
-def _card(row: dict, ctx: dict, now: float, nested: list[dict] = ()) -> str:
+def _card(row: dict, ctx: dict, now: float,
+          children: dict[str, list[dict]] | None = None) -> str:
     a = row["activity"]
     name = row["name"]
     agents = " ".join(sorted({str(s.get("agent") or "") for s in a.recent} - {""}))
@@ -528,10 +529,11 @@ def _card(row: dict, ctx: dict, now: float, nested: list[dict] = ()) -> str:
         out.append(f"<div class='notes'>{len(a.notes)} note(s): {recent}{more}</div>")
     out.append("</summary>")
     out.append(_detail(row, ctx))
+    nested = (children or {}).get(name, [])
     if nested:
         out.append("<div class='nested'>")
         for child in sorted(nested, key=lambda r: recency(r["activity"]), reverse=True):
-            out.append(_card(child, ctx, now))
+            out.append(_card(child, ctx, now, children))
         out.append("</div>")
     out.append("</details>")
     return "".join(out)
@@ -599,17 +601,20 @@ def render(
     now = time.time() if now is None else now
     rows = [r for _, group in groups for r in group]
     by_name = {r["name"]: r for r in rows}
+    # The tree over the page's rows: a unit whose parent is not on the page,
+    # or which is in a cycle, is a top-level card rather than drawn nowhere.
+    shape = tree.build({r["name"]: r.get("part_of") for r in rows})
     children: dict[str, list[dict]] = {}
     for r in rows:
-        parent = r.get("part_of")
-        if parent and parent in by_name:
+        parent = shape.parent.get(r["name"])
+        if parent:
             children.setdefault(parent, []).append(r)
-    top = [r for r in rows if not (r.get("part_of") and r.get("part_of") in by_name)]
+    top = [r for r in rows if r["name"] not in shape.parent]
 
-    # A parent's band is the newest of its own clocks and its parts'.
+    # A parent's band is the newest of its own clocks and its subtree's.
     def band_of(r: dict) -> str:
         own = band(r["activity"], now)
-        kids = [band(c["activity"], now) for c in children.get(r["name"], [])]
+        kids = [band_of(c) for c in children.get(r["name"], [])]
         return min([own, *kids], key=BANDS.index)
 
     banded: dict[str, list[dict]] = {b: [] for b in BANDS}
@@ -648,7 +653,7 @@ def render(
         body.append(f"<details class='band{cls}' data-band='{b}'{opened}>"
                     f"<summary>{html.escape(b)}<span class='n'>{len(members)}</span></summary>")
         for r in sorted(members, key=lambda r: recency(r["activity"]), reverse=True):
-            body.append(_card(r, ctx, now, nested=children.get(r["name"], [])))
+            body.append(_card(r, ctx, now, children))
         body.append("</details>")
 
     loose = listed(unattributed or [])

@@ -18,6 +18,7 @@ from pathlib import Path
 from orglens.declaration import MARKER, read_marker
 from orglens.grammar import Grammar
 from orglens.homes import Candidate, Home, resolve_home, scan_roots
+from orglens.tree import Tree, build as build_tree
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ class Registry:
         self.grammar = grammar
         self._candidates: list[Candidate] | None = None
         self._units: list[Unit] | None = None
+        self._tree: Tree | None = None
 
     # ── the sweep ────────────────────────────────────────────────────────
 
@@ -172,13 +174,26 @@ class Registry:
             f"No unit '{name}' found. Available: {', '.join(u.name for u in units)}"
         )
 
+    def tree(self) -> Tree:
+        """The tree `part_of` builds, once per registry. With two markers
+        declaring one name (`check`'s duplicate), the first in the registry's
+        order stands for it."""
+        if self._tree is None:
+            part_of: dict[str, str | None] = {}
+            for u in self.units():
+                part_of.setdefault(u.name, u.part_of)
+            self._tree = build_tree(part_of)
+        return self._tree
+
     def parts_of(self, unit: Unit) -> list[Unit]:
-        """Units that declared themselves part of this one.
+        """Units that declared themselves part of this one: its children in
+        the tree.
 
         Stated, never derived from folder depth — which is what lets a unit be
         regrouped without anything being renamed.
         """
-        return [u for u in self.units() if u.part_of == unit.name]
+        names = set(self.tree().children.get(unit.name, []))
+        return [u for u in self.units() if u.name in names]
 
     # ── what has not declared itself ─────────────────────────────────────
 
