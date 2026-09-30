@@ -1323,3 +1323,14 @@ class TestNewSeedsAKindsFiles:
         target = tmp_path / "docs" / "loose"
         runner.invoke(cli, ["new", str(target), "--kind", "nothing-declared"], env=env)
         assert sorted(p.name for p in target.iterdir()) == [".orglens.yml", "overview.org"]
+
+
+def test_a_path_is_shown_with_the_name_of_the_root_it_is_under(tmp_path):
+    # With each repository listed as its own root, `docs` under two of them
+    # read the same; the root's name tells them apart.
+    from orglens.cli import _relative
+    a, b = tmp_path / "traitful-chat", tmp_path / "freightify_dev"
+    (a / "docs").mkdir(parents=True)
+    (b / "docs").mkdir(parents=True)
+    assert str(_relative(a / "docs", [b, a])) == "traitful-chat/docs"
+    assert str(_relative(b / "docs", [b, a])) == "freightify_dev/docs"

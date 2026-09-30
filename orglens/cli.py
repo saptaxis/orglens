@@ -199,19 +199,25 @@ def _status_of(registry: Registry, unit):
 
 
 def _relative(path: Path, roots: list[Path]) -> Path:
-    """`path`, relative to whichever root contains it.
+    """`path` from the root that contains it, the root's own name first.
+
+    With each repository listed as a root, `docs` under two of them would
+    read the same; `traitful-chat/docs` does not. The deepest containing root
+    wins where roots overlap.
 
     Resolved before compared: `~/Dropbox` is a symlink to
     `~/Library/CloudStorage/Dropbox` here, and an unresolved comparison would
     fail silently, falling back to the absolute path for no reason.
     """
     resolved = Path(path).resolve()
-    for root in roots:
-        try:
-            return resolved.relative_to(Path(root).expanduser().resolve())
-        except ValueError:
-            continue
-    return path
+    containing = [
+        r for r in (Path(root).expanduser().resolve() for root in roots)
+        if resolved == r or resolved.is_relative_to(r)
+    ]
+    if not containing:
+        return path
+    root = max(containing, key=lambda r: len(r.parts))
+    return resolved.relative_to(root.parent)
 
 
 def _under_a_root(path: Path, roots: list[Path]) -> bool:

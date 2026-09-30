@@ -61,6 +61,10 @@
   under the repository's key, and scad's `git clone --local` refuses a
   subfolder, so a container run with a documents home failed at clone.
 
+- Paths in `check`, `find` and `where` are shown from the root's own name
+  (`traitful-chat/docs`), since with repositories listed one by one, `docs`
+  under two of them read the same.
+
 ## [0.5.0] — 2026-09-28
 
 orglens reads org beside markdown, mixed in one tree, and markdown stays
