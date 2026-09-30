@@ -781,6 +781,14 @@ def check_cmd():
     for unit_name, home_name in report.absent:
         click.echo(f"{unit_name}: home '{home_name}' {ABSENT}")
 
+    for unit_name, parent in report.unknown_parents:
+        click.echo(f"{unit_name}: part_of '{parent}' is no unit")
+    for loop in report.cycles:
+        click.echo("part_of cycle: " + " > ".join([*loop, loop[0]]))
+    for unit_name, container, parent in report.misplaced:
+        said = f"says part_of {parent}" if parent else "states no parent"
+        click.echo(f"{unit_name}: sits inside {container}'s home, but {said}")
+
     for kind in report.unmatched:
         glob = registry.grammar.artifact_types[kind].find
         click.echo(f"no {kind} found anywhere (looked for {glob})")

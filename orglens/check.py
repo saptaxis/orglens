@@ -173,6 +173,13 @@ class Report:
     #: (unit, home name) for every home that resolved nowhere: its repository
     #: is under no root, or it is not cloned on this machine.
     absent: list[tuple[str, str]] = field(default_factory=list)
+    #: (unit, the parent it names) where that parent is no unit.
+    unknown_parents: list[tuple[str, str]] = field(default_factory=list)
+    #: Each `part_of` cycle once.
+    cycles: list[list[str]] = field(default_factory=list)
+    #: (unit, the unit whose home it sits inside, the parent it names or None):
+    #: folder and marker disagreeing. Reported, never corrected.
+    misplaced: list[tuple[str, str, str | None]] = field(default_factory=list)
     #: Document kinds whose glob matches nothing anywhere. A mistyped glob
     #: finds no documents and raises nothing, so without this it fails
     #: silently — the one way this design can still go wrong quietly.
@@ -200,6 +207,9 @@ class Report:
             or self.undeclared
             or self.weak
             or self.absent
+            or self.unknown_parents
+            or self.cycles
+            or self.misplaced
             or self.unmatched
             or self.duplicates
             or self.collisions
@@ -210,6 +220,22 @@ class Report:
             or self.stale
             or self.held
         )
+
+
+def _misplaced(registry: Registry, units: list) -> list[tuple[str, str, str | None]]:
+    """Units whose folder sits inside another unit's home while the marker
+    names a different parent, or none. Membership is the marker's; this only
+    says the two disagree. A unit inside no other unit's home is never
+    reported: a code repository states its parent deliberately."""
+    out = []
+    for unit in units:
+        above = unit.declared_at.parent
+        container = registry.at(above) if above != unit.declared_at else None
+        if container is None or container.name == unit.name:
+            continue
+        if unit.part_of != container.name:
+            out.append((unit.name, container.name, unit.part_of))
+    return sorted(out, key=lambda row: row[0])
 
 
 def run(registry: Registry, sessions: list | None = None) -> Report:
@@ -423,6 +449,9 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
         undeclared=registry.candidates(),
         weak=weak,
         absent=[(u.name, h.name) for u in units for h in u.homes if h.how == "absent"],
+        unknown_parents=sorted(registry.tree().unknown.items()),
+        cycles=registry.tree().cycles,
+        misplaced=_misplaced(registry, units),
         unmatched=unmatched,
         duplicates=duplicates,
         collisions=collisions,

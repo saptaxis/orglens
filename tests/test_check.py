@@ -557,3 +557,50 @@ def test_a_home_under_no_root_is_reported_as_absent(declared_tree, grammar):
 
 def test_homes_that_all_resolve_leave_nothing_absent(registry):
     assert check.run(registry).absent == []
+
+
+def _declare_in(path: Path, unit: str, part_of: str | None = None) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / MARKER).write_text(
+        f"home: {unit}\nunit: {unit}\nkind: project\n"
+        + (f"part_of: {part_of}\n" if part_of else "")
+        + f"homes:\n  - {unit}\n"
+    )
+    (path / "overview.md").write_text("# Overview\n")
+
+
+class TestTheTree:
+    def test_a_parent_that_is_no_unit_is_reported(self, declared_tree, grammar):
+        _declare_in(declared_tree / "projects" / "stray", "stray", part_of="nosuch")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.unknown_parents == [("stray", "nosuch")]
+        assert bool(report)
+
+    def test_a_cycle_is_reported_once(self, declared_tree, grammar):
+        _declare_in(declared_tree / "projects" / "a", "a", part_of="b")
+        _declare_in(declared_tree / "projects" / "b", "b", part_of="a")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.cycles == [["a", "b"]]
+
+    def test_a_unit_inside_another_that_names_a_different_parent(self, declared_tree, grammar):
+        _declare_in(declared_tree / "projects" / "orglens" / "inner", "inner", part_of="clipcompose")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.misplaced == [("inner", "orglens", "clipcompose")]
+
+    def test_a_unit_inside_another_that_states_no_parent(self, declared_tree, grammar):
+        _declare_in(declared_tree / "projects" / "orglens" / "inner", "inner")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.misplaced == [("inner", "orglens", None)]
+
+    def test_a_unit_inside_the_one_it_names_is_quiet(self, declared_tree, grammar):
+        _declare_in(declared_tree / "projects" / "orglens" / "inner", "inner", part_of="orglens")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.misplaced == []
+        assert report.unknown_parents == []
+        assert report.cycles == []
+
+    def test_a_unit_in_no_other_units_home_is_never_misplaced(self, declared_tree, grammar):
+        # A code repository states its parent deliberately.
+        _declare_in(declared_tree / "projects" / "free", "free", part_of="orglens")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.misplaced == []
