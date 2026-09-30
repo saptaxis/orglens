@@ -1289,3 +1289,37 @@ class TestTreeCommand:
                 {"name": "c", "kind": "project", "status": "c going", "children": []},
             ]},
         ]
+
+
+class TestNewSeedsAKindsFiles:
+    def _grammar(self, tmp_path, fmt: str) -> Path:
+        from tests.test_grammar import ORG_GRAMMAR
+        path = tmp_path / f"grammar-{fmt}.yaml"
+        path.write_text(ORG_GRAMMAR.replace("format: org", f"format: {fmt}"))
+        return path
+
+    def test_each_declared_file_is_seeded_with_its_title_and_description(self, runner, tmp_path):
+        (tmp_path / "docs").mkdir()
+        env = _roots_config(tmp_path, [tmp_path / "docs"], self._grammar(tmp_path, "org"))
+        target = tmp_path / "docs" / "personal"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "organization"], env=env)
+        assert result.exit_code == 0, result.output
+        assert (target / "inbox.org").read_text() == "#+TITLE: Inbox\n\nCapture not yet processed.\n"
+        # The driver keeps its stub; it is not seeded a second time.
+        assert "#+STATUS:" in (target / "overview.org").read_text()
+        checked = runner.invoke(cli, ["check"], env=env)
+        assert "personal" not in checked.output
+
+    def test_markdown_seeds_a_heading(self, runner, tmp_path):
+        (tmp_path / "docs").mkdir()
+        env = _roots_config(tmp_path, [tmp_path / "docs"], self._grammar(tmp_path, "md"))
+        target = tmp_path / "docs" / "personal"
+        runner.invoke(cli, ["new", str(target), "--kind", "organization"], env=env)
+        assert (target / "inbox.md").read_text() == "# Inbox\n\nCapture not yet processed.\n"
+
+    def test_a_kind_with_no_structure_gets_only_the_driver(self, runner, tmp_path):
+        (tmp_path / "docs").mkdir()
+        env = _roots_config(tmp_path, [tmp_path / "docs"], self._grammar(tmp_path, "org"))
+        target = tmp_path / "docs" / "loose"
+        runner.invoke(cli, ["new", str(target), "--kind", "nothing-declared"], env=env)
+        assert sorted(p.name for p in target.iterdir()) == [".orglens.yml", "overview.org"]

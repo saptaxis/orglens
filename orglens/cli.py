@@ -491,6 +491,23 @@ def _write_declaration(proposal: Proposal, path: Path, part_of: str | None) -> N
     )
 
 
+def _seed(target: Path, kind: str | None, registry: Registry, fmt, driver: str) -> None:
+    """Every file the kind's `structure:` declares, other than the driver,
+    seeded with a title and what it is for --- the grammar's own words --- so
+    whoever opens the folder knows where things go. Folders are not made."""
+    declared = registry.grammar.entity_types.get(kind or "")
+    if declared is None:
+        return
+    for key, means in declared.files.items():
+        stem = formats.stem(key)
+        if stem == driver:
+            continue
+        path = target / f"{stem}{fmt.suffix}"
+        if not path.exists():
+            title = stem.replace("-", " ").capitalize()
+            path.write_text(fmt.seed(title, " ".join((means or "").split())))
+
+
 def _interactive() -> bool:
     """Whether a person is at the other end. An agent or a script is not,
     and gets no parent it did not pass."""
@@ -637,6 +654,7 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     driver = target / f"{base}{fmt.suffix}"
     driver.write_text(fmt.stub(base.replace("-", " ").capitalize(), target.name,
                                time.strftime("%Y-%m-%d")))
+    _seed(target, kind, registry, fmt, base)
     registered = _register_in_nav(target)
 
     click.echo(f"Created {kind or 'unit'}: {target}")
