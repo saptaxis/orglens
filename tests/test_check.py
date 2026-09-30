@@ -539,3 +539,21 @@ def test_undescribed_counts_org_documents(declared_tree, grammar):
         (folder / f"n{i}.org").write_text("x\n")
     report = check.run(Registry([declared_tree], grammar))
     assert any(u.path == folder for u in report.undescribed)
+
+
+def test_a_home_under_no_root_is_reported_as_absent(declared_tree, grammar):
+    """With roots listed one by one, a repository left off the list is the
+    likely mistake: its home resolves nowhere, and its documents and sessions
+    go uncounted. `check` names it."""
+    (declared_tree / "projects" / "orglens" / MARKER).write_text(
+        "home: orglens\nunit: orglens\nkind: project\n"
+        "homes:\n  - orglens\n  - orglens-code\n"
+    )
+    report = check.run(Registry([declared_tree], grammar))
+
+    assert report.absent == [("orglens", "orglens-code")]
+    assert bool(report)
+
+
+def test_homes_that_all_resolve_leave_nothing_absent(registry):
+    assert check.run(registry).absent == []

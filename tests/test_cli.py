@@ -1193,3 +1193,20 @@ def test_new_writes_an_org_driver_when_the_grammar_says_org(runner, tmp_path):
     assert driver.is_file()
     assert driver.read_text().startswith("#+TITLE: Overview\n#+STATUS: Opened ")
     assert not (docs / "projects" / "demo" / "overview.md").exists()
+
+
+def test_check_and_where_say_why_a_home_is_absent(runner, tmp_path):
+    unit = tmp_path / "docs" / "projects" / "alpha"
+    unit.mkdir(parents=True)
+    (unit / ".orglens.yml").write_text(
+        "home: alpha\nunit: alpha\nkind: project\nhomes:\n  - alpha\n  - alpha-code\n"
+    )
+    (unit / "overview.md").write_text("# Overview\n\n> **Status:** going\n")
+    env = _roots_config(tmp_path, [tmp_path / "docs"])
+
+    checked = runner.invoke(cli, ["check"], env=env)
+    assert "alpha: home 'alpha-code' is under none of your roots on this machine" in checked.output
+    assert "list its repository in roots, or it is not cloned here" in checked.output
+
+    where = runner.invoke(cli, ["where", "alpha"], env=env)
+    assert "under none of your roots" in where.output

@@ -578,6 +578,12 @@ def _register_in_nav(target: Path) -> str | bool | None:
     return str(nav)
 
 
+#: Why a home resolves nowhere. With roots listed one by one, the likely cause
+#: is a repository left off the list; a home not cloned here is legitimate.
+ABSENT = ("is under none of your roots on this machine — "
+          "list its repository in roots, or it is not cloned here")
+
+
 def _home_line(home) -> str:
     shown = str(home.path) if home.path is not None else "absent"
     return f"{home.name:<40} {shown:<32} ({home.how})"
@@ -594,7 +600,7 @@ def _repo_line(home) -> str:
     as clean.
     """
     if home.path is None:
-        return f"{home.name:<40} (home absent on this machine)"
+        return f"{home.name:<40} ({ABSENT})"
     root = activity._repo_root(home.path)
     if root is None:
         return f"{home.name:<40} none — nothing is backing this up"
@@ -692,6 +698,9 @@ def check_cmd():
                 f"{unit_name}: home '{home_name}' resolved by directory name only "
                 "— renaming it will detach"
             )
+
+    for unit_name, home_name in report.absent:
+        click.echo(f"{unit_name}: home '{home_name}' {ABSENT}")
 
     for kind in report.unmatched:
         glob = registry.grammar.artifact_types[kind].find

@@ -170,6 +170,9 @@ class Report:
     #: real. `how` is carried so the printer can say which of the two
     #: actually happened, rather than always naming the first.
     weak: list[tuple[str, str, str]] = field(default_factory=list)
+    #: (unit, home name) for every home that resolved nowhere: its repository
+    #: is under no root, or it is not cloned on this machine.
+    absent: list[tuple[str, str]] = field(default_factory=list)
     #: Document kinds whose glob matches nothing anywhere. A mistyped glob
     #: finds no documents and raises nothing, so without this it fails
     #: silently — the one way this design can still go wrong quietly.
@@ -196,6 +199,7 @@ class Report:
             self.drifted
             or self.undeclared
             or self.weak
+            or self.absent
             or self.unmatched
             or self.duplicates
             or self.collisions
@@ -418,6 +422,7 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
         drifted=drifted,
         undeclared=registry.candidates(),
         weak=weak,
+        absent=[(u.name, h.name) for u in units for h in u.homes if h.how == "absent"],
         unmatched=unmatched,
         duplicates=duplicates,
         collisions=collisions,
