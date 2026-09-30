@@ -48,3 +48,31 @@ def test_a_chain_leading_into_a_cycle_keeps_its_parent():
     assert t.parent == {"d": "a"}
     assert "d" not in t.top
     assert tree.below(t, "a") == ["a", "d"]
+
+
+def test_draw_gives_every_top_node_and_its_subtree_with_branches():
+    t = tree.build({"org": None, "prog": "org", "e1": "prog", "e2": "prog",
+                    "client": "org", "solo": None})
+    lines = tree.draw(t, label=lambda n: n.upper())
+    assert lines == [
+        "ORG",
+        "├── CLIENT",
+        "└── PROG",
+        "    ├── E1",
+        "    └── E2",
+        "SOLO",
+    ]
+
+
+def test_draw_from_one_unit_is_its_subtree():
+    t = tree.build({"org": None, "prog": "org", "e1": "prog"})
+    assert tree.draw(t, label=str, start="prog") == ["prog", "└── e1"]
+
+
+def test_draw_marks_an_unknown_parent_and_a_cycle():
+    t = tree.build({"a": "nosuch", "b": "c", "c": "b"})
+    assert tree.draw(t, label=str) == [
+        "a  (part of nosuch: no such unit)",
+        "b  (in a cycle: b > c > b)",
+        "c  (in a cycle: b > c > b)",
+    ]

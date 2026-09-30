@@ -1266,3 +1266,26 @@ class TestUnder:
         result = runner.invoke(cli, ["snapshot", "--unit", "a", "--json"], env=env)
         assert result.exit_code == 0, result.output
         assert {u["name"] for u in json.loads(result.output)["units"]} == {"a", "b", "c"}
+
+
+class TestTreeCommand:
+    def test_tree_draws_the_hierarchy_with_kinds_and_status(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["tree"], env=env)
+        assert result.exit_code == 0, result.output
+        assert result.output.splitlines() == [
+            "a  (project)  a going",
+            "└── b  (project)  b going",
+            "    └── c  (project)  c going",
+            "d  (project)  d going",
+        ]
+
+    def test_tree_of_a_unit_as_json_nests_its_children(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["tree", "b", "--json"], env=env)
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == [
+            {"name": "b", "kind": "project", "status": "b going", "children": [
+                {"name": "c", "kind": "project", "status": "c going", "children": []},
+            ]},
+        ]

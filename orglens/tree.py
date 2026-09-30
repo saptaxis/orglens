@@ -69,3 +69,40 @@ def below(tree: Tree, name: str) -> list[str]:
         out.append(here)
         stack.extend(reversed(tree.children.get(here, [])))
     return out
+
+
+def draw(tree: Tree, label, start: str | None = None) -> list[str]:
+    """The tree as lines, every top node and its subtree, or `start`'s.
+    `label(name)` gives a node's text; a parent that is no unit and a cycle
+    are marked after it, since both leave the unit top-level."""
+    cycle_of = {n: c for c in tree.cycles for n in c}
+
+    def text(name: str) -> str:
+        marks = []
+        if name in tree.unknown:
+            marks.append(f"part of {tree.unknown[name]}: no such unit")
+        if name in cycle_of:
+            loop = cycle_of[name]
+            marks.append("in a cycle: " + " > ".join([*loop, loop[0]]))
+        return label(name) + "".join(f"  ({m})" for m in marks)
+
+    lines: list[str] = []
+
+    def walk(name: str, lead: str, seen: set[str]) -> None:
+        kids = [k for k in tree.children.get(name, []) if k not in seen]
+        for i, kid in enumerate(kids):
+            last = i == len(kids) - 1
+            lines.append(lead + ("└── " if last else "├── ") + text(kid))
+            walk(kid, lead + ("    " if last else "│   "), seen | {kid})
+
+    for top in ([start] if start is not None else tree.top):
+        lines.append(text(top))
+        walk(top, "", {top})
+    return lines
+
+
+def nested(tree: Tree, start: str, node) -> dict:
+    """`start`'s subtree as nested data: `node(name)` gives a node's fields,
+    and `children` is added."""
+    return {**node(start),
+            "children": [nested(tree, kid, node) for kid in tree.children.get(start, [])]}

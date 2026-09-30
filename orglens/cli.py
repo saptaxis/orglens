@@ -17,6 +17,7 @@ import builtins
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -25,7 +26,7 @@ from pathlib import Path
 import click
 
 from orglens import (activity, check as check_module, complete, documents, formats,
-                     reference, sessions, view)
+                     reference, sessions, tree as tree_mod, view)
 from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
 from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
@@ -354,6 +355,56 @@ def status(under: str | None):
                 when = f" ({_ago(ask['at'])} ago)" if ask["at"] else ""
                 first = ask["question"].strip().splitlines()[0]
                 click.echo(f"  {name}: {first[:88]}{when}")
+
+
+@cli.command(name="tree")
+@click.argument("unit_name", required=False, shell_complete=complete.units)
+@click.option("--json", "as_json", is_flag=True,
+              help="The same tree as nested data.")
+def tree_cmd(unit_name: str | None, as_json: bool):
+    """The units as a tree: each under the unit its `part_of` names.
+
+    Every top-level unit and what is under it, or one unit's subtree. A
+    `part_of` naming no unit, and a cycle, leave a unit top-level and are
+    marked; `check` reports both.
+    """
+    registry, _ = _load_registry()
+    units = registry.units()
+    if not units:
+        click.echo("Nothing found.")
+        return
+    by_name: dict[str, Unit] = {}
+    for u in units:
+        by_name.setdefault(u.name, u)
+    shape = registry.tree()
+    start = None
+    if unit_name is not None:
+        try:
+            start = registry.resolve(unit_name).name
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+
+    def status_of(name: str) -> str | None:
+        found = _status_of(registry, by_name[name])
+        return found.text if found else None
+
+    if as_json:
+        def node(name: str) -> dict:
+            return {"name": name, "kind": by_name[name].kind, "status": status_of(name)}
+        tops = [start] if start is not None else shape.top
+        click.echo(json.dumps([tree_mod.nested(shape, t, node) for t in tops], indent=2))
+        return
+
+    def label(name: str) -> str:
+        kind = by_name[name].kind
+        text = f"{name}  ({kind})" if kind else name
+        status = status_of(name)
+        return f"{text}  {status}" if status else text
+
+    width = shutil.get_terminal_size().columns if sys.stdout.isatty() else None
+    for line in tree_mod.draw(shape, label, start=start):
+        click.echo(line[:width] if width else line)
 
 
 @cli.command()
