@@ -3,9 +3,11 @@
 A session belongs to a set of units. An explicit attribution — written by
 `orglens start` before the first turn, or by `orglens attribute` afterwards —
 names one unit, and that session belongs to it alone, whatever directory it
-ran in. Without one, the session belongs to every unit that has a home
-containing its working directory: one unit ordinarily, several when a home is
-shared, none when it ran outside every home.
+ran in. Without one, the session belongs to the unit whose home is the
+deepest containing its working directory: one unit ordinarily, several when
+that home is shared, none when it ran outside every home. A unit whose home
+holds other units' homes (an organisation's folder) does not also count
+their sessions.
 
 Everything that says how many sessions a unit has, or lists them, reads from
 here. `activity` used to encode the same rule as a SQL clause per unit, and a
@@ -28,7 +30,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from orglens.events import attributions, dismissed, whys
-from orglens.homes import repo_of
 from orglens.units import Registry
 
 #: scad's own words for a session that can be picked back up.
@@ -122,7 +123,10 @@ def _prefixes(registry: Registry) -> list[tuple[str, str]]:
                 continue
             for spelling in _spellings(home.path, registry.roots):
                 out.append((unit.name, spelling))
-            out.append((unit.name, f"/workspace/{repo_of(home.name)}"))
+            # scad mounts the repository at `/workspace/<repo>` and records
+            # the in-container path, so a home inside it is under the mount
+            # by its full name.
+            out.append((unit.name, f"/workspace/{home.name}"))
     return out
 
 
@@ -151,7 +155,13 @@ def all_sessions(registry: Registry, events_root: Path) -> list[Session]:
         # never that unit's work.
         if sid in gone:
             return frozenset(), "dismissed"
-        units = frozenset(name for name, prefix in prefixes if cwd and _under(cwd, prefix))
+        # The deepest home wins. Every matching prefix is a prefix of this
+        # cwd, so the longest is the deepest; units sharing that home each
+        # count it. A parent does not also count its children's sessions —
+        # what it holds is the tree's to say, not the folder's.
+        hits = [(name, prefix) for name, prefix in prefixes if cwd and _under(cwd, prefix)]
+        deepest = max((len(prefix.rstrip("/")) for _, prefix in hits), default=0)
+        units = frozenset(name for name, prefix in hits if len(prefix.rstrip("/")) == deepest)
         return units, ("containment" if units else None)
 
     out: list[Session] = []

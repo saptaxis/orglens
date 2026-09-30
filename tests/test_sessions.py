@@ -76,6 +76,29 @@ def test_a_container_cwd_matches_the_home_it_was_mounted_from(tmp_path, monkeypa
     assert s.units == frozenset({"alpha"})
 
 
+def test_a_session_belongs_to_the_deepest_home_containing_it(tmp_path, monkeypatch):
+    # An organisation's home contains its projects' folders. Containment
+    # counts a session for the deepest home only; the tree, not the folder,
+    # says what the organisation holds.
+    registry = _tree(tmp_path, {"org": ["org-home"], "x": ["org-home/projects/x"]})
+    code = tmp_path / "code"
+    inside, own = _sessions(monkeypatch, registry, [
+        export_row("s1", str(code / "org-home" / "projects" / "x" / "specs")),
+        export_row("s2", str(code / "org-home")),
+    ], tmp_path)
+    by_id = {s.id: s.units for s in (inside, own)}
+    assert by_id["s1"] == frozenset({"x"})
+    assert by_id["s2"] == frozenset({"org"})
+
+
+def test_a_container_session_goes_to_the_home_by_its_full_name(tmp_path, monkeypatch):
+    # scad records the in-container path under the mount. Matching by the
+    # repository alone gave every docs unit the same `/workspace/inwit`.
+    registry = _tree(tmp_path, {"a": ["inwit/docs/projects/a"], "b": ["inwit/docs/projects/b"]})
+    [s] = _sessions(monkeypatch, registry, [export_row("s1", "/workspace/inwit/docs/projects/a/specs")], tmp_path)
+    assert s.units == frozenset({"a"})
+
+
 def test_only_main_sessions_are_asked_for(tmp_path, monkeypatch):
     # Subagents and workflow agents belong to their parent. The export is
     # asked with `--kind main`; this pins the argv, since a missing flag
