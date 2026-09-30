@@ -177,3 +177,17 @@ class TestResolveFallbacks:
 
         assert "orglens" in str(excinfo.value)
         assert "orglens-web" in str(excinfo.value)
+
+
+def test_a_kind_with_no_pattern_makes_no_candidates_and_is_proposed_for_nothing(tmp_path):
+    from orglens.grammar import Grammar
+    from orglens.propose import propose
+    from tests.test_grammar import ORG_GRAMMAR
+    path = tmp_path / "grammar.yaml"
+    path.write_text(ORG_GRAMMAR)
+    grammar = Grammar.from_yaml(path)
+    (tmp_path / "docs" / "personal").mkdir(parents=True)
+    registry = Registry([tmp_path / "docs"], grammar)
+
+    assert registry.candidates() == []
+    assert propose(tmp_path / "docs" / "personal", registry).kind == ""

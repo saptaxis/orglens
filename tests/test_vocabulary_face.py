@@ -48,7 +48,8 @@ def vocabulary() -> set[str]:
         for key in entity_type.structure:
             words.add(key.rstrip("/").removesuffix(".md"))
         # "projects" out of "projects/*", "expt-" out of "expt-*"
-        words.add(entity_type.pattern.split("*")[0].strip("/"))
+        if entity_type.pattern:
+            words.add(entity_type.pattern.split("*")[0].strip("/"))
     for artifact_type in grammar.artifact_types.values():
         words.add(artifact_type.find.split("/")[0])
     return {w for w in words if w and not set(w) <= set("*?[]")}

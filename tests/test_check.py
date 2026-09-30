@@ -604,3 +604,19 @@ class TestTheTree:
         _declare_in(declared_tree / "projects" / "free", "free", part_of="orglens")
         report = check.run(Registry([declared_tree], grammar))
         assert report.misplaced == []
+
+
+def test_a_kind_with_no_pattern_still_has_its_files_checked(tmp_path):
+    from tests.test_grammar import ORG_GRAMMAR
+    path = tmp_path / "grammar.yaml"
+    path.write_text(ORG_GRAMMAR)
+    grammar = Grammar.from_yaml(path)
+    org = tmp_path / "docs" / "personal"
+    org.mkdir(parents=True)
+    (org / MARKER).write_text("home: personal\nunit: personal\nkind: organization\nhomes:\n  - personal\n")
+    (org / "overview.org").write_text("#+TITLE: Overview\n")
+
+    report = check.run(Registry([tmp_path / "docs"], grammar))
+
+    drift = next(d for d in report.drifted if d.entity == "personal")
+    assert [m.name for m in drift.missing] == ["inbox.org"]

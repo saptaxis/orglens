@@ -44,7 +44,7 @@ def generate_snapshot(
         "",
         "**Kinds:** "
         + ", ".join(
-            f"{name} (`{et.pattern}`)"
+            f"{name} (`{et.pattern}`)" if et.pattern else f"{name} (declared by marker)"
             for name, et in registry.grammar.entity_types.items()
         ),
         "",

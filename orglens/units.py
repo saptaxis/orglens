@@ -239,6 +239,7 @@ class Registry:
             if any(
                 candidate.path.match(et.pattern)
                 for et in self.grammar.entity_types.values()
+                if et.pattern
             ):
                 found.append(candidate.path)
         return sorted(found)

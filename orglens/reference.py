@@ -55,7 +55,8 @@ def render(grammar: Grammar) -> str:
         "|------|----------|",
     ]
     for name, entity_type in grammar.entity_types.items():
-        lines.append(f"| `{name}` | `{entity_type.pattern}` |")
+        found_at = f"`{entity_type.pattern}`" if entity_type.pattern else "declared by marker"
+        lines.append(f"| `{name}` | {found_at} |")
 
     lines += [
         "",
@@ -84,7 +85,8 @@ def render(grammar: Grammar) -> str:
     ]
     for name, entity_type in grammar.entity_types.items():
         lines += [
-            f"### {name} — `{entity_type.pattern}`",
+            f"### {name} — `{entity_type.pattern}`" if entity_type.pattern
+            else f"### {name} — declared by marker",
             "",
             "| Path | What it is for |",
             "|------|----------------|",
