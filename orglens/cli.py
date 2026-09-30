@@ -478,16 +478,46 @@ def find(artifact_type: str, unit_name: str | None, within: str | None,
             click.echo(f"      +{len(item.matches) - 5} more")
 
 
-def _write_declaration(proposal: Proposal, path: Path) -> None:
-    """A confirmed proposal, written as a marker."""
+def _write_declaration(proposal: Proposal, path: Path, part_of: str | None) -> None:
+    """A confirmed proposal, written as a marker, with the parent the person
+    gave (`_parent_for`) rather than the one position suggested."""
     _write_marker(
         path,
         home=proposal.homes[0],
         unit=proposal.unit,
         kind=proposal.kind,
-        part_of=proposal.part_of,
+        part_of=part_of,
         homes=proposal.homes,
     )
+
+
+def _interactive() -> bool:
+    """Whether a person is at the other end. An agent or a script is not,
+    and gets no parent it did not pass."""
+    return sys.stdin.isatty()
+
+
+def _parent_for(path: Path, registry: Registry, given: str | None) -> str | None:
+    """The `part_of` to write for a new marker at `path`.
+
+    Position suggests, a person decides. `--part-of` is written as given (a
+    unit that does not exist is refused, as a typo would be). Otherwise, when
+    a unit contains the folder and a person is at the terminal, they are
+    asked, default no. Otherwise none: membership is never inferred.
+    """
+    if given is not None:
+        try:
+            return registry.resolve(given).name
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+    above = path.parent
+    container = registry.at(above) if above != path else None
+    if container is None or not _interactive():
+        return None
+    kind = f" ({container.kind})" if container.kind else ""
+    asked = f"{path.name} sits inside {container.name}{kind}. Part of {container.name}?"
+    return container.name if click.confirm(asked, default=False) else None
 
 
 def _show(proposal: Proposal) -> None:
@@ -499,9 +529,6 @@ def _show(proposal: Proposal) -> None:
     click.echo(f"  unit:    {proposal.unit}")
     click.echo(f"  kind:    {proposal.kind or '(unknown)':<24}"
                f"  {proposal.why.get('kind', '')}")
-    if proposal.part_of:
-        click.echo(f"  part_of: {proposal.part_of:<24}"
-                   f"  {proposal.why.get('part_of', '')}")
     click.echo(f"  homes:   {proposal.why.get('homes', '')}")
     for home in proposal.homes:
         click.echo(f"    - {home}")
@@ -510,7 +537,9 @@ def _show(proposal: Proposal) -> None:
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False))
 @click.option("--yes", is_flag=True, help="Write it without asking.")
-def declare(path: str, yes: bool):
+@click.option("--part-of", default=None, metavar="UNIT", shell_complete=complete.units,
+              help="The unit this is part of. Never taken from position unasked.")
+def declare(path: str, yes: bool, part_of: str | None):
     """Declare an existing directory as a unit, from what it looks like.
 
     Everything proposed comes from position, which is a good suggestion and a
@@ -526,12 +555,13 @@ def declare(path: str, yes: bool):
 
     proposal = propose(target, registry)
     _show(proposal)
+    parent = _parent_for(target, registry, part_of)
 
     if not yes and not click.confirm("write this?", default=True):
         click.echo("nothing written.")
         return
 
-    _write_declaration(proposal, target)
+    _write_declaration(proposal, target, parent)
     click.echo(f"declared {proposal.unit}")
 
 
@@ -589,6 +619,9 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     if target.exists():
         click.echo(f"{target} already exists", err=True)
         sys.exit(1)
+    # Asked before anything is created, so a refused `--part-of` leaves
+    # nothing behind.
+    parent = _parent_for(target.resolve(), registry, part_of)
 
     target.mkdir(parents=True)
     # Derived after the directory exists: the name depends on the repository
@@ -596,7 +629,7 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     mine = home_name(target.resolve(), registry)
     homes = (mine,) + tuple(h for h in extra_homes if h != mine)
     _write_marker(target, home=mine, unit=target.name, kind=kind,
-                  part_of=part_of, homes=homes)
+                  part_of=parent, homes=homes)
     # The driver in the grammar's format (R3, R12). The stub and the status
     # reader come from the same format module, so they cannot drift (R8).
     fmt = formats.get(registry.grammar.format)
@@ -1788,9 +1821,10 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         click.echo(f"{unit_name} is not declared. It looks like this:")
         proposal = propose(match, registry)
         _show(proposal)
+        parent = _parent_for(match, registry, None)
         if not click.confirm("declare it and start?", default=True):
             return
-        _write_declaration(proposal, match)
+        _write_declaration(proposal, match, parent)
         registry = Registry(registry.roots, registry.grammar)   # re-sweep
         unit = registry.resolve(unit_name)
 
