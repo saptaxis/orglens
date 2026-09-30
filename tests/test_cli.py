@@ -1,5 +1,6 @@
 """The commands, and what they refuse to know on their own."""
 
+import json
 import os
 import subprocess
 import time
@@ -1210,3 +1211,58 @@ def test_check_and_where_say_why_a_home_is_absent(runner, tmp_path):
 
     where = runner.invoke(cli, ["where", "alpha"], env=env)
     assert "under none of your roots" in where.output
+
+
+def _chain_tree(tmp_path) -> dict:
+    """a > b > c, and d beside them; each with one loose document."""
+    docs = tmp_path / "docs" / "projects"
+    for name, parent in (("a", None), ("b", "a"), ("c", "b"), ("d", None)):
+        d = docs / name
+        d.mkdir(parents=True)
+        (d / ".orglens.yml").write_text(
+            f"home: {name}\nunit: {name}\nkind: project\n"
+            + (f"part_of: {parent}\n" if parent else "")
+            + f"homes:\n  - {name}\n"
+        )
+        (d / "overview.md").write_text(f"# Overview\n\n> **Status:** {name} going\n")
+        (d / f"notes-{name}.md").write_text("# notes\n")
+    return _roots_config(tmp_path, [tmp_path / "docs"])
+
+
+def _names_listed(output: str) -> set[str]:
+    # Unit lines are indented two spaces; `status` indents its quoted status
+    # lines further.
+    return {line.split()[0] for line in output.splitlines()
+            if line.startswith("  ") and not line.startswith("    ")}
+
+
+class TestUnder:
+    def test_list_under_a_unit_is_that_unit_and_its_subtree(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["list", "--under", "a"], env=env)
+        assert result.exit_code == 0, result.output
+        assert _names_listed(result.output) == {"a", "b", "c"}
+
+    def test_status_under_a_middle_unit(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["status", "--under", "b"], env=env)
+        assert result.exit_code == 0, result.output
+        assert _names_listed(result.output) == {"b", "c"}
+
+    def test_find_under_a_unit_covers_its_subtree(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["find", "doc", "--under", "a", "--json"], env=env)
+        assert result.exit_code == 0, result.output
+        units = {d["unit"] for d in json.loads(result.output)}
+        assert units == {"a", "b", "c"}
+
+    def test_find_with_a_unit_and_under_is_a_usage_error(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["find", "doc", "a", "--under", "b"], env=env)
+        assert result.exit_code != 0
+
+    def test_snapshot_unit_selects_the_whole_subtree(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["snapshot", "--unit", "a", "--json"], env=env)
+        assert result.exit_code == 0, result.output
+        assert {u["name"] for u in json.loads(result.output)["units"]} == {"a", "b", "c"}

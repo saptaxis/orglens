@@ -110,8 +110,8 @@ def _selected(registry: Registry, kind: str | None, unit: str | None) -> list:
     if kind is not None:
         units = [u for u in units if u.kind == kind]
     if unit is not None:
-        chosen = registry.resolve(unit)
-        units = [u for u in units if u.name == chosen.name or u.part_of == chosen.name]
+        subtree = {u.name for u in registry.below(unit)}
+        units = [u for u in units if u.name in subtree]
     return units
 
 

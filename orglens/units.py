@@ -18,7 +18,7 @@ from pathlib import Path
 from orglens.declaration import MARKER, read_marker
 from orglens.grammar import Grammar
 from orglens.homes import Candidate, Home, resolve_home, scan_roots
-from orglens.tree import Tree, build as build_tree
+from orglens.tree import Tree, below as below_in, build as build_tree
 
 
 @dataclass(frozen=True)
@@ -184,6 +184,16 @@ class Registry:
                 part_of.setdefault(u.name, u.part_of)
             self._tree = build_tree(part_of)
         return self._tree
+
+    def below(self, name: str) -> list[Unit]:
+        """A unit and every unit under it in the tree, depth first. The name
+        is resolved as `resolve` does, so a partial name works and an unknown
+        one raises the same error."""
+        top = self.resolve(name)
+        by_name: dict[str, Unit] = {}
+        for u in self.units():
+            by_name.setdefault(u.name, u)
+        return [by_name[n] for n in below_in(self.tree(), top.name)]
 
     def parts_of(self, unit: Unit) -> list[Unit]:
         """Units that declared themselves part of this one: its children in

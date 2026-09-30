@@ -234,13 +234,30 @@ def _unknown(kind: str, value: str, available) -> None:
     sys.exit(1)
 
 
+def _under(registry: Registry, name: str | None) -> list[Unit]:
+    """Every unit, or one unit and its subtree. An unknown name is the same
+    error `resolve` gives everywhere else."""
+    if name is None:
+        return registry.units()
+    try:
+        return registry.below(name)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+
+UNDER_HELP = "Only this unit and the units under it in the tree."
+
+
 @cli.command()
 @click.option("--type", "kind_filter", default=None, help="Filter by kind")
-def list(kind_filter: str | None):
+@click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
+              shell_complete=complete.units)
+def list(kind_filter: str | None, under: str | None):
     """List everything in the tree."""
     registry, _ = _load_registry()
-    units = registry.units()
-    kinds_present = sorted({u.kind for u in units})
+    units = _under(registry, under)
+    kinds_present = sorted({u.kind for u in registry.units()})
 
     if kind_filter is not None and kind_filter not in kinds_present:
         _unknown("kind", kind_filter, kinds_present)
@@ -274,10 +291,12 @@ def list(kind_filter: str | None):
 
 
 @cli.command()
-def status():
+@click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
+              shell_complete=complete.units)
+def status(under: str | None):
     """Where everything stands — the authored line, dated, beside derived facts."""
     registry, _ = _load_registry()
-    units = registry.units()
+    units = _under(registry, under)
 
     every, by_unit = _sessions_by_unit(registry)
     notes = _warm(registry, units, every)
@@ -348,9 +367,12 @@ def status():
               help="Only documents touched within this long: 2w, 90d, 6h.")
 @click.option("--waiting", is_flag=True,
               help="Only packets with a gate open, with the question.")
+@click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
+              shell_complete=complete.units)
 @click.option("--json", "as_json", is_flag=True)
 def find(artifact_type: str, unit_name: str | None, within: str | None,
-         pattern: str | None, window: str | None, waiting: bool, as_json: bool):
+         pattern: str | None, window: str | None, waiting: bool, under: str | None,
+         as_json: bool):
     """Find documents by kind, optionally scoped to one unit.
 
     The kind is the grammar's word for where to look; `--in` is the tree's
@@ -362,8 +384,14 @@ def find(artifact_type: str, unit_name: str | None, within: str | None,
     if artifact_type not in registry.grammar.artifact_types:
         _unknown("document kind", artifact_type, registry.grammar.artifact_types)
 
+    if unit_name is not None and under is not None:
+        raise click.UsageError("give a unit, or --under a unit, not both")
     try:
-        found = documents.find(registry, artifact_type, unit_name, within=within)
+        if under is not None:
+            found = [d for one in _under(registry, under)
+                     for d in documents.find(registry, artifact_type, one, within=within)]
+        else:
+            found = documents.find(registry, artifact_type, unit_name, within=within)
     except ValueError as exc:
         click.echo(str(exc), err=True)
         sys.exit(1)
@@ -766,7 +794,7 @@ def check_cmd():
               help="Say whether the written snapshot is older than the tree; exit 1 if so.")
 @click.option("--type", "kind", default=None, help="Only units of this kind.",
               shell_complete=complete.kinds)
-@click.option("--unit", "unit_name", default=None, help="Only this unit and its parts.",
+@click.option("--unit", "unit_name", default=None, help="Only this unit and the units under it.",
               shell_complete=complete.units)
 @click.option("--json", "as_json", is_flag=True,
               help="The same facts as data, for a program to compose with.")
