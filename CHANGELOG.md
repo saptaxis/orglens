@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Markers are found at any depth. The walk stopped three folders below each
+  root, so a deeper unit was not found and nothing said so; listing a nested
+  folder as a second root was the workaround, and is no longer needed.
+- `skip:` in config names the folders no walk enters, matched by folder name,
+  globs allowed; absent, a default applies (`node_modules`, `__pycache__`,
+  `*.egg-info`, `site-packages`, `venv`, `env`, `build`, `dist`, `target`,
+  `site`). Finding units, `find`, a unit's edited time and packet completion
+  share it; they had three different lists before. A skipped folder cannot
+  answer for a home by its name.
+- No walk follows a link to a directory. A document reached only through a
+  link inside a home is no longer found.
+- `check` reports a home that resolves nowhere, and `where` says why: its
+  repository is under no root, or it is not cloned on this machine. The README
+  now recommends listing each repository as a root rather than the folder that
+  holds them.
 - `orglens start <TAB>` completes unit names, as `resume`, `where` and `find`
   already did; its argument had no completer.
 - A unit's status is read from its driver in any home before any other

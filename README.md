@@ -56,17 +56,41 @@ mkdir -p ~/.orglens
 cat > ~/.orglens/config.yaml <<'EOF'
 roots:
   - ~/path/to/your/docs
-  - ~/path/to/your/code
+  - ~/path/to/your/code/one-repository
+  - ~/path/to/your/code/another
 EOF
 ```
 
-`roots` are the directories orglens sweeps for declarations: your documents tree
-and wherever your repositories are checked out. A unit outside every root is
-un-met rather than invisible, and registers itself the first time you work in
-it. The sweep goes three directories below each root; a marker deeper than
-that is found by listing its parent as a root too. A root that is itself a
-repository counts as a home candidate, so a checkout whose parent holds
-everything can be listed on its own. `grammar: /path/to/custom.yaml`
+`roots` are where orglens looks for declarations: your documents tree, and
+each repository that is a unit's home, listed one by one. List repositories
+rather than the folder that holds them: every folder under a root can answer
+for a home by its name, and a folder of checkouts usually holds copies. A root
+that is itself a repository counts as a home candidate. A home whose repository
+is not listed shows as absent in `where` and `check`. A unit outside every root
+is not in `list`, `status`, `snapshot` or `check`; standing inside it,
+`orglens where` still resolves it, and `orglens new` warns when it creates one.
+
+The walk goes as deep as the tree does. It never enters a hidden folder, never
+follows a link to a directory, and never enters a folder named in `skip:`,
+matched against the folder's own name, globs allowed. Without `skip:` the
+default applies; with it, your list replaces the default, so copy the default
+and edit it:
+
+```yaml
+skip:
+  - node_modules
+  - __pycache__
+  - "*.egg-info"
+  - site-packages
+  - venv
+  - env
+  - build
+  - dist
+  - target
+  - site
+```
+
+`grammar: /path/to/custom.yaml`
 replaces the bundled grammar. `view_link: file` makes the view's document
 links open the files themselves, for a tree read in an editor; by default they
 point at the served site at `docs_base_url` (`http://localhost:8000`).
