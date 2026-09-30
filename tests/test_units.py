@@ -37,7 +37,11 @@ def test_a_directory_in_no_home_resolves_to_nothing(two_root_tree, tmp_path):
 def test_undeclared_folders_matching_a_pattern_are_candidates(two_root_tree, tmp_path):
     found = two_root_tree.candidates()
     assert any(p.name == "reelmill" for p in found)
-    assert not any(p.name == "orglens" for p in found)
+    # The declared folder is not a candidate. (The fixture's stand-in
+    # `code/traitful-docs/docs/projects/orglens` is: it matches `projects/*`,
+    # carries no marker and is in no home. The depth limit used to hide it.)
+    declared = (tmp_path / "traitful-docs" / "docs" / "projects" / "orglens").resolve()
+    assert declared not in {p.resolve() for p in found}
 
 
 def test_a_matching_directory_inside_a_declared_home_is_not_a_candidate(two_root_tree, tmp_path):

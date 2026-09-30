@@ -189,9 +189,8 @@ class Registry:
         exists, only what is worth asking about. A report, never a gate.
 
         Matched against the sweep rather than by `rglob` per pattern. The
-        sweep is depth-bounded and already done; an unbounded `rglob` over a
-        code root walks build output and dependency folders, which is the
-        expense the whole index exists to avoid.
+        sweep is already done, and it skips build output and dependency
+        folders (`skip.py`); an `rglob` per pattern would walk them again.
 
         Matched with `Path.match`, not `fnmatch`: `fnmatch`'s `*` crosses `/`,
         so `projects/*` would match `projects/orglens/specs` as readily as

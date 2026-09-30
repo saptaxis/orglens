@@ -171,19 +171,46 @@ def test_a_root_reached_through_a_symlink_yields_resolved_paths(tmp_path):
     assert "via-symlink" not in home.path.parts
 
 
-def test_a_nested_root_reaches_past_the_outer_root_depth_bound(tmp_path):
-    # With `docs` and `docs/research/prog` both listed, a marker at
-    # `docs/research/prog/articles/piece` is depth 4 from the first root and
-    # depth 2 from the second. It has to be found: the setup note prescribes
-    # adding the nested root as the remedy for anything past the bound.
-    docs = tmp_path / "docs"
-    prog = docs / "research" / "prog"
-    piece = prog / "articles" / "piece"
-    piece.mkdir(parents=True)
-    (piece / MARKER).write_text("home: piece\n")
+def test_a_marker_at_any_depth_is_found(tmp_path):
+    # There is no depth limit. A marker six folders below the only root is
+    # found; it used to need its parent listed as a second root.
+    deep = tmp_path / "a" / "b" / "c" / "d" / "e" / "piece"
+    deep.mkdir(parents=True)
+    (deep / MARKER).write_text("home: piece\n")
 
-    candidates = scan_roots([docs, prog])
-    assert resolve_home("piece", candidates).how == "marker"
+    home = resolve_home("piece", scan_roots([tmp_path]))
+    assert home.how == "marker"
+    assert home.path == deep.resolve()
+
+
+def test_markers_in_skipped_folders_are_not_found(tmp_path):
+    for sub in ("node_modules/a", "build/b", "src/c"):
+        (tmp_path / sub).mkdir(parents=True)
+        (tmp_path / sub / MARKER).write_text(f"home: {Path(sub).name}\n")
+
+    candidates = scan_roots([tmp_path])
+    assert resolve_home("a", candidates).how != "marker"
+    assert resolve_home("b", candidates).how != "marker"
+    assert resolve_home("c", candidates).how == "marker"
+    # A skipped folder is not a candidate either: `build` cannot answer for
+    # a home by its name.
+    assert resolve_home("build", candidates).how == "absent"
+
+
+def test_a_symlinked_directory_is_not_followed(tmp_path):
+    real = tmp_path / "real"
+    (real / "deep" / "x").mkdir(parents=True)
+    (real / "deep" / "x" / MARKER).write_text("home: x\n")
+    (tmp_path / "link").symlink_to(real)
+    (tmp_path / "real" / "up").symlink_to(tmp_path)   # a loop
+
+    candidates = scan_roots([tmp_path])
+    paths = [c.path for c in candidates]
+    assert paths.count((real / "deep" / "x").resolve()) == 1
+    assert not any("link" in p.parts[len(tmp_path.resolve().parts):-1] for p in paths)
+    # The link itself is still a candidate, so a home reached through one
+    # resolves by name.
+    assert resolve_home("link", candidates).how == "name"
 
 
 def test_overlapping_roots_report_each_directory_once(tmp_path):
