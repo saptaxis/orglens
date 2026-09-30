@@ -181,3 +181,17 @@ def test_every_argument_that_takes_a_unit_completes_unit_names():
         and getattr(param, "_custom_shell_complete", None) is None
     ]
     assert missing == []
+
+
+def test_packets_are_found_at_any_depth_and_not_in_skipped_folders(tmp_path, monkeypatch):
+    for name in ("a/b/c/d", "node_modules/pkg"):
+        (tmp_path / name).mkdir(parents=True)
+        (tmp_path / name / "session.jsonl").write_text("")
+
+    class Cfg:
+        roots = [tmp_path]
+        skip = ("node_modules",)
+
+    monkeypatch.setattr("orglens.config.Config.load", staticmethod(lambda: Cfg()))
+    found = [i.value for i in complete.packets(None, None, "")]
+    assert found == [str(tmp_path / "a" / "b" / "c" / "d")]

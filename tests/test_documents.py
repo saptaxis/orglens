@@ -351,3 +351,26 @@ def test_loose_documents_include_org(docs_tree, grammar):
     (home / "backlog.org").write_text("* TODO x\n")
     unit = _registry(docs_tree, grammar).resolve("clipcompose")
     assert "backlog.org" in {p.name for p in documents.loose(unit)}
+
+
+def test_find_skips_the_folders_skip_names(tmp_path, grammar):
+    """`find` walks a home through `skip.py`: a plan in MkDocs' `site/` build
+    or in `node_modules` is not a plan. The list is config's; with
+    `skip: [archive]`, `site/` is walked again and `archive/` is not."""
+    from orglens import skip
+    home = tmp_path / "unit-a"
+    for folder in ("plans", "site/plans", "node_modules/x/plans", "archive/plans"):
+        (home / folder).mkdir(parents=True)
+        (home / folder / "01-thing-Feb012026.md").write_text("# plan\n")
+    (home / MARKER).write_text(
+        "home: unit-a\nunit: unit-a\nkind: project\nhomes:\n  - unit-a\n"
+    )
+
+    def plans() -> set[str]:
+        documents._dirs_under.cache_clear()
+        found = documents.find(Registry([tmp_path], grammar), "plan", "unit-a")
+        return {str(d.path.parent.relative_to(home)) for d in found}
+
+    assert plans() == {"plans", "archive/plans"}
+    skip.use(["archive"])
+    assert plans() == {"plans", "site/plans", "node_modules/x/plans"}

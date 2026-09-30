@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from orglens import formats
+from orglens import formats, skip
 from orglens.units import Registry, Unit
 
 
@@ -78,11 +78,6 @@ def _containers(home: Path, directory: str) -> list[Path]:
     return [d for d in _dirs_under(home) if d.name == directory]
 
 
-#: Build output and dependency folders: never documents, and the bulk of a
-#: code home's directory count.
-_SKIP = {"node_modules", "__pycache__", "venv", "dist", "build", "target", "site-packages"}
-
-
 @lru_cache(maxsize=None)
 def _dirs_under(home: Path) -> tuple[Path, ...]:
     """Every directory under a home, walked once per process and filtered
@@ -96,14 +91,9 @@ def _dirs_under(home: Path) -> tuple[Path, ...]:
         except OSError:
             continue
         for entry in entries:
-            if entry.name.startswith(".") or entry.name in _SKIP:
-                continue
-            try:
-                if entry.is_dir():
-                    found.append(entry)
-                    stack.append(entry)
-            except OSError:
-                continue
+            if skip.descend(entry):
+                found.append(entry)
+                stack.append(entry)
     return tuple(sorted(found))
 
 
@@ -182,11 +172,19 @@ def find(
                         e == resolved or e in resolved.parents for e in excluded
                     ):
                         continue
-                    if any(part.startswith(".") for part in path.relative_to(home).parts):
+                    if _skipped_below(path, home):
                         continue
                     seen.add(resolved)
                     found.append(Document(path.name, kind, path, one.name))
     return found
+
+
+def _skipped_below(path: Path, top: Path) -> bool:
+    """Whether a file `rglob` found under `top` sits in a folder no walk
+    enters, or is hidden itself. `rglob` walks everything; this is the same
+    rule `_dirs_under` applies on the way down."""
+    parts = path.relative_to(top).parts
+    return path.name.startswith(".") or any(skip.skipped(part) for part in parts[:-1])
 
 
 def loose(unit: Unit) -> list[Path]:
@@ -245,7 +243,7 @@ def _files_of(found: Document) -> list[Path]:
         return sorted(
             p for p in found.path.rglob("*")
             if p.is_file() and formats.is_document(p)
-            and not any(part.startswith(".") for part in p.relative_to(found.path).parts)
+            and not _skipped_below(p, found.path)
         )
     return [found.path]
 

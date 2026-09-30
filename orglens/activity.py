@@ -31,6 +31,7 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
+from orglens import skip
 from orglens import sessions as sessions_mod
 from orglens.sessions import Session
 
@@ -174,9 +175,6 @@ def _dirty(root: Path, path: Path) -> int:
     return count
 
 
-_SKIP = {".git", "node_modules", "__pycache__", ".venv"}
-
-
 @lru_cache(maxsize=None)
 def _newest_mtime(path: Path) -> int | None:
     """When the tree was last edited, landed or not. Cached per process and
@@ -193,11 +191,12 @@ def _newest_mtime(path: Path) -> int | None:
         except OSError:
             continue
         for entry in entries:
-            if entry.name.startswith(".") or entry.name in _SKIP:
+            if skip.skipped(entry.name):
                 continue
             try:
                 if entry.is_dir():
-                    stack.append(entry)
+                    if skip.descend(entry):
+                        stack.append(entry)
                 else:
                     newest = max(newest, int(entry.stat().st_mtime))
             except OSError:

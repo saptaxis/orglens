@@ -44,3 +44,22 @@ def descend(entry: Path) -> bool:
         return entry.is_dir() and not entry.is_symlink() and not skipped(entry.name)
     except OSError:
         return False
+
+
+def walk_files(root: Path, name: str):
+    """Every file called `name` under `root`, by the same rule: no skipped
+    folder entered, no link followed."""
+    stack = [Path(root)]
+    while stack:
+        try:
+            entries = list(stack.pop().iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.name == name and entry.is_file():
+                    yield entry
+                elif descend(entry):
+                    stack.append(entry)
+            except OSError:
+                continue
