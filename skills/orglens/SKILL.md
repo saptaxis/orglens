@@ -63,6 +63,8 @@ orglens where [<name>]                          # roots, and which unit a name o
 
 The kind is the grammar's word for where to look; `--in` is the tree's word
 where the grammar has none yet. Fire several in one turn rather than scanning.
+`orglens tree [<unit>]` shows the units as a tree; `--under <unit>` on `list`,
+`status` and `find` keeps one unit and everything under it.
 
 ## Create
 
@@ -71,12 +73,18 @@ orglens new <path> --kind project [--part-of <unit>] [--home <name>]
 ```
 
 `new` makes the directory, its marker, a stub driver document (the grammar's
-name for it, in the grammar's format; status line, *What it is*, *State tracking*), and adds the unit to the parent's
+name for it, in the grammar's format; status line, *What it is*, *State tracking*), every other file the kind's `structure:` declares (seeded with a title and what it is for), and adds the unit to the parent's
 `.nav.yml` when that lists children by name. It prints the next steps. The path
 given is exactly where it lands; `--home` is repeatable and names another place
 the work lives (a code repository). Then write the driver document — `orglens-adapt`
 is the skill for shaping one. Documents are written by hand, following the
 reference's naming; nothing parses a filename.
+
+**A parent is the person's to state.** `part_of` puts a unit in the tree, and
+where the folder sits does not. Never pass `--part-of` from position alone: when
+the folder sits inside a unit, ask the person whether it is part of that unit,
+naming it, and pass `--part-of` only on a yes. Run without a terminal, `new` and
+`declare` write no parent they were not given.
 
 A tree may hold markdown and org side by side, and both are read. Write a new
 document in the grammar's `format` (the reference says which); keep an existing

@@ -26,6 +26,36 @@
   repository (one of them seven months old, one a fragment of orglens's own
   changelog) instead of their `overview`.
 
+- The units form a tree, built from `part_of` alone: a unit with no `part_of`
+  is a top-level node, every other hangs under the unit it names, and no kind
+  is special. `orglens tree [UNIT]` draws it with kind and status, `--json`
+  as nested data. `--under UNIT` on `list`, `status` and `find` keeps one unit
+  and its subtree, and `snapshot --unit` now takes the whole subtree rather
+  than the unit and its direct children.
+- `view` draws every level of the tree, where it drew one: a grandchild's
+  card was left out. Units whose `part_of` names each other are top-level
+  cards instead of vanishing from the page.
+- A session belongs to the deepest home containing where it ran, and only to
+  the units sharing that home: an organisation whose folder holds its
+  projects' no longer counts their sessions. A container session is matched by
+  `/workspace/<home name>`, not the repository alone, which every documents
+  unit in one repository shared.
+- `check` reports a `part_of` naming no unit, a `part_of` cycle, and a unit
+  whose folder sits inside another unit's home while its marker names a
+  different parent, or none.
+- `new` and `declare` ask `Part of X? [y/N]` when the folder sits inside a unit,
+  and write `part_of` only on a yes or `--part-of`; without a terminal they
+  write none. `declare` gains `--part-of`, no longer proposes a parent in its
+  bundle, and `declare --yes` writes a parent only when given one.
+- A kind may be declared under `structure:` with no entry under `entities:`:
+  it has no pattern, is found by its markers alone, and `check` reports its
+  missing files like any kind's.
+- `new` seeds every file the kind's `structure:` declares besides the driver,
+  with a title and the grammar's description of it; `new --kind experiment`,
+  for one, now writes `design` too.
+- `check` reports a folder that looks like a unit and declares nothing wherever
+  it sits, inside another unit's home too.
+
 ## [0.5.0] — 2026-09-28
 
 orglens reads org beside markdown, mixed in one tree, and markdown stays
