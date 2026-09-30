@@ -223,18 +223,18 @@ class Registry:
         up as a migration candidate, which is the same as reporting nothing.
         `Path.match` is right-anchored and stops at the separator.
 
-        A directory nested *inside* a declared unit's home is owned by that
-        unit, not undeclared — excluded whether or not it happens to be the
-        home path exactly, which is why the test is "under a home" rather
-        than "equal to a home".
+        Wherever it sits. A folder inside a unit's home is not that unit's
+        for sitting there: membership is stated (`part_of`), so a folder that
+        looks like a unit and declares nothing is reported even under an
+        organisation's folder. Only a unit's declaring directory and its homes
+        are excluded.
         """
         owned = {u.declared_at.resolve() for u in self.units()} | {
             p.resolve() for u in self.units() for p in u.paths
         }
         found: list[Path] = []
         for candidate in self._scan():
-            resolved = candidate.path.resolve()
-            if any(resolved.is_relative_to(o) for o in owned):
+            if candidate.path.resolve() in owned:
                 continue
             if any(
                 candidate.path.match(et.pattern)
