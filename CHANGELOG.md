@@ -56,6 +56,11 @@
 - `check` reports a folder that looks like a unit and declares nothing wherever
   it sits, inside another unit's home too.
 
+- `orglens config` renders a repository's root as its path. A home inside a
+  repository (`inwit/docs/projects/orglens`) was written as its own folder
+  under the repository's key, and scad's `git clone --local` refuses a
+  subfolder, so a container run with a documents home failed at clone.
+
 ## [0.5.0] — 2026-09-28
 
 orglens reads org beside markdown, mixed in one tree, and markdown stays

@@ -80,3 +80,23 @@ def test_runtime_cannot_clobber_the_generated_repos(unit_with_clobbering_runtime
     got = yaml.safe_load(render(unit_with_clobbering_runtime))
     assert got["name"] == "orglens"
     assert set(got["repos"]) == {"orglens"}
+
+
+def test_a_home_inside_a_repository_renders_the_repositorys_root(tmp_path):
+    # The repos block is keyed by repository, so its path is the repository:
+    # scad clones it with `git clone --local <path>`, which refuses a
+    # subfolder. A docs home rendered as its own folder failed at clone.
+    from orglens.homes import Home
+    from orglens.units import Unit
+    unit = Unit(
+        name="orglens", kind="project",
+        homes=(
+            Home(name="orglens", path=tmp_path / "code" / "orglens", how="remote"),
+            Home(name="inwit/docs/projects/orglens",
+                 path=tmp_path / "inwit" / "docs" / "projects" / "orglens", how="declaring"),
+        ),
+        part_of=None, declared_at=tmp_path / "inwit" / "docs" / "projects" / "orglens",
+    )
+    got = yaml.safe_load(render(unit))
+    assert got["repos"]["inwit"]["path"] == str(tmp_path / "inwit")
+    assert got["repos"]["orglens"]["path"] == str(tmp_path / "code" / "orglens")
