@@ -146,6 +146,7 @@ def test_packets_are_the_directories_holding_a_session_file(tmp_path, monkeypatc
 
     class Cfg:
         roots = [tmp_path]
+        skip = ()
 
     monkeypatch.setattr("orglens.config.Config.load", staticmethod(lambda: Cfg()))
     found = [i.value for i in complete.packets(None, None, "")]

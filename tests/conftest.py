@@ -22,7 +22,8 @@ def no_real_machine_state(tmp_path, monkeypatch):
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "no-events")
     # Per-process caches: one command is one process, but the suite is one
     # process running hundreds of trees.
-    from orglens import activity, documents
+    from orglens import activity, documents, skip
+    skip.use(skip.DEFAULT)
     activity._status_lines.cache_clear()
     activity._last_commit.cache_clear()
     activity._newest_mtime.cache_clear()

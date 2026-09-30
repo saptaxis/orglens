@@ -12,9 +12,24 @@ from pathlib import Path
 
 import yaml
 
+from orglens import skip as skip_rule
 from orglens.grammar import Grammar
 
 ORGLENS_HOME = Path.home() / ".orglens"
+
+
+def _skip(data: dict) -> tuple[str, ...]:
+    """`skip:` as given, or the default when absent. A bare string is refused
+    rather than iterated: `skip: node_modules` would otherwise skip every
+    folder whose name is one letter."""
+    if "skip" not in data:
+        return skip_rule.DEFAULT
+    value = data["skip"]
+    if value is None:
+        value = []
+    if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
+        raise ValueError("skip must be a list of folder names (globs allowed)")
+    return tuple(value)
 
 
 @dataclass
@@ -25,6 +40,9 @@ class Config:
     #: What a view link opens: `served` (the doc at `docs_base_url`) or
     #: `file` (the file itself, for a tree read in an editor).
     view_link: str = "served"
+    #: Folder names no walk enters (`skip.py`). The whole list: a config's
+    #: `skip:` replaces the default rather than adding to it.
+    skip: tuple[str, ...] = skip_rule.DEFAULT
     _config_dir: Path | None = None
 
     @classmethod
@@ -49,6 +67,7 @@ class Config:
             # published site and the same links work from anywhere.
             docs_base_url=(data.get("docs_base_url") or "http://localhost:8000").rstrip("/"),
             view_link=data.get("view_link", "served"),
+            skip=_skip(data),
             _config_dir=path.parent,
         )
 
@@ -58,7 +77,9 @@ class Config:
         location. What the CLI loads, for readers outside the CLI."""
         import os
         path = os.environ.get("ORGLENS_CONFIG")
-        return cls.from_yaml(Path(path).expanduser()) if path else cls.load()
+        config = cls.from_yaml(Path(path).expanduser()) if path else cls.load()
+        skip_rule.use(config.skip)
+        return config
 
     @classmethod
     def load(cls) -> Config:
