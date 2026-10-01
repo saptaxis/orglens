@@ -1,69 +1,50 @@
 # Changelog
 
-## Unreleased
+## [0.6.0] — 2026-10-02
 
-- Markers are found at any depth. The walk stopped three folders below each
-  root, so a deeper unit was not found and nothing said so; listing a nested
-  folder as a second root was the workaround, and is no longer needed.
-- `skip:` in config names the folders no walk enters, matched by folder name,
-  globs allowed; absent, a default applies (`node_modules`, `__pycache__`,
-  `*.egg-info`, `site-packages`, `venv`, `env`, `build`, `dist`, `target`,
-  `site`). Finding units, `find`, a unit's edited time and packet completion
-  share it; they had three different lists before. A skipped folder cannot
-  answer for a home by its name.
-- No walk follows a link to a directory. A document reached only through a
-  link inside a home is no longer found.
-- `check` reports a home that resolves nowhere, and `where` says why: its
-  repository is under no root, or it is not cloned on this machine. The README
-  now recommends listing each repository as a root rather than the folder that
-  holds them.
-- `orglens start <TAB>` completes unit names, as `resume`, `where` and `find`
-  already did; its argument had no completer.
-- A unit's status is read from its driver in any home before any other
-  document in any home. Home by home, a code repository listed first answered
-  from its README or changelog, which may quote `**Status:**` while describing
-  something else: on a 31-unit tree two units showed a line from their code
-  repository (one of them seven months old, one a fragment of orglens's own
-  changelog) instead of their `overview`.
+### Finding units
 
-- The units form a tree, built from `part_of` alone: a unit with no `part_of`
-  is a top-level node, every other hangs under the unit it names, and no kind
-  is special. `orglens tree [UNIT]` draws it with lines, a node's units
-  grouped by kind, each as `name — status`; `--json` gives nested data. `--under UNIT` on `list`, `status` and `find` keeps one unit
-  and its subtree, and `snapshot --unit` now takes the whole subtree rather
-  than the unit and its direct children.
-- `view` draws every level of the tree, where it drew one: a grandchild's
-  card was left out. Units whose `part_of` names each other are top-level
-  cards instead of vanishing from the page.
-- A session belongs to the deepest home containing where it ran, and only to
-  the units sharing that home: an organisation whose folder holds its
-  projects' no longer counts their sessions. A container session is matched by
-  `/workspace/<home name>`, not the repository alone, which every documents
-  unit in one repository shared.
-- `check` reports a `part_of` naming no unit, a `part_of` cycle, and a unit
-  whose folder sits inside another unit's home while its marker names a
-  different parent, or none.
-- `new` and `declare` ask `Part of X? [y/N]` when the folder sits inside a unit,
-  and write `part_of` only on a yes or `--part-of`; without a terminal they
-  write none. `declare` gains `--part-of`, no longer proposes a parent in its
-  bundle, and `declare --yes` writes a parent only when given one.
-- A kind may be declared under `structure:` with no entry under `entities:`:
-  it has no pattern, is found by its markers alone, and `check` reports its
-  missing files like any kind's.
-- `new` seeds every file the kind's `structure:` declares besides the driver,
-  with a title and the grammar's description of it; `new --kind experiment`,
-  for one, now writes `design` too.
-- `check` reports a folder that looks like a unit and declares nothing wherever
-  it sits, inside another unit's home too.
+- Markers are found at any depth; roots are best listed one per repository.
+- `skip:` in config: folders no walk enters (default: `node_modules`,
+  `__pycache__`, `*.egg-info`, `site-packages`, `venv`, `env`, `build`, `dist`,
+  `target`, `site`). No walk follows a link to a directory.
+- `check` and `where` report a home that resolves nowhere.
+- Paths are shown from the root's name (`traitful-chat/docs`).
 
-- `orglens config` renders a repository's root as its path. A home inside a
-  repository (`inwit/docs/projects/orglens`) was written as its own folder
-  under the repository's key, and scad's `git clone --local` refuses a
-  subfolder, so a container run with a documents home failed at clone.
+### The unit tree
 
-- Paths in `check`, `find` and `where` are shown from the root's own name
-  (`traitful-chat/docs`), since with repositories listed one by one, `docs`
-  under two of them read the same.
+- `part_of` builds a tree of units; no kind is special.
+- `orglens tree [UNIT]`: the tree with lines, units grouped by kind, each with
+  its status. `--json` for data.
+- `--under UNIT` on `list`, `status` and `find`; `snapshot --unit` takes the
+  whole subtree.
+- `view` draws every level and keeps units in a `part_of` cycle.
+- `check` reports a `part_of` naming no unit, a cycle, a folder disagreeing
+  with its marker, and an undeclared folder inside another unit's home.
+- A session belongs to the deepest home containing it. Container sessions are
+  matched by `/workspace/<home name>`.
+
+### Declaring and creating units
+
+- `new` and `declare` ask before writing a parent (`Part of X? [y/N]`), and
+  never write one unasked. `declare` gains `--part-of`.
+- A kind can be declared under `structure:` alone, found by its markers.
+- `new` seeds every file the kind's `structure:` declares.
+
+### Fixes
+
+- `orglens config` renders a repository's root as its path, not a home inside
+  it, which scad's clone refused.
+- A unit's status comes from its driver in any home before other documents.
+- `orglens start <TAB>` completes unit names.
+
+### Not yet
+
+- Status lines are shown with their org markup, and cut at the first comma
+  even inside brackets.
+- `list` does not group by organisation.
+- `resume UNIT` can pick a running session or skip a just-launched one;
+  fixing one by the obvious rule breaks the other, so the rule is not decided.
 
 ## [0.5.0] — 2026-09-28
 

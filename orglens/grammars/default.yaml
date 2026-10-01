@@ -10,10 +10,11 @@ format: md
 # question, an experiment's design — stay separate and are pointed at from it.
 driver: overview
 
-# What exists. Every pattern is relative: matched at the docs root, then inside
-# every entity found, until nothing new turns up. Depth is never declared — an
-# experiment is `expt-*` wherever it sits, so a client can grow projects and a
-# project can grow experiments without editing this file.
+# What might be undeclared work. A unit exists because its marker says so,
+# found at any depth; these patterns only name folders worth asking about when
+# they carry no marker. Depth is never declared — an
+# experiment is `expt-*` wherever it sits. A kind may also be declared under
+# `structure:` alone, with no pattern: found by its markers only.
 entities:
   client: clients/*
   project: projects/*
@@ -57,9 +58,10 @@ artifacts:
       skeleton, draft, critique, audit. A trailing slash in `find` means the
       artifact is the directory, not the files in it.
 
-# What each part of an entity is for. Read when authoring and when creating;
-# never when discovering. Describing purpose is safe — asserting existence is
-# what drifts, so a missing entry here hides nothing.
+# What each part of an entity is for. Read when authoring, and by `new`, which
+# seeds every file named here (a folder, with a trailing `/`, is never made).
+# `check` reports a declared file that is missing, and does not report a
+# folder of documents that some kind names here.
 structure:
   client:
     overview: Who they are and the state of the engagement.

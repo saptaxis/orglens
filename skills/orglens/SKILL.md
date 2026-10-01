@@ -39,7 +39,7 @@ that is the writing capability's; this card only says where the file goes.
 ```bash
 orglens snapshot --check || orglens snapshot   # refresh only when stale
 orglens snapshot --stdout --type project        # scope it: a projects task need not load every client and experiment
-orglens snapshot --stdout --unit <name>         # one unit and its parts
+orglens snapshot --stdout --unit <name>         # one unit and everything under it in the tree
 orglens snapshot --json [--unit <name>]         # the same facts as data, to compose with
 ```
 
@@ -92,7 +92,7 @@ one in the format it is in. The status line is `#+STATUS: …` under `#+TITLE:` 
 org, `> **Status:** …` in markdown. `check` reports a document written in both.
 
 ```bash
-orglens declare <path> [--yes]                  # a folder that exists and looks like a unit but never said so
+orglens declare <path> [--yes] [--part-of <unit>]  # a folder that exists and looks like a unit but never said so
 ```
 
 ## Launch
@@ -171,7 +171,7 @@ The tutorial at `capabilities/tutorial/README.md` walks all of it.
 ## Check
 
 ```bash
-orglens check                                   # drift: missing driver docs, undeclared folders, weak or shared homes, a unit its parent nav omits, folders the grammar has no word for, a document in two formats
+orglens check                                   # drift: missing driver docs, undeclared folders, homes under no root, part_of naming no unit or a cycle, a folder disagreeing with its marker, weak or shared homes, a unit its parent nav omits, folders the grammar has no word for, a document in two formats
 orglens view                                    # the page: waiting and running first, then a card per unit; filter by unit, agent, text
 orglens config <unit> [--workdir <repo>]        # the repos: block scad reads for a container
 orglens reference --out <path>                  # regenerate the grammar reference
