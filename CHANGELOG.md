@@ -28,8 +28,8 @@
 
 - The units form a tree, built from `part_of` alone: a unit with no `part_of`
   is a top-level node, every other hangs under the unit it names, and no kind
-  is special. `orglens tree [UNIT]` draws it with kind and status, `--json`
-  as nested data. `--under UNIT` on `list`, `status` and `find` keeps one unit
+  is special. `orglens tree [UNIT]` draws it with lines, a node's units
+  grouped by kind, each as `name — status`; `--json` gives nested data. `--under UNIT` on `list`, `status` and `find` keeps one unit
   and its subtree, and `snapshot --unit` now takes the whole subtree rather
   than the unit and its direct children.
 - `view` draws every level of the tree, where it drew one: a grandchild's

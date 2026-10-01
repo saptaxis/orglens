@@ -50,29 +50,69 @@ def test_a_chain_leading_into_a_cycle_keeps_its_parent():
     assert tree.below(t, "a") == ["a", "d"]
 
 
-def test_draw_gives_every_top_node_and_its_subtree_with_branches():
-    t = tree.build({"org": None, "prog": "org", "e1": "prog", "e2": "prog",
-                    "client": "org", "solo": None})
-    lines = tree.draw(t, label=lambda n: n.upper())
-    assert lines == [
-        "ORG",
-        "├── CLIENT",
-        "└── PROG",
-        "    ├── E1",
-        "    └── E2",
-        "SOLO",
+KINDS = {"personal": "organization", "traitful": "organization",
+         "lwp": "research", "e1": "experiment", "e2": "experiment", "lander": "project",
+         "orglens": "project", "dotfiles": "project", "acme": "client", "gasco": "project"}
+SHAPE = {"personal": None, "traitful": None, "lwp": "personal", "e1": "lwp", "e2": "lwp",
+         "lander": "lwp", "orglens": "personal", "dotfiles": "personal",
+         "acme": "traitful", "gasco": "traitful"}
+
+
+def test_draw_groups_each_top_nodes_units_by_kind_with_lines_and_spacing():
+    t = tree.build(SHAPE)
+    assert tree.draw(t, kind=KINDS.get) == [
+        "personal",
+        "├── project",
+        "│   ├── dotfiles",
+        "│   └── orglens",
+        "│",
+        "└── research",
+        "    └── lwp",
+        "        ├── experiment",
+        "        │   ├── e1",
+        "        │   └── e2",
+        "        └── project",
+        "            └── lander",
+        "",
+        "traitful",
+        "├── client",
+        "│   └── acme",
+        "│",
+        "└── project",
+        "    └── gasco",
+    ]
+
+
+def test_below_the_top_one_kind_needs_no_heading():
+    t = tree.build({"org": None, "prog": "org", "e1": "prog", "e2": "prog"})
+    kinds = {"org": "organization", "prog": "research", "e1": "experiment", "e2": "experiment"}
+    assert tree.draw(t, kind=kinds.get) == [
+        "org", "└── research", "    └── prog", "        ├── e1", "        └── e2",
+    ]
+
+
+def test_a_status_follows_the_name_after_a_separator():
+    t = tree.build({"org": None, "p": "org"})
+    kinds = {"org": "organization", "p": "project"}
+    statuses = {"org": "Opened", "p": "Plan 02 complete"}
+    assert tree.draw(t, kind=kinds.get, status=statuses.get) == [
+        "org — Opened", "└── project", "    └── p — Plan 02 complete",
     ]
 
 
 def test_draw_from_one_unit_is_its_subtree():
-    t = tree.build({"org": None, "prog": "org", "e1": "prog"})
-    assert tree.draw(t, label=str, start="prog") == ["prog", "└── e1"]
+    t = tree.build(SHAPE)
+    assert tree.draw(t, kind=KINDS.get, start="lwp") == [
+        "lwp", "├── experiment", "│   ├── e1", "│   └── e2", "│", "└── project", "    └── lander",
+    ]
 
 
 def test_draw_marks_an_unknown_parent_and_a_cycle():
     t = tree.build({"a": "nosuch", "b": "c", "c": "b"})
-    assert tree.draw(t, label=str) == [
+    assert tree.draw(t, kind=lambda n: "project") == [
         "a  (part of nosuch: no such unit)",
+        "",
         "b  (in a cycle: b > c > b)",
+        "",
         "c  (in a cycle: b > c > b)",
     ]

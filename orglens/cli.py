@@ -402,14 +402,10 @@ def tree_cmd(unit_name: str | None, as_json: bool):
         click.echo(json.dumps([tree_mod.nested(shape, t, node) for t in tops], indent=2))
         return
 
-    def label(name: str) -> str:
-        kind = by_name[name].kind
-        text = f"{name}  ({kind})" if kind else name
-        status = status_of(name)
-        return f"{text}  {status}" if status else text
-
+    # Cut to the terminal's width so a status never wraps; piped, whole.
     width = shutil.get_terminal_size().columns if sys.stdout.isatty() else None
-    for line in tree_mod.draw(shape, label, start=start):
+    for line in tree_mod.draw(shape, lambda name: by_name[name].kind, start=start,
+                              status=status_of):
         click.echo(line[:width] if width else line)
 
 

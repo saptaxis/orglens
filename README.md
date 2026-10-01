@@ -105,7 +105,7 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 |---------|-------------|
 | `orglens list [--type KIND] [--under UNIT]` | List all units, grouped by declared kind; `--under` keeps one unit and its subtree |
 | `orglens status [--under UNIT]` | Where every unit stands, across all of its homes |
-| `orglens tree [UNIT] [--json]` | The units as a tree, each under the unit its `part_of` names, with kind and status; a `part_of` naming no unit, and a cycle, are marked |
+| `orglens tree [UNIT] [--json]` | The units as a tree, each under the unit its `part_of` names, a node's units grouped by kind, each as `name — status`; a `part_of` naming no unit, and a cycle, are marked |
 | `orglens find KIND [UNIT] [--under UNIT] [--in DIR] [--grep TEXT] [--since 2w] [--waiting] [--json]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own. `--in` scopes to a directory the grammar has no name for; `--grep` keeps the ones whose text matches and shows the lines |
 | `orglens new PATH [--kind KIND] [--part-of UNIT] [--home NAME]` | Create a unit: a directory, the declaration that names it, and a stub driver document in the grammar's format, and every other file the kind's `structure:` declares, seeded with its title and what it is for. `--home` is repeatable |
 | `orglens declare PATH [--yes] [--part-of UNIT]` | Declare an existing directory as a unit, proposed from what it looks like; the parent is asked, never taken from position |

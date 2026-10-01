@@ -71,33 +71,62 @@ def below(tree: Tree, name: str) -> list[str]:
     return out
 
 
-def draw(tree: Tree, label, start: str | None = None) -> list[str]:
+def draw(tree: Tree, kind, start: str | None = None, status=None) -> list[str]:
     """The tree as lines, every top node and its subtree, or `start`'s.
-    `label(name)` gives a node's text; a parent that is no unit and a cycle
-    are marked after it, since both leave the unit top-level."""
+    `kind(name)` gives a unit's kind; `status(name)`, when given, a line
+    shown after the name as `name — status`.
+
+    Under a top node its units are grouped by kind, each group a node headed
+    by the kind as markers write it, with a spacer line between groups;
+    deeper down a node's children are grouped only when they are of more than
+    one kind. A parent that is no unit and a cycle are marked after the name,
+    since both leave the unit top-level.
+    """
     cycle_of = {n: c for c in tree.cycles for n in c}
 
     def text(name: str) -> str:
+        said = status(name) if status else None
         marks = []
         if name in tree.unknown:
             marks.append(f"part of {tree.unknown[name]}: no such unit")
         if name in cycle_of:
             loop = cycle_of[name]
             marks.append("in a cycle: " + " > ".join([*loop, loop[0]]))
-        return label(name) + "".join(f"  ({m})" for m in marks)
+        return name + (f" — {said}" if said else "") + "".join(f"  ({m})" for m in marks)
+
+    def expand(name: str, top: bool, seen: set[str]) -> tuple[list, bool]:
+        """A node's children as (text, children) items, and whether a spacer
+        line goes between them (kind groups under a top node)."""
+        kids = [k for k in tree.children.get(name, []) if k not in seen]
+        groups: dict[str, list[str]] = {}
+        for kid in kids:
+            groups.setdefault(kind(kid) or "", []).append(kid)
+
+        def unit(kid: str) -> tuple:
+            return text(kid), expand(kid, False, seen | {kid})
+
+        if top or len(groups) > 1:
+            items = [(group or "(no kind)", ([unit(k) for k in groups[group]], False))
+                     for group in sorted(groups)]
+            return items, top
+        return [unit(k) for k in kids], False
 
     lines: list[str] = []
 
-    def walk(name: str, lead: str, seen: set[str]) -> None:
-        kids = [k for k in tree.children.get(name, []) if k not in seen]
-        for i, kid in enumerate(kids):
-            last = i == len(kids) - 1
-            lines.append(lead + ("└── " if last else "├── ") + text(kid))
-            walk(kid, lead + ("    " if last else "│   "), seen | {kid})
+    def render(items: list, spacer: bool, prefix: str) -> None:
+        for i, (label, (below, spaced)) in enumerate(items):
+            last = i == len(items) - 1
+            lines.append(prefix + ("└── " if last else "├── ") + label)
+            render(below, spaced, prefix + ("    " if last else "│   "))
+            if spacer and not last:
+                lines.append(prefix + "│")
 
-    for top in ([start] if start is not None else tree.top):
+    for i, top in enumerate([start] if start is not None else tree.top):
+        if i:
+            lines.append("")
         lines.append(text(top))
-        walk(top, "", {top})
+        items, spacer = expand(top, True, {top})
+        render(items, spacer, "")
     return lines
 
 
