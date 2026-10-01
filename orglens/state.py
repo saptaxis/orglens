@@ -56,18 +56,51 @@ def read_status(path: Path, declared: list[str] | None = None,
     actually maintain and it is found there; the driver is only where it is
     looked for first.
     """
-    preferred: list[Path] = []
+    preferred = _declared(path, declared, prefer)
+    return _first_status(preferred + _rest(path, preferred))
+
+
+def unit_status(paths: list[Path], declared: list[str] | None = None,
+                prefer: str = "md") -> Status | None:
+    """The status line for a unit that lives in several homes.
+
+    The documents the grammar names, in every home, before any other document
+    in any home. Home by home, a code repository listed first would answer
+    from its README or changelog — which may well quote `**Status:**` while
+    describing the syntax — before the documents home was asked for its
+    driver.
+    """
+    preferred = [p for path in paths for p in _declared(path, declared, prefer)]
+    status = _first_status(preferred)
+    if status is not None:
+        return status
+    for path in paths:
+        status = _first_status(_rest(path, preferred))
+        if status is not None:
+            return status
+    return None
+
+
+def _declared(path: Path, declared: list[str] | None, prefer: str) -> list[Path]:
+    found: list[Path] = []
     for name in declared or []:
         if name.endswith("/"):
             continue
-        found = formats.existing(path, name, prefer)
-        if found is not None and found not in preferred:
-            preferred.append(found)
-    rest = sorted(
+        match = formats.existing(path, name, prefer)
+        if match is not None and match not in found:
+            found.append(match)
+    return found
+
+
+def _rest(path: Path, preferred: list[Path]) -> list[Path]:
+    return sorted(
         p for p in _entries(path)
         if p.is_file() and formats.is_document(p) and p not in preferred
     )
-    for candidate in preferred + rest:
+
+
+def _first_status(candidates: list[Path]) -> Status | None:
+    for candidate in candidates:
         fmt = formats.of(candidate)
         if fmt is None:
             continue

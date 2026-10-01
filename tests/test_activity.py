@@ -192,3 +192,18 @@ def test_latest_plan_counts_org_plans(tmp_path):
     (plans / "01-a-Jan012026.md").write_text("x")
     (plans / "02-b-Feb012026.org").write_text("x")
     assert activity._latest_plan(tmp_path) == "02"
+
+
+def test_newest_mtime_ignores_what_skip_names(tmp_path):
+    """/Edited/ means a person touched it: a newer file under `build/` does
+    not move it, one under `src/` does."""
+    import os
+    home = tmp_path / "unit"
+    (home / "src").mkdir(parents=True)
+    (home / "build").mkdir()
+    (home / "src" / "a.py").write_text("x")
+    os.utime(home / "src" / "a.py", (1_000_000, 1_000_000))
+    (home / "build" / "out.bin").write_text("x")
+    os.utime(home / "build" / "out.bin", (2_000_000, 2_000_000))
+
+    assert activity._newest_mtime(home) == 1_000_000

@@ -95,13 +95,14 @@ def packets(ctx, param, incomplete):
     A packet is not in the snapshot — it is a directory with a session file,
     which nothing renders — so this is the one completer that looks at the
     tree. It stays cheap by looking only for the session file itself rather
-    than walking every directory: `rglob` on one filename, and the roots are
-    a handful of trees.
+    than reading every file: one filename, looked for under the roots without
+    entering the folders `skip.py` names.
     """
     from pathlib import Path
 
     try:
         from orglens.config import Config
+        from orglens import skip
         from orglens.workflow.session import SESSION_FILE
 
         roots = [Path(r).expanduser() for r in Config.current().roots]
@@ -110,7 +111,7 @@ def packets(ctx, param, incomplete):
     found = []
     for root in roots:
         try:
-            found += [str(p.parent) for p in root.rglob(SESSION_FILE)]
+            found += [str(p.parent) for p in skip.walk_files(root, SESSION_FILE)]
         except OSError:
             continue
     return _items(((path, "") for path in sorted(set(found))), incomplete)

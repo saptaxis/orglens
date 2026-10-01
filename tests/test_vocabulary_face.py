@@ -32,7 +32,7 @@ ENGINE = ROOT / "orglens"
 FACE = ("cli.py", "check.py", "complete.py", "config.py", "declaration.py",
         "documents.py",
         "events.py", "grammar.py", "homes.py", "propose.py", "reference.py",
-        "scadconfig.py", "sessions.py", "snapshot.py", "state.py", "units.py",
+        "scadconfig.py", "sessions.py", "skip.py", "snapshot.py", "state.py", "tree.py", "units.py",
         "workflow/definition.py", "workflow/session.py", "workflow/cli.py")
 
 
@@ -48,7 +48,8 @@ def vocabulary() -> set[str]:
         for key in entity_type.structure:
             words.add(key.rstrip("/").removesuffix(".md"))
         # "projects" out of "projects/*", "expt-" out of "expt-*"
-        words.add(entity_type.pattern.split("*")[0].strip("/"))
+        if entity_type.pattern:
+            words.add(entity_type.pattern.split("*")[0].strip("/"))
     for artifact_type in grammar.artifact_types.values():
         words.add(artifact_type.find.split("/")[0])
     return {w for w in words if w and not set(w) <= set("*?[]")}

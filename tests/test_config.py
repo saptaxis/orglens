@@ -137,3 +137,37 @@ def test_current_honours_orglens_config(tmp_path, monkeypatch):
     path.write_text("roots: [/somewhere]\n")
     monkeypatch.setenv("ORGLENS_CONFIG", str(path))
     assert Config.current().roots == [Path("/somewhere")]
+
+
+def test_skip_defaults_when_config_has_none(tmp_path):
+    from orglens import skip
+    path = tmp_path / "config.yaml"
+    path.write_text("roots: [/tmp]\n")
+    assert Config.from_yaml(path).skip == skip.DEFAULT
+
+
+def test_skip_is_the_whole_list_when_given(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("roots: [/tmp]\nskip: [data, \"*.log\"]\n")
+    assert Config.from_yaml(path).skip == ("data", "*.log")
+    path.write_text("roots: [/tmp]\nskip: []\n")
+    assert Config.from_yaml(path).skip == ()
+
+
+@pytest.mark.parametrize("value", ["node_modules", "{a: b}", "[1]"])
+def test_skip_that_is_not_a_list_of_names_is_an_error(tmp_path, value):
+    # A string would be iterated as characters and skip every one-letter folder.
+    path = tmp_path / "config.yaml"
+    path.write_text(f"roots: [/tmp]\nskip: {value}\n")
+    with pytest.raises(ValueError, match="skip"):
+        Config.from_yaml(path)
+
+
+def test_current_puts_the_configs_skip_in_force(tmp_path, monkeypatch):
+    from orglens import skip
+    path = tmp_path / "config.yaml"
+    path.write_text("roots: [/somewhere]\nskip: [data]\n")
+    monkeypatch.setenv("ORGLENS_CONFIG", str(path))
+    Config.current()
+    assert skip.skipped("data")
+    assert not skip.skipped("node_modules")

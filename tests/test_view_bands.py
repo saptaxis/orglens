@@ -121,6 +121,26 @@ class TestPage:
         assert "data-unit='expt-1'" in prog_card
         assert page.count("data-unit='expt-1'") == 1
 
+    def test_units_naming_each_other_as_parents_both_stay_on_the_page(self):
+        # A cycle has no top-level member, so nesting under parents drew
+        # neither card. Each is a top-level card instead.
+        rows = [_row("a", Activity(last_session=NOW - H), part_of="b"),
+                _row("b", Activity(last_session=NOW - H), part_of="a")]
+        page = render([("Projects", rows)], CTX, now=NOW)
+        assert "data-unit='a'" in page
+        assert "data-unit='b'" in page
+
+    def test_a_grandchild_is_drawn_inside_its_parents_card(self):
+        # organization > programme > experiment: the experiment is a card
+        # inside the programme's, which is inside the organisation's.
+        rows = [_row("org", Activity(last_session=NOW - H), kind="organization"),
+                _row("prog", Activity(last_session=NOW - H), kind="research-program", part_of="org"),
+                _row("expt", Activity(modified=NOW - 2 * H), kind="experiment", part_of="prog")]
+        page = render([("All", rows)], CTX, now=NOW)
+        assert page.count("data-unit='expt'") == 1
+        prog_card = page[page.index("data-unit='prog'"):]
+        assert "data-unit='expt'" in prog_card
+
     def test_bands_older_than_yesterday_are_folded(self):
         rows = [_row("a", Activity(last_session=NOW - H)), _row("b", Activity(modified=NOW - 10 * 24 * H))]
         page = render([("Projects", rows)], CTX, now=NOW)

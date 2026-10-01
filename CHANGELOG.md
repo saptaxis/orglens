@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.6.0] — 2026-10-02
+
+### Finding units
+
+- Markers are found at any depth; roots are best listed one per repository.
+- `skip:` in config: folders no walk enters (default: `node_modules`,
+  `__pycache__`, `*.egg-info`, `site-packages`, `venv`, `env`, `build`, `dist`,
+  `target`, `site`). No walk follows a link to a directory.
+- `check` and `where` report a home that resolves nowhere.
+- Paths are shown from the root's name (`traitful-chat/docs`).
+
+### The unit tree
+
+- `part_of` builds a tree of units; no kind is special.
+- `orglens tree [UNIT]`: the tree with lines, units grouped by kind, each with
+  its status. `--json` for data.
+- `--under UNIT` on `list`, `status` and `find`; `snapshot --unit` takes the
+  whole subtree.
+- `view` draws every level and keeps units in a `part_of` cycle.
+- `check` reports a `part_of` naming no unit, a cycle, a folder disagreeing
+  with its marker, and an undeclared folder inside another unit's home.
+- A session belongs to the deepest home containing it. Container sessions are
+  matched by `/workspace/<home name>`.
+
+### Declaring and creating units
+
+- `new` and `declare` ask before writing a parent (`Part of X? [y/N]`), and
+  never write one unasked. `declare` gains `--part-of`.
+- A kind can be declared under `structure:` alone, found by its markers.
+- `new` seeds every file the kind's `structure:` declares.
+
+### Fixes
+
+- `orglens config` renders a repository's root as its path, not a home inside
+  it, which scad's clone refused.
+- A unit's status comes from its driver in any home before other documents.
+- `orglens start <TAB>` completes unit names.
+
+### Not yet
+
+- Status lines are shown with their org markup, and cut at the first comma
+  even inside brackets.
+- `list` does not group by organisation.
+- `resume UNIT` can pick a running session or skip a just-launched one;
+  fixing one by the obvious rule breaks the other, so the rule is not decided.
+
 ## [0.5.0] — 2026-09-28
 
 orglens reads org beside markdown, mixed in one tree, and markdown stays

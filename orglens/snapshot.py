@@ -17,7 +17,7 @@ from pathlib import Path
 
 from orglens import documents
 from orglens.config import Config
-from orglens.state import read_status
+from orglens.state import unit_status
 from orglens.units import Registry
 
 
@@ -44,7 +44,7 @@ def generate_snapshot(
         "",
         "**Kinds:** "
         + ", ".join(
-            f"{name} (`{et.pattern}`)"
+            f"{name} (`{et.pattern}`)" if et.pattern else f"{name} (declared by marker)"
             for name, et in registry.grammar.entity_types.items()
         ),
         "",
@@ -110,8 +110,8 @@ def _selected(registry: Registry, kind: str | None, unit: str | None) -> list:
     if kind is not None:
         units = [u for u in units if u.kind == kind]
     if unit is not None:
-        chosen = registry.resolve(unit)
-        units = [u for u in units if u.name == chosen.name or u.part_of == chosen.name]
+        subtree = {u.name for u in registry.below(unit)}
+        units = [u for u in units if u.name in subtree]
     return units
 
 
@@ -163,8 +163,4 @@ def _heading(kind: str) -> str:
 
 def _status_of(registry: Registry, unit):
     declared = registry.grammar.documents_for(unit.kind)
-    for path in unit.paths:
-        status = read_status(path, declared, registry.grammar.format)
-        if status:
-            return status
-    return None
+    return unit_status(unit.paths, declared, registry.grammar.format)

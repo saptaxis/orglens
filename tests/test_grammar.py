@@ -178,3 +178,25 @@ def test_a_pattern_with_a_dot_in_its_stem_keeps_it(tmp_path):
     assert sorted(kinds["draft"].file_globs) == ["*.draft.md", "*.draft.org"]
     assert sorted(kinds["release"].file_globs) == ["v1.2-*.md", "v1.2-*.org"]
     assert kinds["text"].file_globs == ["*.txt"]
+
+
+ORG_GRAMMAR = (
+    "version: 2\ndriver: overview\nformat: org\n"
+    "entities:\n  project: projects/*\n"
+    "structure:\n"
+    "  project:\n    overview: What it is.\n"
+    "  organization:\n    overview: Where it stands.\n    inbox: Capture not yet processed.\n"
+    "artifacts:\n  doc:\n    find: \"*\"\n    means: anything\n"
+)
+
+
+def test_a_kind_declared_only_in_structure_is_a_kind_with_no_pattern(tmp_path):
+    # Organisations are top-level folders with free names: no glob picks
+    # them out, and they are found by their markers alone.
+    path = tmp_path / "grammar.yaml"
+    path.write_text(ORG_GRAMMAR)
+    g = Grammar.from_yaml(path)
+    org = g.entity_types["organization"]
+    assert org.pattern is None
+    assert set(org.files) == {"overview", "inbox"}
+    assert g.entity_types["project"].pattern == "projects/*"

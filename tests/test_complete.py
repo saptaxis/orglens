@@ -146,6 +146,7 @@ def test_packets_are_the_directories_holding_a_session_file(tmp_path, monkeypatc
 
     class Cfg:
         roots = [tmp_path]
+        skip = ()
 
     monkeypatch.setattr("orglens.config.Config.load", staticmethod(lambda: Cfg()))
     found = [i.value for i in complete.packets(None, None, "")]
@@ -168,3 +169,29 @@ def test_a_workflow_that_does_not_validate_still_completes(tmp_path):
         params = {"packet": str(packet)}
 
     assert [i.value for i in complete.nodes(Ctx, None, "")] == ["brief", "draft"]
+
+
+def test_every_argument_that_takes_a_unit_completes_unit_names():
+    """`start <TAB>` offered nothing while `resume <TAB>` offered units."""
+    from orglens.cli import cli
+    missing = [
+        name for name, command in cli.commands.items()
+        for param in command.params
+        if param.param_type_name == "argument" and param.name in ("unit_name", "unit")
+        and getattr(param, "_custom_shell_complete", None) is None
+    ]
+    assert missing == []
+
+
+def test_packets_are_found_at_any_depth_and_not_in_skipped_folders(tmp_path, monkeypatch):
+    for name in ("a/b/c/d", "node_modules/pkg"):
+        (tmp_path / name).mkdir(parents=True)
+        (tmp_path / name / "session.jsonl").write_text("")
+
+    class Cfg:
+        roots = [tmp_path]
+        skip = ("node_modules",)
+
+    monkeypatch.setattr("orglens.config.Config.load", staticmethod(lambda: Cfg()))
+    found = [i.value for i in complete.packets(None, None, "")]
+    assert found == [str(tmp_path / "a" / "b" / "c" / "d")]

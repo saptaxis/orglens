@@ -19,7 +19,11 @@ sessions, which is ordinary). Every other command works without it.
 - **A unit declares itself.** A `.orglens.yml` says what this is. Where the
   folder sits means nothing, so work can move without becoming something else.
 - **Grouping is stated.** `part_of:` is the only way one unit belongs to
-  another. A folder inside a folder is not its child.
+  another, and it builds a tree: a unit with no `part_of` is a top-level node,
+  every other hangs under the unit it names. A folder inside a folder is not
+  its child. `kind` is a label on each node; no kind is special, so an
+  organisation is a top-level unit of kind `organization`, and what is in it
+  is its subtree.
 - **A home is a name.** It resolves to a path on this machine — by marker, then
   git remote, then directory name — so one declaration works on your laptop,
   another machine, and inside a container where the repositories sit elsewhere.
@@ -56,17 +60,41 @@ mkdir -p ~/.orglens
 cat > ~/.orglens/config.yaml <<'EOF'
 roots:
   - ~/path/to/your/docs
-  - ~/path/to/your/code
+  - ~/path/to/your/code/one-repository
+  - ~/path/to/your/code/another
 EOF
 ```
 
-`roots` are the directories orglens sweeps for declarations: your documents tree
-and wherever your repositories are checked out. A unit outside every root is
-un-met rather than invisible, and registers itself the first time you work in
-it. The sweep goes three directories below each root; a marker deeper than
-that is found by listing its parent as a root too. A root that is itself a
-repository counts as a home candidate, so a checkout whose parent holds
-everything can be listed on its own. `grammar: /path/to/custom.yaml`
+`roots` are where orglens looks for declarations: your documents tree, and
+each repository that is a unit's home, listed one by one. List repositories
+rather than the folder that holds them: every folder under a root can answer
+for a home by its name, and a folder of checkouts usually holds copies. A root
+that is itself a repository counts as a home candidate. A home whose repository
+is not listed shows as absent in `where` and `check`. A unit outside every root
+is not in `list`, `status`, `snapshot` or `check`; standing inside it,
+`orglens where` still resolves it, and `orglens new` warns when it creates one.
+
+The walk goes as deep as the tree does. It never enters a hidden folder, never
+follows a link to a directory, and never enters a folder named in `skip:`,
+matched against the folder's own name, globs allowed. Without `skip:` the
+default applies; with it, your list replaces the default, so copy the default
+and edit it:
+
+```yaml
+skip:
+  - node_modules
+  - __pycache__
+  - "*.egg-info"
+  - site-packages
+  - venv
+  - env
+  - build
+  - dist
+  - target
+  - site
+```
+
+`grammar: /path/to/custom.yaml`
 replaces the bundled grammar. `view_link: file` makes the view's document
 links open the files themselves, for a tree read in an editor; by default they
 point at the served site at `docs_base_url` (`http://localhost:8000`).
@@ -75,12 +103,13 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 
 | Command | Description |
 |---------|-------------|
-| `orglens list [--type KIND]` | List all units, grouped by declared kind |
-| `orglens status` | Where every unit stands, across all of its homes |
-| `orglens find KIND [UNIT] [--in DIR] [--grep TEXT] [--since 2w] [--waiting] [--json]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own. `--in` scopes to a directory the grammar has no name for; `--grep` keeps the ones whose text matches and shows the lines |
-| `orglens new PATH [--kind KIND] [--part-of UNIT] [--home NAME]` | Create a unit: a directory, the declaration that names it, and a stub driver document in the grammar's format. `--home` is repeatable |
-| `orglens declare PATH [--yes]` | Declare an existing directory as a unit, proposed from what it looks like |
-| `orglens check` | Report where the tree has drifted: missing driver documents, undeclared folders, weak or shared homes, kinds that match nothing, folders of documents the grammar has no word for, a document written in two formats side by side. Reports only — never gates |
+| `orglens list [--type KIND] [--under UNIT]` | List all units, grouped by declared kind; `--under` keeps one unit and its subtree |
+| `orglens status [--under UNIT]` | Where every unit stands, across all of its homes |
+| `orglens tree [UNIT] [--json]` | The units as a tree, each under the unit its `part_of` names, a node's units grouped by kind, each as `name — status`; a `part_of` naming no unit, and a cycle, are marked |
+| `orglens find KIND [UNIT] [--under UNIT] [--in DIR] [--grep TEXT] [--since 2w] [--waiting] [--json]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own. `--in` scopes to a directory the grammar has no name for; `--grep` keeps the ones whose text matches and shows the lines |
+| `orglens new PATH [--kind KIND] [--part-of UNIT] [--home NAME]` | Create a unit: a directory, the declaration that names it, and a stub driver document in the grammar's format, and every other file the kind's `structure:` declares, seeded with its title and what it is for. `--home` is repeatable |
+| `orglens declare PATH [--yes] [--part-of UNIT]` | Declare an existing directory as a unit, proposed from what it looks like; asks for the parent when the folder sits inside a unit |
+| `orglens check` | Report where the tree has drifted: missing driver documents and declared files, undeclared folders, homes under no root, a `part_of` naming no unit or a cycle, a folder disagreeing with its marker, weak or shared homes, kinds that match nothing, folders of documents the grammar has no word for, a document written in two formats side by side. Reports only — never gates |
 | `orglens snapshot [--stdout] [--check] [--json]` | Generate a topology snapshot (markdown), with the same facts as JSON beside it for completion; `--json` prints the data instead. `--check` says whether the written one is older than any declaration or driver document, or the JSON lags it, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
 | `orglens view` | Render where everything stands as a page, and open it: units banded by when they last moved, waiting first, a foldable card each; filter by band, kind, agent or text |
@@ -236,10 +265,12 @@ and appends one `attributed` event to `~/.orglens/events/`. Unless you pass
 points at wherever the unit's status is authored.
 
 `orglens start` on an undeclared name proposes a declaration from the
-directory's position: kind from where it sits, `part_of` from what contains it,
-a home from a same-named repository. It shows the reasoning for each guess and
-asks before writing. `orglens declare PATH` runs the same proposal without
-starting a session.
+directory's position: kind from where it sits, and a home from a same-named
+repository. It shows the reasoning for each guess and asks before writing.
+The parent is a separate question: when the folder sits inside a unit, it asks
+`Part of X? [y/N]`, and writes `part_of` only on a yes; without a terminal it
+writes none unless `--part-of` is given. `orglens declare PATH` runs the same
+proposal without starting a session, and `orglens new` asks the same question.
 
 `orglens config UNIT` renders a unit's homes into the `repos:` block of the
 config a container launcher reads. Homes absent from this machine are left out.

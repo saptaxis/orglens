@@ -21,6 +21,9 @@ class Format:
     status: Callable[[str], str | None]
     #: (title, unit name, today as YYYY-MM-DD) -> the document's text
     stub: Callable[[str, str, str], str]
+    #: (title, what it is for) -> a file a kind's `structure:` declares,
+    #: seeded by `new` so whoever opens it knows what goes there.
+    seed: Callable[[str, str], str]
 
 
 def clean(raw: str) -> str:

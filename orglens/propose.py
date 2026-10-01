@@ -34,7 +34,7 @@ class Proposal:
 def _kind_for(path: Path, grammar: Grammar) -> tuple[str, str]:
     """The kind whose pattern this path matches, and why we think so."""
     for name, entity_type in grammar.entity_types.items():
-        if path.match(entity_type.pattern):
+        if entity_type.pattern and path.match(entity_type.pattern):
             return name, f"it matches `{entity_type.pattern}`"
     return "", "nothing in the grammar matches this position — say which kind"
 

@@ -101,3 +101,73 @@ def test_declared_home_resolves_by_marker_not_by_a_shadowed_name(tmp_path, gramm
     unit = registry.resolve("myunit")
     by_name = {h.name: h for h in unit.homes}
     assert by_name["myunit"].path == code_home
+
+
+class TestTheParentQuestion:
+    """Position suggests, a person decides: `part_of` is written only on a
+    yes or `--part-of`, and never from position without a terminal."""
+
+    def _inside(self, config):
+        target = config.roots[0] / "projects" / "orglens" / "sub"
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    def _written(self, target):
+        return yaml.safe_load((target / MARKER).read_text())
+
+    def test_declare_asks_and_a_yes_writes_the_parent(self, two_root_tree_config, monkeypatch):
+        monkeypatch.setattr("orglens.cli._interactive", lambda: True)
+        target = self._inside(two_root_tree_config)
+        result = CliRunner().invoke(cli, ["declare", str(target)], input="y\ny\n")
+        assert "sub sits inside orglens (project). Part of orglens?" in result.output
+        assert "part_of:" not in result.output
+        assert self._written(target)["part_of"] == "orglens"
+
+    def test_a_no_or_enter_writes_no_parent(self, two_root_tree_config, monkeypatch):
+        monkeypatch.setattr("orglens.cli._interactive", lambda: True)
+        for answer in ("n\ny\n", "\ny\n"):
+            target = self._inside(two_root_tree_config)
+            (target / MARKER).unlink(missing_ok=True)
+            CliRunner().invoke(cli, ["declare", str(target)], input=answer)
+            assert "part_of" not in self._written(target)
+
+    def test_without_a_terminal_no_parent_is_written(self, two_root_tree_config, monkeypatch):
+        monkeypatch.setattr("orglens.cli._interactive", lambda: False)
+        target = self._inside(two_root_tree_config)
+        result = CliRunner().invoke(cli, ["declare", str(target), "--yes"])
+        assert result.exit_code == 0, result.output
+        assert "part_of" not in self._written(target)
+
+    def test_part_of_given_is_written_without_asking(self, two_root_tree_config, monkeypatch):
+        monkeypatch.setattr("orglens.cli._interactive", lambda: True)
+        target = self._inside(two_root_tree_config)
+        result = CliRunner().invoke(cli, ["declare", str(target), "--yes", "--part-of", "orglens"])
+        assert result.exit_code == 0, result.output
+        assert "Part of" not in result.output
+        assert self._written(target)["part_of"] == "orglens"
+
+    def test_part_of_naming_no_unit_writes_nothing(self, two_root_tree_config, monkeypatch):
+        target = self._inside(two_root_tree_config)
+        result = CliRunner().invoke(cli, ["declare", str(target), "--yes", "--part-of", "nosuch"])
+        assert result.exit_code != 0
+        assert not (target / MARKER).exists()
+
+    def test_new_asks_too(self, two_root_tree_config, monkeypatch):
+        monkeypatch.setattr("orglens.cli._interactive", lambda: True)
+        target = two_root_tree_config.roots[0] / "projects" / "orglens" / "gamma"
+        result = CliRunner().invoke(cli, ["new", str(target), "--kind", "project"], input="y\n")
+        assert result.exit_code == 0, result.output
+        assert self._written(target)["part_of"] == "orglens"
+
+    def test_new_without_a_terminal_writes_no_parent(self, two_root_tree_config, monkeypatch):
+        monkeypatch.setattr("orglens.cli._interactive", lambda: False)
+        target = two_root_tree_config.roots[0] / "projects" / "orglens" / "gamma"
+        result = CliRunner().invoke(cli, ["new", str(target), "--kind", "project"])
+        assert result.exit_code == 0, result.output
+        assert "part_of" not in self._written(target)
+
+    def test_new_with_part_of_naming_no_unit_creates_nothing(self, two_root_tree_config):
+        target = two_root_tree_config.roots[0] / "projects" / "gamma"
+        result = CliRunner().invoke(cli, ["new", str(target), "--part-of", "nosuch"])
+        assert result.exit_code != 0
+        assert not target.exists()

@@ -37,26 +37,32 @@ def test_a_directory_in_no_home_resolves_to_nothing(two_root_tree, tmp_path):
 def test_undeclared_folders_matching_a_pattern_are_candidates(two_root_tree, tmp_path):
     found = two_root_tree.candidates()
     assert any(p.name == "reelmill" for p in found)
-    assert not any(p.name == "orglens" for p in found)
+    # The declared folder is not a candidate. (The fixture's stand-in
+    # `code/traitful-docs/docs/projects/orglens` is: it matches `projects/*`,
+    # carries no marker and is in no home. The depth limit used to hide it.)
+    declared = (tmp_path / "traitful-docs" / "docs" / "projects" / "orglens").resolve()
+    assert declared not in {p.resolve() for p in found}
 
 
-def test_a_matching_directory_inside_a_declared_home_is_not_a_candidate(two_root_tree, tmp_path):
-    # `expt-*` is a single-segment pattern, so this directory matches it even
-    # sitting inside a declared unit's home — Path.match's separator rule does
-    # not save us here. Only excluding what is *under* a claimed home does,
-    # which is what this test exists to hold in place.
-    #
-    # (`docs/projects/orglens/specs` was tried here first and looked right,
-    # but it turned out to pass on the separator fix alone: `specs` sits two
-    # segments below `projects`, so `Path.match('projects/*')` already
-    # rejects it without the containment exclusion ever being exercised.
-    # `expt-*` is one segment, so it matches regardless of nesting depth —
-    # the containment exclusion is the only thing left that can stop it.)
+def test_an_undeclared_match_inside_a_declared_home_is_a_candidate(two_root_tree, tmp_path):
+    # Reversed on 2026-10-01 (specs/unit-tree.org). A folder inside a unit's
+    # home used to be treated as that unit's, so an undeclared project under
+    # an organisation's folder was never reported. Membership is stated, so a
+    # folder that looks like a unit and declares nothing is reported wherever
+    # it sits. (`expt-*` is one segment, so it matches at any depth.)
     (tmp_path / "traitful-docs" / "docs" / "projects" / "orglens" / "expt-1").mkdir(
         parents=True, exist_ok=True
     )
     found = two_root_tree.candidates()
-    assert not any(p.name == "expt-1" for p in found)
+    assert any(p.name == "expt-1" for p in found)
+
+
+def test_a_declared_unit_inside_a_home_is_not_a_candidate(two_root_tree, tmp_path):
+    inner = tmp_path / "traitful-docs" / "docs" / "projects" / "orglens" / "expt-2"
+    inner.mkdir(parents=True, exist_ok=True)
+    (inner / MARKER).write_text("unit: expt-2\nkind: experiment\nhomes:\n  - expt-2\n")
+    registry = Registry(two_root_tree.roots, two_root_tree.grammar)
+    assert not any(p.name == "expt-2" for p in registry.candidates())
 
 
 def test_a_grandchild_of_a_matched_directory_is_not_a_candidate(two_root_tree, tmp_path):
@@ -173,3 +179,17 @@ class TestResolveFallbacks:
 
         assert "orglens" in str(excinfo.value)
         assert "orglens-web" in str(excinfo.value)
+
+
+def test_a_kind_with_no_pattern_makes_no_candidates_and_is_proposed_for_nothing(tmp_path):
+    from orglens.grammar import Grammar
+    from orglens.propose import propose
+    from tests.test_grammar import ORG_GRAMMAR
+    path = tmp_path / "grammar.yaml"
+    path.write_text(ORG_GRAMMAR)
+    grammar = Grammar.from_yaml(path)
+    (tmp_path / "docs" / "personal").mkdir(parents=True)
+    registry = Registry([tmp_path / "docs"], grammar)
+
+    assert registry.candidates() == []
+    assert propose(tmp_path / "docs" / "personal", registry).kind == ""

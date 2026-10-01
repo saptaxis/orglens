@@ -31,4 +31,8 @@ def stub(title: str, name: str, today: str) -> str:
     )
 
 
-FORMAT = Format(name="org", suffix=".org", status=status, stub=stub)
+def seed(title: str, text: str) -> str:
+    return f"#+TITLE: {title}\n" + (f"\n{text}\n" if text else "")
+
+
+FORMAT = Format(name="org", suffix=".org", status=status, stub=stub, seed=seed)

@@ -1,5 +1,6 @@
 """The commands, and what they refuse to know on their own."""
 
+import json
 import os
 import subprocess
 import time
@@ -1193,3 +1194,141 @@ def test_new_writes_an_org_driver_when_the_grammar_says_org(runner, tmp_path):
     assert driver.is_file()
     assert driver.read_text().startswith("#+TITLE: Overview\n#+STATUS: Opened ")
     assert not (docs / "projects" / "demo" / "overview.md").exists()
+
+
+def test_check_and_where_say_why_a_home_is_absent(runner, tmp_path):
+    unit = tmp_path / "docs" / "projects" / "alpha"
+    unit.mkdir(parents=True)
+    (unit / ".orglens.yml").write_text(
+        "home: alpha\nunit: alpha\nkind: project\nhomes:\n  - alpha\n  - alpha-code\n"
+    )
+    (unit / "overview.md").write_text("# Overview\n\n> **Status:** going\n")
+    env = _roots_config(tmp_path, [tmp_path / "docs"])
+
+    checked = runner.invoke(cli, ["check"], env=env)
+    assert "alpha: home 'alpha-code' is under none of your roots on this machine" in checked.output
+    assert "list its repository in roots, or it is not cloned here" in checked.output
+
+    where = runner.invoke(cli, ["where", "alpha"], env=env)
+    assert "under none of your roots" in where.output
+
+
+def _chain_tree(tmp_path) -> dict:
+    """a > b > c, and d beside them; each with one loose document."""
+    docs = tmp_path / "docs" / "projects"
+    for name, parent in (("a", None), ("b", "a"), ("c", "b"), ("d", None)):
+        d = docs / name
+        d.mkdir(parents=True)
+        (d / ".orglens.yml").write_text(
+            f"home: {name}\nunit: {name}\nkind: project\n"
+            + (f"part_of: {parent}\n" if parent else "")
+            + f"homes:\n  - {name}\n"
+        )
+        (d / "overview.md").write_text(f"# Overview\n\n> **Status:** {name} going\n")
+        (d / f"notes-{name}.md").write_text("# notes\n")
+    return _roots_config(tmp_path, [tmp_path / "docs"])
+
+
+def _names_listed(output: str) -> set[str]:
+    # Unit lines are indented two spaces; `status` indents its quoted status
+    # lines further.
+    return {line.split()[0] for line in output.splitlines()
+            if line.startswith("  ") and not line.startswith("    ")}
+
+
+class TestUnder:
+    def test_list_under_a_unit_is_that_unit_and_its_subtree(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["list", "--under", "a"], env=env)
+        assert result.exit_code == 0, result.output
+        assert _names_listed(result.output) == {"a", "b", "c"}
+
+    def test_status_under_a_middle_unit(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["status", "--under", "b"], env=env)
+        assert result.exit_code == 0, result.output
+        assert _names_listed(result.output) == {"b", "c"}
+
+    def test_find_under_a_unit_covers_its_subtree(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["find", "doc", "--under", "a", "--json"], env=env)
+        assert result.exit_code == 0, result.output
+        units = {d["unit"] for d in json.loads(result.output)}
+        assert units == {"a", "b", "c"}
+
+    def test_find_with_a_unit_and_under_is_a_usage_error(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["find", "doc", "a", "--under", "b"], env=env)
+        assert result.exit_code != 0
+
+    def test_snapshot_unit_selects_the_whole_subtree(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["snapshot", "--unit", "a", "--json"], env=env)
+        assert result.exit_code == 0, result.output
+        assert {u["name"] for u in json.loads(result.output)["units"]} == {"a", "b", "c"}
+
+
+class TestTreeCommand:
+    def test_tree_draws_names_and_status_grouped_by_kind(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["tree"], env=env)
+        assert result.exit_code == 0, result.output
+        assert result.output.splitlines() == [
+            "a — a going", "└── project", "    └── b — b going", "        └── c — c going",
+            "", "d — d going",
+        ]
+
+    def test_tree_of_a_unit_as_json_nests_its_children(self, runner, tmp_path):
+        env = _chain_tree(tmp_path)
+        result = runner.invoke(cli, ["tree", "b", "--json"], env=env)
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == [
+            {"name": "b", "kind": "project", "status": "b going", "children": [
+                {"name": "c", "kind": "project", "status": "c going", "children": []},
+            ]},
+        ]
+
+
+class TestNewSeedsAKindsFiles:
+    def _grammar(self, tmp_path, fmt: str) -> Path:
+        from tests.test_grammar import ORG_GRAMMAR
+        path = tmp_path / f"grammar-{fmt}.yaml"
+        path.write_text(ORG_GRAMMAR.replace("format: org", f"format: {fmt}"))
+        return path
+
+    def test_each_declared_file_is_seeded_with_its_title_and_description(self, runner, tmp_path):
+        (tmp_path / "docs").mkdir()
+        env = _roots_config(tmp_path, [tmp_path / "docs"], self._grammar(tmp_path, "org"))
+        target = tmp_path / "docs" / "personal"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "organization"], env=env)
+        assert result.exit_code == 0, result.output
+        assert (target / "inbox.org").read_text() == "#+TITLE: Inbox\n\nCapture not yet processed.\n"
+        # The driver keeps its stub; it is not seeded a second time.
+        assert "#+STATUS:" in (target / "overview.org").read_text()
+        checked = runner.invoke(cli, ["check"], env=env)
+        assert "personal" not in checked.output
+
+    def test_markdown_seeds_a_heading(self, runner, tmp_path):
+        (tmp_path / "docs").mkdir()
+        env = _roots_config(tmp_path, [tmp_path / "docs"], self._grammar(tmp_path, "md"))
+        target = tmp_path / "docs" / "personal"
+        runner.invoke(cli, ["new", str(target), "--kind", "organization"], env=env)
+        assert (target / "inbox.md").read_text() == "# Inbox\n\nCapture not yet processed.\n"
+
+    def test_a_kind_with_no_structure_gets_only_the_driver(self, runner, tmp_path):
+        (tmp_path / "docs").mkdir()
+        env = _roots_config(tmp_path, [tmp_path / "docs"], self._grammar(tmp_path, "org"))
+        target = tmp_path / "docs" / "loose"
+        runner.invoke(cli, ["new", str(target), "--kind", "nothing-declared"], env=env)
+        assert sorted(p.name for p in target.iterdir()) == [".orglens.yml", "overview.org"]
+
+
+def test_a_path_is_shown_with_the_name_of_the_root_it_is_under(tmp_path):
+    # With each repository listed as its own root, `docs` under two of them
+    # read the same; the root's name tells them apart.
+    from orglens.cli import _relative
+    a, b = tmp_path / "traitful-chat", tmp_path / "freightify_dev"
+    (a / "docs").mkdir(parents=True)
+    (b / "docs").mkdir(parents=True)
+    assert str(_relative(a / "docs", [b, a])) == "traitful-chat/docs"
+    assert str(_relative(b / "docs", [b, a])) == "freightify_dev/docs"

@@ -22,10 +22,12 @@ from orglens import formats
 
 @dataclass(frozen=True)
 class EntityType:
-    """A kind of thing, and the relative glob that finds one."""
+    """A kind of thing, and the relative glob that finds one --- or none, for
+    a kind declared only under `structure:` (an organisation: a top-level
+    folder with a free name), found by its markers alone."""
 
     name: str
-    pattern: str
+    pattern: str | None
     #: path within the entity -> what it is for. Authoring, never discovery.
     structure: dict[str, str] = field(default_factory=dict)
 
@@ -122,13 +124,14 @@ class Grammar:
             )
         declared = data.get("structure") or {}
 
+        patterns = data.get("entities") or {}
         entity_types = {
             name: EntityType(
                 name=name,
-                pattern=pattern,
+                pattern=patterns.get(name),
                 structure=dict(declared.get(name) or {}),
             )
-            for name, pattern in (data.get("entities") or {}).items()
+            for name in [*patterns, *(k for k in declared if k not in patterns)]
         }
 
         artifact_types = {}

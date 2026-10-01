@@ -48,20 +48,22 @@ def render(grammar: Grammar) -> str:
         "",
         "## What exists",
         "",
-        "Patterns are relative: matched at the docs root, then inside every entity",
-        "found. Nesting is never declared, so anything can contain anything.",
+        "A unit exists because its marker says so, at any depth. A pattern only",
+        "names a folder worth asking about when it carries no marker; a kind with",
+        "no pattern is found by its markers alone. Nesting is stated by `part_of`.",
         "",
         "| Kind | Found at |",
         "|------|----------|",
     ]
     for name, entity_type in grammar.entity_types.items():
-        lines.append(f"| `{name}` | `{entity_type.pattern}` |")
+        found_at = f"`{entity_type.pattern}`" if entity_type.pattern else "declared by marker"
+        lines.append(f"| `{name}` | {found_at} |")
 
     lines += [
         "",
-        "A directory that matches **is** one of these, whether or not it holds the",
-        "files below. Nothing is hidden for being incomplete; `orglens check`",
-        "reports the gap and changes nothing.",
+        "A declared unit is one of these whether or not it holds the files below.",
+        "Nothing is hidden for being incomplete; `orglens check` reports the gap",
+        "and changes nothing, and `orglens new` seeds the files when it creates one.",
         "",
         "## Documents",
         "",
@@ -84,7 +86,8 @@ def render(grammar: Grammar) -> str:
     ]
     for name, entity_type in grammar.entity_types.items():
         lines += [
-            f"### {name} — `{entity_type.pattern}`",
+            f"### {name} — `{entity_type.pattern}`" if entity_type.pattern
+            else f"### {name} — declared by marker",
             "",
             "| Path | What it is for |",
             "|------|----------------|",

@@ -17,6 +17,7 @@ import builtins
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -25,7 +26,7 @@ from pathlib import Path
 import click
 
 from orglens import (activity, check as check_module, complete, documents, formats,
-                     reference, sessions, view)
+                     reference, sessions, tree as tree_mod, view)
 from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
 from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
@@ -34,7 +35,7 @@ from orglens.homes import Home, repo_of
 from orglens.propose import Proposal, home_name, propose
 from orglens.scadconfig import render as render_scadconfig
 from orglens.snapshot import generate_snapshot, snapshot_data
-from orglens.state import read_status
+from orglens.state import unit_status
 from orglens.units import Registry, Unit
 from orglens.workflow.cli import workflow as workflow_group
 
@@ -186,34 +187,37 @@ def _warm(registry: Registry, units: list, every: list) -> dict[str, list[dict]]
 
 
 def _status_of(registry: Registry, unit):
-    """The authored line for a unit, checked across every home in turn.
+    """The authored line for a unit: the driver in any home first, then any
+    other document (`state.unit_status`).
 
     A kind the grammar has never heard of still gets the driver document
     looked for — `documents_for` only adds detail beyond that when the
     grammar actually describes the kind.
     """
     declared = registry.grammar.documents_for(unit.kind)
-    for path in unit.paths:
-        status = read_status(path, declared, registry.grammar.format)
-        if status:
-            return status
-    return None
+    return unit_status(unit.paths, declared, registry.grammar.format)
 
 
 def _relative(path: Path, roots: list[Path]) -> Path:
-    """`path`, relative to whichever root contains it.
+    """`path` from the root that contains it, the root's own name first.
+
+    With each repository listed as a root, `docs` under two of them would
+    read the same; `traitful-chat/docs` does not. The deepest containing root
+    wins where roots overlap.
 
     Resolved before compared: `~/Dropbox` is a symlink to
     `~/Library/CloudStorage/Dropbox` here, and an unresolved comparison would
     fail silently, falling back to the absolute path for no reason.
     """
     resolved = Path(path).resolve()
-    for root in roots:
-        try:
-            return resolved.relative_to(Path(root).expanduser().resolve())
-        except ValueError:
-            continue
-    return path
+    containing = [
+        r for r in (Path(root).expanduser().resolve() for root in roots)
+        if resolved == r or resolved.is_relative_to(r)
+    ]
+    if not containing:
+        return path
+    root = max(containing, key=lambda r: len(r.parts))
+    return resolved.relative_to(root.parent)
 
 
 def _under_a_root(path: Path, roots: list[Path]) -> bool:
@@ -237,13 +241,30 @@ def _unknown(kind: str, value: str, available) -> None:
     sys.exit(1)
 
 
+def _under(registry: Registry, name: str | None) -> list[Unit]:
+    """Every unit, or one unit and its subtree. An unknown name is the same
+    error `resolve` gives everywhere else."""
+    if name is None:
+        return registry.units()
+    try:
+        return registry.below(name)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+
+UNDER_HELP = "Only this unit and the units under it in the tree."
+
+
 @cli.command()
 @click.option("--type", "kind_filter", default=None, help="Filter by kind")
-def list(kind_filter: str | None):
+@click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
+              shell_complete=complete.units)
+def list(kind_filter: str | None, under: str | None):
     """List everything in the tree."""
     registry, _ = _load_registry()
-    units = registry.units()
-    kinds_present = sorted({u.kind for u in units})
+    units = _under(registry, under)
+    kinds_present = sorted({u.kind for u in registry.units()})
 
     if kind_filter is not None and kind_filter not in kinds_present:
         _unknown("kind", kind_filter, kinds_present)
@@ -277,10 +298,12 @@ def list(kind_filter: str | None):
 
 
 @cli.command()
-def status():
+@click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
+              shell_complete=complete.units)
+def status(under: str | None):
     """Where everything stands — the authored line, dated, beside derived facts."""
     registry, _ = _load_registry()
-    units = registry.units()
+    units = _under(registry, under)
 
     every, by_unit = _sessions_by_unit(registry)
     notes = _warm(registry, units, every)
@@ -340,6 +363,52 @@ def status():
                 click.echo(f"  {name}: {first[:88]}{when}")
 
 
+@cli.command(name="tree")
+@click.argument("unit_name", required=False, shell_complete=complete.units)
+@click.option("--json", "as_json", is_flag=True,
+              help="The same tree as nested data.")
+def tree_cmd(unit_name: str | None, as_json: bool):
+    """The units as a tree: each under the unit its `part_of` names.
+
+    Every top-level unit and what is under it, or one unit's subtree. A
+    `part_of` naming no unit, and a cycle, leave a unit top-level and are
+    marked; `check` reports both.
+    """
+    registry, _ = _load_registry()
+    units = registry.units()
+    if not units:
+        click.echo("Nothing found.")
+        return
+    by_name: dict[str, Unit] = {}
+    for u in units:
+        by_name.setdefault(u.name, u)
+    shape = registry.tree()
+    start = None
+    if unit_name is not None:
+        try:
+            start = registry.resolve(unit_name).name
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+
+    def status_of(name: str) -> str | None:
+        found = _status_of(registry, by_name[name])
+        return found.text if found else None
+
+    if as_json:
+        def node(name: str) -> dict:
+            return {"name": name, "kind": by_name[name].kind, "status": status_of(name)}
+        tops = [start] if start is not None else shape.top
+        click.echo(json.dumps([tree_mod.nested(shape, t, node) for t in tops], indent=2))
+        return
+
+    # Cut to the terminal's width so a status never wraps; piped, whole.
+    width = shutil.get_terminal_size().columns if sys.stdout.isatty() else None
+    for line in tree_mod.draw(shape, lambda name: by_name[name].kind, start=start,
+                              status=status_of):
+        click.echo(line[:width] if width else line)
+
+
 @cli.command()
 @click.argument("artifact_type", shell_complete=complete.kinds)
 @click.argument("unit_name", required=False, shell_complete=complete.units)
@@ -351,9 +420,12 @@ def status():
               help="Only documents touched within this long: 2w, 90d, 6h.")
 @click.option("--waiting", is_flag=True,
               help="Only packets with a gate open, with the question.")
+@click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
+              shell_complete=complete.units)
 @click.option("--json", "as_json", is_flag=True)
 def find(artifact_type: str, unit_name: str | None, within: str | None,
-         pattern: str | None, window: str | None, waiting: bool, as_json: bool):
+         pattern: str | None, window: str | None, waiting: bool, under: str | None,
+         as_json: bool):
     """Find documents by kind, optionally scoped to one unit.
 
     The kind is the grammar's word for where to look; `--in` is the tree's
@@ -365,8 +437,14 @@ def find(artifact_type: str, unit_name: str | None, within: str | None,
     if artifact_type not in registry.grammar.artifact_types:
         _unknown("document kind", artifact_type, registry.grammar.artifact_types)
 
+    if unit_name is not None and under is not None:
+        raise click.UsageError("give a unit, or --under a unit, not both")
     try:
-        found = documents.find(registry, artifact_type, unit_name, within=within)
+        if under is not None:
+            found = [d for one in _under(registry, under)
+                     for d in documents.find(registry, artifact_type, one, within=within)]
+        else:
+            found = documents.find(registry, artifact_type, unit_name, within=within)
     except ValueError as exc:
         click.echo(str(exc), err=True)
         sys.exit(1)
@@ -402,16 +480,63 @@ def find(artifact_type: str, unit_name: str | None, within: str | None,
             click.echo(f"      +{len(item.matches) - 5} more")
 
 
-def _write_declaration(proposal: Proposal, path: Path) -> None:
-    """A confirmed proposal, written as a marker."""
+def _write_declaration(proposal: Proposal, path: Path, part_of: str | None) -> None:
+    """A confirmed proposal, written as a marker, with the parent the person
+    gave (`_parent_for`) rather than the one position suggested."""
     _write_marker(
         path,
         home=proposal.homes[0],
         unit=proposal.unit,
         kind=proposal.kind,
-        part_of=proposal.part_of,
+        part_of=part_of,
         homes=proposal.homes,
     )
+
+
+def _seed(target: Path, kind: str | None, registry: Registry, fmt, driver: str) -> None:
+    """Every file the kind's `structure:` declares, other than the driver,
+    seeded with a title and what it is for --- the grammar's own words --- so
+    whoever opens the folder knows where things go. Folders are not made."""
+    declared = registry.grammar.entity_types.get(kind or "")
+    if declared is None:
+        return
+    for key, means in declared.files.items():
+        stem = formats.stem(key)
+        if stem == driver:
+            continue
+        path = target / f"{stem}{fmt.suffix}"
+        if not path.exists():
+            title = stem.replace("-", " ").capitalize()
+            path.write_text(fmt.seed(title, " ".join((means or "").split())))
+
+
+def _interactive() -> bool:
+    """Whether a person is at the other end. An agent or a script is not,
+    and gets no parent it did not pass."""
+    return sys.stdin.isatty()
+
+
+def _parent_for(path: Path, registry: Registry, given: str | None) -> str | None:
+    """The `part_of` to write for a new marker at `path`.
+
+    Position suggests, a person decides. `--part-of` is written as given (a
+    unit that does not exist is refused, as a typo would be). Otherwise, when
+    a unit contains the folder and a person is at the terminal, they are
+    asked, default no. Otherwise none: membership is never inferred.
+    """
+    if given is not None:
+        try:
+            return registry.resolve(given).name
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+    above = path.parent
+    container = registry.at(above) if above != path else None
+    if container is None or not _interactive():
+        return None
+    kind = f" ({container.kind})" if container.kind else ""
+    asked = f"{path.name} sits inside {container.name}{kind}. Part of {container.name}?"
+    return container.name if click.confirm(asked, default=False) else None
 
 
 def _show(proposal: Proposal) -> None:
@@ -423,9 +548,6 @@ def _show(proposal: Proposal) -> None:
     click.echo(f"  unit:    {proposal.unit}")
     click.echo(f"  kind:    {proposal.kind or '(unknown)':<24}"
                f"  {proposal.why.get('kind', '')}")
-    if proposal.part_of:
-        click.echo(f"  part_of: {proposal.part_of:<24}"
-                   f"  {proposal.why.get('part_of', '')}")
     click.echo(f"  homes:   {proposal.why.get('homes', '')}")
     for home in proposal.homes:
         click.echo(f"    - {home}")
@@ -434,7 +556,9 @@ def _show(proposal: Proposal) -> None:
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False))
 @click.option("--yes", is_flag=True, help="Write it without asking.")
-def declare(path: str, yes: bool):
+@click.option("--part-of", default=None, metavar="UNIT", shell_complete=complete.units,
+              help="The unit this is part of. Never taken from position unasked.")
+def declare(path: str, yes: bool, part_of: str | None):
     """Declare an existing directory as a unit, from what it looks like.
 
     Everything proposed comes from position, which is a good suggestion and a
@@ -450,12 +574,13 @@ def declare(path: str, yes: bool):
 
     proposal = propose(target, registry)
     _show(proposal)
+    parent = _parent_for(target, registry, part_of)
 
     if not yes and not click.confirm("write this?", default=True):
         click.echo("nothing written.")
         return
 
-    _write_declaration(proposal, target)
+    _write_declaration(proposal, target, parent)
     click.echo(f"declared {proposal.unit}")
 
 
@@ -513,6 +638,9 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     if target.exists():
         click.echo(f"{target} already exists", err=True)
         sys.exit(1)
+    # Asked before anything is created, so a refused `--part-of` leaves
+    # nothing behind.
+    parent = _parent_for(target.resolve(), registry, part_of)
 
     target.mkdir(parents=True)
     # Derived after the directory exists: the name depends on the repository
@@ -520,7 +648,7 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     mine = home_name(target.resolve(), registry)
     homes = (mine,) + tuple(h for h in extra_homes if h != mine)
     _write_marker(target, home=mine, unit=target.name, kind=kind,
-                  part_of=part_of, homes=homes)
+                  part_of=parent, homes=homes)
     # The driver in the grammar's format (R3, R12). The stub and the status
     # reader come from the same format module, so they cannot drift (R8).
     fmt = formats.get(registry.grammar.format)
@@ -528,6 +656,7 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     driver = target / f"{base}{fmt.suffix}"
     driver.write_text(fmt.stub(base.replace("-", " ").capitalize(), target.name,
                                time.strftime("%Y-%m-%d")))
+    _seed(target, kind, registry, fmt, base)
     registered = _register_in_nav(target)
 
     click.echo(f"Created {kind or 'unit'}: {target}")
@@ -581,6 +710,12 @@ def _register_in_nav(target: Path) -> str | bool | None:
     return str(nav)
 
 
+#: Why a home resolves nowhere. With roots listed one by one, the likely cause
+#: is a repository left off the list; a home not cloned here is legitimate.
+ABSENT = ("is under none of your roots on this machine — "
+          "list its repository in roots, or it is not cloned here")
+
+
 def _home_line(home) -> str:
     shown = str(home.path) if home.path is not None else "absent"
     return f"{home.name:<40} {shown:<32} ({home.how})"
@@ -597,7 +732,7 @@ def _repo_line(home) -> str:
     as clean.
     """
     if home.path is None:
-        return f"{home.name:<40} (home absent on this machine)"
+        return f"{home.name:<40} ({ABSENT})"
     root = activity._repo_root(home.path)
     if root is None:
         return f"{home.name:<40} none — nothing is backing this up"
@@ -696,6 +831,17 @@ def check_cmd():
                 "— renaming it will detach"
             )
 
+    for unit_name, home_name in report.absent:
+        click.echo(f"{unit_name}: home '{home_name}' {ABSENT}")
+
+    for unit_name, parent in report.unknown_parents:
+        click.echo(f"{unit_name}: part_of '{parent}' is no unit")
+    for loop in report.cycles:
+        click.echo("part_of cycle: " + " > ".join([*loop, loop[0]]))
+    for unit_name, container, parent in report.misplaced:
+        said = f"says part_of {parent}" if parent else "states no parent"
+        click.echo(f"{unit_name}: sits inside {container}'s home, but {said}")
+
     for kind in report.unmatched:
         glob = registry.grammar.artifact_types[kind].find
         click.echo(f"no {kind} found anywhere (looked for {glob})")
@@ -760,7 +906,7 @@ def check_cmd():
               help="Say whether the written snapshot is older than the tree; exit 1 if so.")
 @click.option("--type", "kind", default=None, help="Only units of this kind.",
               shell_complete=complete.kinds)
-@click.option("--unit", "unit_name", default=None, help="Only this unit and its parts.",
+@click.option("--unit", "unit_name", default=None, help="Only this unit and the units under it.",
               shell_complete=complete.units)
 @click.option("--json", "as_json", is_flag=True,
               help="The same facts as data, for a program to compose with.")
@@ -1655,7 +1801,7 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
 
 
 @cli.command()
-@click.argument("unit_name")
+@click.argument("unit_name", shell_complete=complete.units)
 @click.option("--home", default=None, help="Which home to work in.")
 @click.option("--agent", default="claude",
               type=click.Choice(["claude", "codex", "kimi"]),
@@ -1695,9 +1841,10 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         click.echo(f"{unit_name} is not declared. It looks like this:")
         proposal = propose(match, registry)
         _show(proposal)
+        parent = _parent_for(match, registry, None)
         if not click.confirm("declare it and start?", default=True):
             return
-        _write_declaration(proposal, match)
+        _write_declaration(proposal, match, parent)
         registry = Registry(registry.roots, registry.grammar)   # re-sweep
         unit = registry.resolve(unit_name)
 

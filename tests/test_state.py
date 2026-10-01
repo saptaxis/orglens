@@ -120,3 +120,21 @@ def test_the_backlog_is_not_preferred_over_the_driver_by_name(tmp_path):
     (tmp_path / "backlog.org").write_text("#+STATUS: Backlog\n")
     (tmp_path / "overview.org").write_text("#+STATUS: Driver\n")
     assert read_status(tmp_path, ["overview"]).text == "Driver"
+
+
+def test_a_unit_reads_a_driver_in_any_home_before_other_documents_in_the_first(tmp_path):
+    from orglens.state import unit_status
+    code, docs = tmp_path / "code", tmp_path / "docs"
+    code.mkdir(); docs.mkdir()
+    (code / "CHANGELOG.md").write_text("In markdown it is still `> **Status:**`.\n")
+    (docs / "overview.org").write_text("#+TITLE: X\n#+STATUS: Real\n")
+    status = unit_status([code, docs], ["overview"], "org")
+    assert status.text == "Real" and status.source.name == "overview.org"
+
+
+def test_a_unit_with_no_driver_anywhere_still_finds_a_status_in_other_documents(tmp_path):
+    from orglens.state import unit_status
+    code, docs = tmp_path / "code", tmp_path / "docs"
+    code.mkdir(); docs.mkdir()
+    (docs / "notes.md").write_text("> **Status:** From notes\n")
+    assert unit_status([code, docs], ["overview"], "md").text == "From notes"

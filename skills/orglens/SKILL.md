@@ -39,7 +39,7 @@ that is the writing capability's; this card only says where the file goes.
 ```bash
 orglens snapshot --check || orglens snapshot   # refresh only when stale
 orglens snapshot --stdout --type project        # scope it: a projects task need not load every client and experiment
-orglens snapshot --stdout --unit <name>         # one unit and its parts
+orglens snapshot --stdout --unit <name>         # one unit and everything under it in the tree
 orglens snapshot --json [--unit <name>]         # the same facts as data, to compose with
 ```
 
@@ -63,6 +63,8 @@ orglens where [<name>]                          # roots, and which unit a name o
 
 The kind is the grammar's word for where to look; `--in` is the tree's word
 where the grammar has none yet. Fire several in one turn rather than scanning.
+`orglens tree [<unit>]` shows the units as a tree; `--under <unit>` on `list`,
+`status` and `find` keeps one unit and everything under it.
 
 ## Create
 
@@ -71,12 +73,18 @@ orglens new <path> --kind project [--part-of <unit>] [--home <name>]
 ```
 
 `new` makes the directory, its marker, a stub driver document (the grammar's
-name for it, in the grammar's format; status line, *What it is*, *State tracking*), and adds the unit to the parent's
+name for it, in the grammar's format; status line, *What it is*, *State tracking*), every other file the kind's `structure:` declares (seeded with a title and what it is for), and adds the unit to the parent's
 `.nav.yml` when that lists children by name. It prints the next steps. The path
 given is exactly where it lands; `--home` is repeatable and names another place
 the work lives (a code repository). Then write the driver document — `orglens-adapt`
 is the skill for shaping one. Documents are written by hand, following the
 reference's naming; nothing parses a filename.
+
+**A parent is the person's to state.** `part_of` puts a unit in the tree, and
+where the folder sits does not. Never pass `--part-of` from position alone: when
+the folder sits inside a unit, ask the person whether it is part of that unit,
+naming it, and pass `--part-of` only on a yes. Run without a terminal, `new` and
+`declare` write no parent they were not given.
 
 A tree may hold markdown and org side by side, and both are read. Write a new
 document in the grammar's `format` (the reference says which); keep an existing
@@ -84,7 +92,7 @@ one in the format it is in. The status line is `#+STATUS: …` under `#+TITLE:` 
 org, `> **Status:** …` in markdown. `check` reports a document written in both.
 
 ```bash
-orglens declare <path> [--yes]                  # a folder that exists and looks like a unit but never said so
+orglens declare <path> [--yes] [--part-of <unit>]  # a folder that exists and looks like a unit but never said so
 ```
 
 ## Launch
@@ -163,7 +171,7 @@ The tutorial at `capabilities/tutorial/README.md` walks all of it.
 ## Check
 
 ```bash
-orglens check                                   # drift: missing driver docs, undeclared folders, weak or shared homes, a unit its parent nav omits, folders the grammar has no word for, a document in two formats
+orglens check                                   # drift: missing driver docs, undeclared folders, homes under no root, part_of naming no unit or a cycle, a folder disagreeing with its marker, weak or shared homes, a unit its parent nav omits, folders the grammar has no word for, a document in two formats
 orglens view                                    # the page: waiting and running first, then a card per unit; filter by unit, agent, text
 orglens config <unit> [--workdir <repo>]        # the repos: block scad reads for a container
 orglens reference --out <path>                  # regenerate the grammar reference

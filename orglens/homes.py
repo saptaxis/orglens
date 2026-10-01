@@ -19,12 +19,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from orglens import skip
 from orglens.declaration import MARKER, read_marker
-
-#: Deep enough for a repository sitting a couple of levels inside a root,
-#: shallow enough that a root holding fifty checkouts scans in milliseconds.
-DEFAULT_DEPTH = 3
-
 
 @dataclass(frozen=True)
 class Candidate:
@@ -100,29 +96,35 @@ def _remote_of(path: Path) -> str | None:
     return normalise_remote(result.stdout)
 
 
-def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candidate]:
-    """Every directory under the roots that could be a home, with its evidence."""
-    found: list[Candidate] = []
-    # The depth each directory was reached at. Roots may overlap — `docs`
-    # and `docs/research/prog` both listed — and the nested one exists to
-    # reach deeper than the outer one's bound allows. So a directory already
-    # reported is walked again when a later root reaches it with more depth
-    # to spend, but reported only once.
-    seen: dict[Path, int] = {}
+def scan_roots(roots: list[Path]) -> list[Candidate]:
+    """Every directory under the roots that could be a home, with its evidence.
 
-    def walk(base: Path, depth: int) -> None:
-        if depth > max_depth:
-            return
-        try:
-            children = sorted(p for p in base.iterdir() if p.is_dir())
-        except OSError:
-            return
-        for child in children:
-            if child.name.startswith("."):
+    As deep as the tree goes. A folder `skip.skipped` names is neither
+    reported nor entered, so `build` cannot answer for a home by name; a
+    symlinked directory is reported, so a home reached through a link still
+    resolves, but never entered, which keeps the walk inside the tree and out
+    of loops. Overlapping roots report and walk each directory once, by the
+    first root that reaches it.
+    """
+    found: list[Candidate] = []
+    seen: set[Path] = set()
+
+    def walk(top: Path) -> None:
+        # Depth first in sorted order, as the recursive walk was: resolution
+        # by name takes the first candidate, so the order is part of the
+        # answer. A stack rather than recursion, now that nothing bounds it.
+        stack = [top]
+        while stack:
+            base = stack.pop()
+            try:
+                children = sorted(p for p in base.iterdir() if p.is_dir())
+            except OSError:
                 continue
-            if child in seen and seen[child] <= depth:
-                continue
-            if child not in seen:
+            below: list[Path] = []
+            for child in children:
+                if skip.skipped(child.name) or child in seen:
+                    continue
+                seen.add(child)
                 marker = read_marker(child)
                 found.append(
                     Candidate(
@@ -132,8 +134,9 @@ def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candid
                         remote=_remote_of(child) if (child / ".git").exists() else None,
                     )
                 )
-            seen[child] = depth
-            walk(child, depth + 1)
+                if skip.descend(child):
+                    below.append(child)
+            stack.extend(reversed(below))
 
     for root in roots:
         # Resolved, not merely expanded. `~/Dropbox` is a symlink to
@@ -148,15 +151,17 @@ def scan_roots(roots: list[Path], max_depth: int = DEFAULT_DEPTH) -> list[Candid
         # everything has no narrower root to list. A plain directory is a
         # container and stays out, or its basename could answer for a home
         # by coincidence.
-        if top not in seen and ((top / ".git").exists() or read_marker(top)):
+        if top in seen:
+            continue    # reached, and walked, from an earlier root
+        if (top / ".git").exists() or read_marker(top):
             marker = read_marker(top)
             found.append(Candidate(
                 path=top, name=top.name,
                 marker_home=marker.home if marker else None,
                 remote=_remote_of(top) if (top / ".git").exists() else None,
             ))
-            seen[top] = 0
-        walk(top, 1)
+        seen.add(top)
+        walk(top)
     return found
 
 
