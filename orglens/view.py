@@ -192,7 +192,7 @@ def doc_url(path: Path, roots: Path | list[Path], base: str) -> str:
                 rel = rel.parent
         tail = "" if str(rel) == "." else f"{rel}/"
         return f"{base}/{tail}"
-    return "file://" + str(path)
+    return Path(path).absolute().as_uri()
 
 
 _DATE = re.compile(r"([A-Z][a-z]{2})(\d{2})(\d{4})")
@@ -209,7 +209,7 @@ def _link(path, label: str, ctx: dict) -> str:
     `file` — the setting for a tree read in an editor rather than served.
     The copy affordance always yields the real path."""
     if ctx.get("link") == "file":
-        url = "file://" + str(path)
+        url = Path(path).absolute().as_uri()
     else:
         url = doc_url(path, ctx["docs_roots"], ctx["base_url"])
     fs = html.escape(str(path))
