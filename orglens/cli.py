@@ -1727,7 +1727,8 @@ def _launch_record(output: str) -> dict | None:
 
 
 def _launch(cwd: Path, agent: str, prompt: str | None,
-            window: str | None = None, name: str | None = None) -> dict | None:
+            window: str | None = None, name: str | None = None,
+            split: bool = False) -> dict | None:
     """Start a session through scad and return its launch record — at least
     `session_id`, and the `tmux` pane when scad names one. Never raises."""
     argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd), "--json"]
@@ -1739,6 +1740,10 @@ def _launch(cwd: Path, agent: str, prompt: str | None,
     # detached sibling; without it scad behaves as before.
     if window:
         argv += ["--window", window]
+    # `--split` puts it in a pane beside the one you typed in, which scad
+    # finds from `$TMUX_PANE`.
+    if split:
+        argv += ["--split"]
     if name:
         argv += ["--name", name]
     try:
@@ -1834,6 +1839,8 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
 @click.option("--prompt", default=None, help="The session's first turn.")
 @click.option("--window", is_flag=True,
               help="Land it as a window in your tmux, named for the unit.")
+@click.option("--split", is_flag=True,
+              help="Land it in a pane beside this one, in the window you are in.")
 @click.option("--about", default=None, metavar="WORDS",
               help="A word or two of context, for the session's name and window.")
 @click.option("--name", default=None, metavar="TEXT",
@@ -1843,8 +1850,8 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
               help="Launch the session unnamed.")
 @click.option("--dry-run", is_flag=True, help="Say what would happen; launch nothing.")
 def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
-          window: bool, about: str | None, name: str | None, no_name: bool,
-          dry_run: bool):
+          window: bool, split: bool, about: str | None, name: str | None,
+          no_name: bool, dry_run: bool):
     """Start a session for a unit, attributed before its first turn.
 
     The unit is what you asked for and the working directory is a consequence,
@@ -1853,6 +1860,8 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
     still attributed by containment where that is unambiguous, and sit
     unattributed where it is not.
     """
+    if split and window:
+        raise click.UsageError("--split or --window, not both")
     registry, _ = _load_registry()
     try:
         unit = registry.resolve(unit_name)
@@ -1903,7 +1912,8 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
     window_name = (_slug(about) if about else unit.name) if window else None
 
     if dry_run:
-        where = f"as a window `{window_name}` in your tmux" if window else "detached in tmux"
+        where = (f"as a window `{window_name}` in your tmux" if window
+                 else "in a pane beside this one" if split else "detached in tmux")
         click.echo(f"would launch {agent} in {chosen.path} for {unit.name}, "
                    f"{where} via `scad session launch`; this command "
                    "returns at once and leaves your terminal alone.")
@@ -1914,7 +1924,7 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         return
 
     record = _launch(chosen.path, agent, first_turn,
-                     window=window_name, name=chosen_name)
+                     window=window_name, name=chosen_name, split=split)
     if record is None:
         click.echo("scad returned no session id — the session is not attributed. "
                    "Attribute it later, or start it again through orglens.")
@@ -1927,7 +1937,10 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
     # printed the pane on stderr, which is easy to miss, and never said
     # `orglens resume`, which it cannot know about.
     pane = record.get("tmux")
-    click.echo(f"running detached in {pane or 'tmux'}; your terminal is free.")
-    if pane:
+    if split:
+        click.echo(f"running in the pane beside this one{f' ({pane})' if pane else ''}.")
+    else:
+        click.echo(f"running detached in {pane or 'tmux'}; your terminal is free.")
+    if pane and not split:
         click.echo(f"  watch it:   tmux attach -t {pane.split(':')[0]}")
     click.echo(f"  come back:  orglens resume {unit.name}")

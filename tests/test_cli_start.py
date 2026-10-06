@@ -89,7 +89,7 @@ def test_a_subprocess_that_cannot_start_yields_no_session_not_a_crash(tmp_path,
 def test_start_records_an_attribution(tmp_path, monkeypatch, two_root_tree_config):
     calls = {}
 
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False):
         calls["cwd"] = cwd
         calls["agent"] = agent
         return {"session_id": "sess-123"}
@@ -271,7 +271,7 @@ def test_start_prints_the_way_back_in(tmp_path, monkeypatch, two_root_tree_confi
     # scad launches detached and prints a pane; through orglens that pane
     # arrived on stderr with no attach command and no `resume` line, so an
     # agent that ran `start` had no idea the session was already running.
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False):
         return {"session_id": "sess-123", "tmux": "scad-cl-2347:0.0"}
     monkeypatch.setattr("orglens.cli._launch", fake_launch)
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
@@ -302,7 +302,7 @@ def test_launch_returns_the_record_not_only_the_id(tmp_path, monkeypatch):
 
 
 def _named(monkeypatch, tmp_path, seen, extra=()):
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False):
         seen.update(window=window, name=name)
         return {"session_id": "s1"}
     monkeypatch.setattr("orglens.cli._launch", fake_launch)
@@ -386,7 +386,7 @@ def test_window_and_name_are_passed_to_scad(tmp_path, monkeypatch,
     is what the window and the session are called."""
     seen = {}
 
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False):
         seen.update(window=window, name=name)
         return {"session_id": "s1"}
 
@@ -403,7 +403,7 @@ def test_no_name_leaves_the_session_unnamed(tmp_path, monkeypatch,
                                             two_root_tree_config):
     seen = {}
 
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False):
         seen.update(window=window, name=name)
         return {"session_id": "s1"}
 
@@ -424,3 +424,38 @@ def test_the_launch_argv_carries_window_and_name(tmp_path, monkeypatch):
     monkeypatch.setattr("orglens.cli.subprocess.run", run)
     _launch(tmp_path, "claude", None, window="orglens", name="orglens")
     assert seen[0][-4:] == ["--window", "orglens", "--name", "orglens"]
+
+
+def test_split_is_passed_to_scad(tmp_path, monkeypatch, two_root_tree_config):
+    """A pane beside the one you typed in; scad does the splitting."""
+    seen = {}
+
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False):
+        seen.update(window=window, split=split)
+        return {"session_id": "s1"}
+
+    monkeypatch.setattr("orglens.cli._launch", fake_launch)
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+    result = CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens", "--split"])
+    assert result.exit_code == 0, result.output
+    assert seen == {"window": None, "split": True}
+
+
+def test_split_and_window_together_are_refused(tmp_path, monkeypatch,
+                                                two_root_tree_config):
+    monkeypatch.setattr("orglens.cli._launch", lambda *a, **k: {"session_id": "s1"})
+    result = CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens",
+                                      "--split", "--window"])
+    assert result.exit_code != 0
+
+
+def test_launch_hands_split_to_scad(tmp_path, monkeypatch):
+    argvs = []
+
+    def run(argv, **kw):
+        argvs.append(argv)
+        return _fake_run(0, json.dumps({"session_id": "s"}))(argv, **kw)
+
+    monkeypatch.setattr("orglens.cli.subprocess.run", run)
+    _launch(tmp_path, "claude", None, split=True)
+    assert "--split" in argvs[0]
