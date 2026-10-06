@@ -28,6 +28,8 @@
 - A *last week* band (7 to 14 days); bands through last week start open.
 - Explore: the cards nested as `orglens tree` nests them, siblings by recency.
 - A scope filter: every unit with units under it.
+- `view` runs scad's incremental reindex first (about a second), so running
+  sessions show their turns; `--no-reindex` skips it.
 
 ## [0.6.0] — 2026-10-02
 
