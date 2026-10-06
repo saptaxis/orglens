@@ -1129,7 +1129,9 @@ def _refresh_snapshot(registry: Registry, config: Config):
 @click.option("--open/--no-open", "do_open", default=True, help="Open it after writing.")
 @click.option("--base-url", default=None,
               help="Where the docs are served. Defaults to config docs_base_url.")
-def view_cmd(out: str, do_open: bool, base_url: str | None):
+@click.option("--reindex/--no-reindex", default=True,
+              help="Bring scad's session index up to date first (about a second).")
+def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool):
     """Render where every unit stands, and open it.
 
     Joins what the tree knows (plans, packets, uncommitted work) with what scad
@@ -1146,6 +1148,12 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
         (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
     ]
 
+    # The page is read to act on, so it is drawn from a fresh index. The
+    # other commands only read; this is the one that brings it up to date.
+    # A failed reindex still draws the page, from the index as it is.
+    if reindex and (why := sessions.reindex()):
+        click.echo(f"scad reindex failed ({why}); sessions may be out of date.",
+                   err=True)
     every, by_unit = _sessions_by_unit(registry)
     notes = _warm(registry, [u for us in by_kind.values() for u in us], every)
 

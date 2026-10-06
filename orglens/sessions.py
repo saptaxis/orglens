@@ -55,6 +55,25 @@ def run_scad(argv: list[str]) -> list[dict]:
     return rows if isinstance(rows, list) else []
 
 
+def reindex() -> str | None:
+    """Bring scad's session index up to date: `scad reindex`, incremental,
+    about a second (measured 2026-10-06). Nothing runs it on a schedule, and
+    a stale index shows a running session with no turns. Returns why it
+    failed, or None. No scad is not a failure: there is nothing to bring up
+    to date."""
+    try:
+        done = subprocess.run(["scad", "reindex"], capture_output=True, text=True,
+                              timeout=120)
+    except FileNotFoundError:
+        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        return str(exc) or type(exc).__name__
+    if done.returncode != 0:
+        lines = (done.stderr or done.stdout).strip().splitlines()
+        return lines[-1] if lines else f"exit {done.returncode}"
+    return None
+
+
 @dataclass(frozen=True)
 class Session:
     id: str

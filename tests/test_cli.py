@@ -10,6 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from orglens.activity import Activity
+import orglens.sessions as sessions_mod
 from orglens.cli import _grouped, cli
 import yaml
 
@@ -1113,6 +1114,69 @@ class TestAgainstTheSharedTwoRootFixture:
         result = runner.invoke(cli, ["check"], env=env)
 
         assert "reelmill" in result.output
+
+
+class TestViewReindexes:
+    """The page is read to act on, so it is drawn from a fresh scad index."""
+
+    def _env(self, tmp_path):
+        home = tmp_path / "docs" / "projects" / "sample"
+        home.mkdir(parents=True)
+        (home / MARKER).write_text("home: sample\nunit: sample\nkind: project\n"
+                                   "homes:\n  - sample\n")
+        return _roots_config(tmp_path, [tmp_path / "docs"])
+
+    def _calls(self, monkeypatch, fail=None):
+        calls = []
+        monkeypatch.setattr("orglens.sessions.reindex",
+                            lambda: calls.append("reindex") or fail)
+        real = sessions_mod.run_scad
+
+        def ls(argv):
+            calls.append(" ".join(argv[:2]))
+            return real(argv)
+        monkeypatch.setattr("orglens.sessions.run_scad", ls)
+        return calls
+
+    def test_view_reindexes_before_reading_sessions(self, runner, tmp_path, monkeypatch):
+        calls = self._calls(monkeypatch)
+        result = runner.invoke(cli, ["view", "--out", str(tmp_path / "v.html"), "--no-open"],
+                               env=self._env(tmp_path))
+        assert result.exit_code == 0, result.output
+        assert calls[0] == "reindex" and "session ls" in calls
+
+    def test_no_reindex_skips_it(self, runner, tmp_path, monkeypatch):
+        calls = self._calls(monkeypatch)
+        runner.invoke(cli, ["view", "--out", str(tmp_path / "v.html"), "--no-open",
+                            "--no-reindex"], env=self._env(tmp_path))
+        assert "reindex" not in calls
+
+    def test_a_failed_reindex_still_draws_the_page(self, runner, tmp_path, monkeypatch):
+        self._calls(monkeypatch, fail="database is locked")
+        out = tmp_path / "v.html"
+        result = runner.invoke(cli, ["view", "--out", str(out), "--no-open"],
+                               env=self._env(tmp_path))
+        assert result.exit_code == 0
+        assert out.exists()
+        assert "database is locked" in result.output and "out of date" in result.output
+
+
+#: The real call, taken before the autouse fixture stands it in for a no-op.
+REINDEX = sessions_mod.reindex
+
+
+class TestReindexCall:
+    def test_no_scad_is_not_a_failure(self, monkeypatch):
+        def missing(*a, **k):
+            raise FileNotFoundError("scad")
+        monkeypatch.setattr("orglens.sessions.subprocess.run", missing)
+        assert REINDEX() is None
+
+    def test_a_failure_says_why(self, monkeypatch):
+        import subprocess as sp
+        monkeypatch.setattr("orglens.sessions.subprocess.run",
+                            lambda argv, **k: sp.CompletedProcess(argv, 1, "", "x\nlocked\n"))
+        assert REINDEX() == "locked"
 
 
 class TestViewCommand:
