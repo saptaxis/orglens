@@ -11,6 +11,17 @@
   others in one line.
 - `start --split` lands the session in a pane beside this one.
 
+### Status lines
+
+- A status is its first sentence as plain text: org and markdown markup
+  (code marks, emphasis, links) is dropped, and the line is no longer cut at
+  the first comma or a trailing parenthesis, nor ever inside brackets.
+  Shown so in `list`, `tree`, `view` and TAB hints.
+
+### check
+
+- A unit inside an ancestor of its stated parent is not misplaced.
+
 ### list
 
 - Grouped by organisation: a block per top of the tree, units in it by the
@@ -30,6 +41,7 @@
 - A *last week* band (7 to 14 days); bands through last week start open.
 - Explore: the cards nested as `orglens tree` nests them, siblings by recency.
 - A scope filter: every unit with units under it.
+- `file://` links are percent-encoded.
 - `view` runs scad's incremental reindex first (about a second), so running
   sessions show their turns; `--no-reindex` skips it.
 
