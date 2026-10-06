@@ -163,38 +163,141 @@ class TestResume:
         CliRunner().invoke(cli, ["resume", "abcd1234", "--print"])
         assert seen == [["session", "resume", "abcd1234-full-id", "--print"]]
 
-    def test_a_unit_name_resumes_its_newest_open_session(
+    def test_a_unit_name_resumes_its_newest_session_whatever_its_outcome(
         self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
     ):
+        """'Open' is read off the last turn, so it filtered out the sessions
+        most worth resuming. The newest stopped session is the one."""
         home = tmp_path / "code" / "orglens"
         _setup(tmp_path, monkeypatch, two_root_tree, [
             _row("1111-newest-but-done", str(home), ended=9000_000, outcome="done"),
             _row("2222-open-older", str(home), ended=5000_000, outcome="awaiting-user"),
-            _row("3333-open-oldest", str(home), ended=1000_000, outcome="in-flight"),
         ])
         seen = []
         monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
 
         result = CliRunner().invoke(cli, ["resume", "orglens"])
         assert result.exit_code == 0, result.output
-        assert seen == [["session", "resume", "2222-open-older"]]
+        assert seen == [["session", "resume", "1111-newest-but-done"]]
 
-    def test_a_unit_with_nothing_open_lists_its_newest_three(
+    def test_a_session_just_launched_is_the_one_resumed(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """Observed 2026-09-27: a live session with no turns yet has no
+        outcome, so it was passed over for an older one."""
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-just-launched", str(home), n_turns=0, started=9000_000,
+                 live={"pid": 7, "name": None, "status": "idle", "waiting_for": ""}),
+            _row("2222-stopped", str(home), ended=5000_000, outcome="awaiting-user"),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        result = CliRunner().invoke(cli, ["resume", "orglens"])
+        assert result.exit_code == 0, result.output
+        assert seen == [["session", "resume", "1111-just-launched"]]
+
+    def test_a_running_session_goes_first_and_to_scad(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """scad attaches to a running session's pane, or refuses when it
+        cannot name one; a stopped session newer by its clock does not win."""
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-stopped-newer", str(home), ended=9000_000),
+            _row("2222-running", str(home), started=1000_000,
+                 live={"pid": 7, "name": None, "status": "busy", "waiting_for": ""}),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        CliRunner().invoke(cli, ["resume", "orglens"])
+        assert seen == [["session", "resume", "2222-running"]]
+
+    def test_the_others_are_named_in_one_line(
         self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
     ):
         home = tmp_path / "code" / "orglens"
         _setup(tmp_path, monkeypatch, two_root_tree, [
-            _row(f"{i}{i}{i}{i}-done", str(home), ended=i * 1000_000, outcome="done")
-            for i in range(1, 6)
+            _row("1111-newest", str(home), ended=9000_000, name="orglens-a-oct06"),
+            _row("2222-older", str(home), ended=5000_000, name="orglens-b-oct05"),
+            _row("3333-oldest", str(home), ended=1000_000),
         ])
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: 0)
+
+        out = CliRunner().invoke(cli, ["resume", "orglens"]).output
+        others = [l for l in out.splitlines() if "orglens-b-oct05" in l]
+        assert len(others) == 1
+        assert "3333" in others[0] and "orglens resume orglens" in others[0]
+
+    def test_a_unit_with_no_sessions_says_so(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
         seen = []
         monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
 
         result = CliRunner().invoke(cli, ["resume", "orglens"])
         assert result.exit_code == 1
         assert seen == []
-        assert "nothing open" in result.output
-        assert "5555" in result.output and "3333" in result.output and "2222" not in result.output
+        assert "no sessions" in result.output
+
+    def test_a_name_resumes_that_session(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-newest", str(home), ended=9000_000, name="orglens-a-oct06"),
+            _row("2222-named", str(home), ended=5000_000, name="orglens-b-oct05"),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        result = CliRunner().invoke(cli, ["resume", "orglens", "orglens-b-oct05"])
+        assert result.exit_code == 0, result.output
+        assert seen == [["session", "resume", "2222-named"]]
+
+    def test_two_sessions_with_one_name_resume_the_newest(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-newer", str(home), ended=9000_000, name="twice"),
+            _row("2222-older", str(home), ended=5000_000, name="twice"),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        CliRunner().invoke(cli, ["resume", "orglens", "twice"])
+        assert seen == [["session", "resume", "1111-newer"]]
+
+    def test_an_unknown_name_lists_the_units_names(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-named", str(home), ended=9000_000, name="orglens-a-oct06"),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        result = CliRunner().invoke(cli, ["resume", "orglens", "nope"])
+        assert result.exit_code == 1
+        assert seen == []
+        assert "nope" in result.output and "orglens-a-oct06" in result.output
+
+    def test_a_name_after_a_session_id_is_refused(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [_row("abcd1234-full-id", str(home))])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        result = CliRunner().invoke(cli, ["resume", "abcd1234", "some-name"])
+        assert result.exit_code != 0
+        assert seen == []
 
     def test_an_ambiguous_prefix_names_the_matches(
         self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config

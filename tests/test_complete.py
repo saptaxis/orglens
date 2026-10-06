@@ -86,6 +86,41 @@ def test_resume_offers_units_and_sessions_both(monkeypatch):
     assert values == ["orglens", "orglens-session-id"]
 
 
+
+def test_resume_offers_the_units_attributed_session_names_newest_first(
+        tmp_path, monkeypatch):
+    """After the unit, TAB offers the names of sessions attributed to it:
+    the event log says which, one scad call says what they are called."""
+    from orglens import events
+    root = tmp_path / "events"
+    for sid, unit in [("aaaa1111-x", "orglens"), ("bbbb2222-x", "orglens"),
+                      ("cccc3333-x", "scad"), ("dddd4444-x", "orglens")]:
+        events.append(events.Event("attributed", unit, sid, 5, "m"), root=root)
+    monkeypatch.setattr("orglens.complete.EVENTS_DIR", root)
+    monkeypatch.setattr("orglens.sessions.run_scad", lambda argv: [
+        {"id": "bbbb2222-x", "name": "orglens-new-oct06", "n_turns": 3,
+         "started": 9000_000, "live": {"pid": 1}},
+        {"id": "cccc3333-x", "name": "scad-oct05", "n_turns": 1, "started": 8000_000},
+        {"id": "aaaa1111-x", "name": "orglens-old-oct01", "n_turns": 12,
+         "started": 1000_000, "ended": 2000_000},
+        {"id": "dddd4444-x", "name": None, "n_turns": 2, "started": 500_000},
+    ])
+
+    class Ctx:
+        params = {"target": "orglens"}
+
+    items = complete.session_names_of_unit(Ctx(), None, "")
+    assert [i.value for i in items] == ["orglens-new-oct06", "orglens-old-oct01"]
+    assert "live" in items[0].help and "bbbb2222" in items[0].help
+    assert "12 turns" in items[1].help and "aaaa1111" in items[1].help
+
+
+def test_no_unit_on_the_line_is_no_names():
+    class Ctx:
+        params = {}
+
+    assert complete.session_names_of_unit(Ctx(), None, "") == []
+
 WORKFLOW = """
 name: writing
 nodes:

@@ -19,6 +19,8 @@ it, so every path returns a list.
 
 from __future__ import annotations
 
+from orglens.events import EVENTS_DIR
+
 #: Enough to cover a machine's recent work without making tab feel slow.
 SESSION_CAP = 300
 
@@ -171,3 +173,54 @@ def units_or_sessions(ctx, param, incomplete):
     """`resume` takes either, so it offers both — units first, since a name
     is what someone types when they know what they are going back to."""
     return units(ctx, param, incomplete) + sessions(ctx, param, incomplete)
+
+
+def session_names_of_unit(ctx, param, incomplete):
+    """`resume UNIT <tab>`: the names of the sessions attributed to the unit,
+    newest first, each with its age, turns, whether it is running, and the
+    short id that tells two of one name apart.
+
+    Only attributed sessions, read from the event log: counting a unit's
+    sessions by containment needs the tree, and a session matched that way
+    rarely carries a name. One scad call says what each is called. The order
+    is kept by the zsh completion (`compadd -V unsorted`).
+    """
+    unit = ((ctx.params or {}) if ctx else {}).get("target")
+    if not unit:
+        return []
+    try:
+        import time
+        from orglens.events import attributions
+        from orglens.sessions import run_scad
+
+        mine = {sid for sid, name in attributions(root=EVENTS_DIR).items()
+                if name == unit}
+        if not mine:
+            return []
+        rows = run_scad(["session", "ls", "--kind", "main",
+                         "--limit", str(SESSION_CAP)])
+    except Exception:
+        return []
+    rows = [r for r in rows if r.get("id") in mine and r.get("name")]
+    rows.sort(key=lambda r: (bool(r.get("live")),
+                             r.get("ended") or r.get("started") or 0), reverse=True)
+    now = time.time()
+    pairs = []
+    for row in rows:
+        when = row.get("ended") or row.get("started")
+        turns = int(row.get("n_turns") or 0)
+        hint = [_age(now - when / 1000) if when else "",
+                f"{turns} turn{'' if turns == 1 else 's'}",
+                "live" if row.get("live") else "", str(row["id"])[:8]]
+        pairs.append((str(row["name"]), " · ".join(h for h in hint if h)))
+    return _items(pairs, incomplete)
+
+
+def _age(seconds: float) -> str:
+    """Coarse, as `orglens sessions` shows it."""
+    hours = seconds / 3600
+    if hours < 24:
+        return f"{hours:.0f}h ago"
+    if hours < 24 * 60:
+        return f"{hours / 24:.0f}d ago"
+    return f"{hours / 720:.0f}mo ago"

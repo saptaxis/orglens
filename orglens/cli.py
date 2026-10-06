@@ -1373,12 +1373,13 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
 
 @cli.command()
 @click.argument("target", shell_complete=complete.units_or_sessions)
+@click.argument("name", required=False, shell_complete=complete.session_names_of_unit)
 @click.option("--prompt", default=None,
               help="Send this as the next turn instead of going in yourself.")
 @click.option("--print", "print_only", is_flag=True,
               help="Print the resume command instead of running it.")
-def resume(target: str, prompt: str | None, print_only: bool):
-    """Resume a session by id, or a unit's newest open session.
+def resume(target: str, name: str | None, prompt: str | None, print_only: bool):
+    """Resume a session by id, a unit's newest session, or one by its name.
 
     Hands the id to `scad session resume`, which knows where the session
     ran; orglens does no working-directory work of its own.
@@ -1386,7 +1387,7 @@ def resume(target: str, prompt: str | None, print_only: bool):
     registry, _ = _load_registry()
     every = sessions.all_sessions(registry, EVENTS_DIR)
 
-    session, matches = _find_session(every, target)
+    session, matches = (None, []) if name else _find_session(every, target)
     if session is None and matches:
         click.echo(f"'{target}' matches more than one session:", err=True)
         for s in matches:
@@ -1396,16 +1397,29 @@ def resume(target: str, prompt: str | None, print_only: bool):
         try:
             unit = registry.resolve(target)
         except ValueError:
-            click.echo(f"'{target}' is neither a session id nor a unit.", err=True)
+            what = "not a unit" if name else "neither a session id nor a unit"
+            click.echo(f"'{target}' is {what}.", err=True)
             sys.exit(1)
+        # Running first, a just-launched one with no turns included: scad
+        # attaches to a running session's pane, or refuses when it cannot
+        # name one, so it is never opened twice. "Open" is not a filter: it
+        # is read off the last turn, so a session with none never had it.
         mine = sessions.listed(sessions.for_unit(every, unit.name), everything=False)
-        open_ = [s for s in mine if s.open]
-        if not open_:
-            click.echo(f"{unit.name}: nothing open to resume. Newest:", err=True)
-            for s in mine[:3]:
-                click.echo(_session_line(s), err=True)
+        if name:
+            named = [s for s in mine if s.label == name]
+            if not named:
+                click.echo(f"{unit.name} has no session named '{name}'. "
+                           "Its named sessions:", err=True)
+                for s in [s for s in mine if s.label][:10]:
+                    click.echo(_session_line(s), err=True)
+                sys.exit(1)
+            session = named[0]
+        elif not mine:
+            click.echo(f"{unit.name}: no sessions to resume.", err=True)
             sys.exit(1)
-        session = open_[0]
+        else:
+            session = mine[0]
+            _name_the_others(unit.name, mine[1:])
 
     if prompt:
         # A turn into the open pane, rather than a terminal to type it in.
@@ -1416,6 +1430,17 @@ def resume(target: str, prompt: str | None, print_only: bool):
     _warn_if_held_twice(session)
     argv = ["session", "resume", session.id] + (["--print"] if print_only else [])
     sys.exit(_scad(argv))
+
+
+def _name_the_others(unit: str, others: list, shown: int = 3) -> None:
+    """One line naming what `resume UNIT` passed over, so picking another is
+    a TAB away rather than a listing to read."""
+    if not others:
+        return
+    names = [s.label or s.id[:8] for s in others[:shown]]
+    more = f" and {len(others) - shown} more" if len(others) > shown else ""
+    click.echo(f"also {', '.join(names)}{more}; "
+               f"pick one with: orglens resume {unit} NAME", err=True)
 
 
 def _warn_if_held_twice(session) -> None:
