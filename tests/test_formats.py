@@ -17,7 +17,7 @@ ALL = sorted(formats.FORMATS)
 def test_the_stub_carries_a_status_its_own_reader_finds(name):
     fmt = formats.get(name)
     text = fmt.stub("Overview", "clipcompose", "2026-09-26")
-    assert fmt.status(text) == "Opened 2026-09-26. Nothing done yet."
+    assert fmt.status(text) == "Opened 2026-09-26; nothing done yet"
 
 
 @pytest.mark.parametrize("name", ALL)
@@ -40,10 +40,42 @@ def test_org_status_keyword_is_case_insensitive_like_org():
 
 @pytest.mark.parametrize("name", ALL)
 def test_status_clean_up_is_shared(name):
+    """The first sentence, whole: a comma or a parenthesis is part of it."""
     fmt = formats.get(name)
-    line = ("> **Status:** Active, since May (see log)\n" if name == "md"
-            else "#+STATUS: Active, since May (see log)\n")
-    assert fmt.status(line) == "Active"
+    line = ("> **Status:** Active, since May (see log). Next: more.\n" if name == "md"
+            else "#+STATUS: Active, since May (see log). Next: more.\n")
+    assert fmt.status(line) == "Active, since May (see log)"
+
+
+@pytest.mark.parametrize("name", ALL)
+def test_a_sentence_does_not_end_inside_brackets_or_quotes(name):
+    fmt = formats.get(name)
+    body = 'Released (sessions per unit. Mostly) and "Done. Really" shipped. Next.'
+    line = f"> **Status:** {body}\n" if name == "md" else f"#+STATUS: {body}\n"
+    assert fmt.status(line) == 'Released (sessions per unit. Mostly) and "Done. Really" shipped'
+
+
+def test_org_markup_is_plain_text():
+    org = formats.get("org")
+    line = ("#+STATUS: 0.6.0: the tree (=orglens tree=, =--under=), *bold* /it/, "
+            "see [[file:log.org][the log]] and [[file:x.org]] --- LOW--MED\n")
+    assert org.status(line) == (
+        "0.6.0: the tree (orglens tree, --under), bold it, see the log and x.org "
+        "\u2014 LOW\u2013MED")
+
+
+def test_org_slashes_in_a_path_are_not_italics():
+    assert formats.get("org").status("#+STATUS: in notes/p1/list here\n") == "in notes/p1/list here"
+
+
+def test_nested_org_emphasis_is_all_dropped():
+    assert formats.get("org").status("#+STATUS: */Name/ is provisional*\n") == "Name is provisional"
+
+
+def test_markdown_markup_is_plain_text():
+    md = formats.get("md")
+    line = "> **Status:** **Bold** `code` [the log](log.md), snake_case_name stays\n"
+    assert md.status(line) == "Bold code the log, snake_case_name stays"
 
 
 def test_a_file_with_no_status_has_none():

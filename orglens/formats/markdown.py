@@ -9,15 +9,26 @@ from orglens.formats.base import Format, clean
 STATUS = re.compile(r"\*\*Status:\*\*\s*(.+)")
 
 
+LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+CODE = re.compile(r"`([^`]+)`")
+EMPHASIS = re.compile(r"(?<![\w*_])(\*\*|__|\*|_)(?=\S)(.+?)(?<=\S)\1(?![\w*_])")
+
+
+def plain(raw: str) -> str:
+    """A line of markdown as plain text: links by their text, code and
+    emphasis marks dropped."""
+    return EMPHASIS.sub(r"\2", CODE.sub(r"\1", LINK.sub(r"\1", raw)))
+
+
 def status(text: str) -> str | None:
     match = STATUS.search(text)
-    return clean(match.group(1)) if match else None
+    return clean(plain(match.group(1))) if match else None
 
 
 def stub(title: str, name: str, today: str) -> str:
     return (
         f"# {title}\n\n"
-        f"> **Status:** Opened {today}. Nothing done yet.\n\n"
+        f"> **Status:** Opened {today}; nothing done yet.\n\n"
         "## What it is\n\n"
         f"What {name} is for, in a paragraph.\n\n"
         "## State tracking\n\n"
