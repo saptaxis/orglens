@@ -176,10 +176,11 @@ class TestListCommand:
         assert "clipcompose" in result.output
         assert "physics-priors" not in result.output
 
-    def test_a_nested_unit_shows_what_it_is_part_of(self, runner, cli_env):
+    def test_a_nested_unit_is_listed_under_the_unit_at_the_top_of_its_branch(
+            self, runner, cli_env):
         result = runner.invoke(cli, ["list", "--type", "experiment"], env=cli_env)
         assert result.exit_code == 0
-        assert "[physics-priors]" in result.output
+        assert "physics-priors\n  experiment:\n    expt-1-agent-behavior" in result.output
 
     def test_an_unknown_kind_says_what_the_kinds_are(self, runner, cli_env):
         """This raised `KeyError: 'deck'` — the CLI never asked the grammar."""
@@ -1241,7 +1242,40 @@ class TestUnder:
         env = _chain_tree(tmp_path)
         result = runner.invoke(cli, ["list", "--under", "a"], env=env)
         assert result.exit_code == 0, result.output
-        assert _names_listed(result.output) == {"a", "b", "c"}
+        lines = [l for l in result.output.splitlines() if l.strip()]
+        assert lines[0].startswith("a  ")
+        assert {l.split()[0] for l in lines[2:]} == {"b"}
+        assert any(l.startswith("    b › c  ") for l in lines)
+        assert "d" not in {l.split()[0] for l in lines}
+
+    def test_list_blocks_by_the_top_of_the_tree_and_the_branchs_kind(
+            self, runner, tmp_path):
+        """An experiment under a research programme is listed under the
+        programme's kind, as `orglens tree` shows it, with its path."""
+        docs = tmp_path / "docs"
+        for name, kind, parent in (("org", "organization", None),
+                                   ("prog", "research", "org"),
+                                   ("expt", "experiment", "prog"),
+                                   ("proj", "project", "org"),
+                                   ("solo", "project", None)):
+            d = docs / name
+            d.mkdir(parents=True)
+            (d / ".orglens.yml").write_text(
+                f"home: {name}\nunit: {name}\nkind: {kind}\n"
+                + (f"part_of: {parent}\n" if parent else "")
+                + f"homes:\n  - {name}\n")
+            (d / "overview.md").write_text("# Overview\n")
+        result = runner.invoke(cli, ["list"], env=_roots_config(tmp_path, [docs]))
+        assert result.exit_code == 0, result.output
+        out = result.output
+        org = out[out.index("\norg"):]
+        assert "  research:\n" in org and "  project:\n" in org
+        research = org[org.index("  research:"):]
+        research = research[:research.index("  project:")] if "  project:" in research else research
+        assert "    prog  " in research and "    prog › expt  " in research
+        assert "  experiment:" not in out
+        # A unit alone at the top of the tree is grouped by kind, as before.
+        assert "Projects:\n  solo" in out
 
     def test_status_under_a_middle_unit(self, runner, tmp_path):
         env = _chain_tree(tmp_path)

@@ -286,15 +286,72 @@ def list(kind_filter: str | None, under: str | None):
         for unit in units
     }
 
-    for kind, members in _grouped(units, acts):
-        click.echo(f"\n{_heading(kind)}:")
-        for unit in members:
-            status = _status_of(registry, unit)
-            shown = f"  ({status.text})" if status else ""
-            within = f"  [{unit.part_of}]" if unit.part_of else ""
-            dated = _dated(acts[unit])
-            when = f"  {' · '.join(dated)}" if dated else ""
-            click.echo(f"  {unit.name}{shown}{within}{when}")
+    tree = registry.tree()
+    top = registry.resolve(under).name if under else None
+    for root, groups in _by_organisation(units, acts, tree, top):
+        # A block per unit with units under it; units alone at the top of the
+        # tree are grouped by kind as they always were.
+        indent = "    " if root else "  "
+        if root:
+            unit = next((u for u in units if u.name == root), None)
+            click.echo(f"\n{root}{_list_tail(registry, unit, acts) if unit else ''}")
+        for kind, members in groups:
+            # The kind as markers write it, as `tree` shows it.
+            click.echo(f"  {kind}:" if root else f"\n{_heading(kind)}:")
+            for unit, path in members:
+                click.echo(f"{indent}{path}{_list_tail(registry, unit, acts)}")
+
+
+def _list_tail(registry: Registry, unit: Unit, acts: dict) -> str:
+    status = _status_of(registry, unit)
+    dated = _dated(acts[unit])
+    return ((f"  ({status.text})" if status else "")
+            + (f"  {' · '.join(dated)}" if dated else ""))
+
+
+def _by_organisation(units: list, acts: dict, tree, top: str | None = None):
+    """`list`'s shape: a block per unit at the top of the tree with units
+    under it, then the units in it by the kind of their branch, as `orglens
+    tree` groups them, flat and newest first. An experiment under a research
+    programme is listed under the programme's kind, with its path from the
+    block's top. Units alone at the top come as `(None, groups)`,
+    grouped by their own kind.
+
+    `top` is `--under`'s unit, which then heads the only block. Blocks and
+    kinds are led by their newest member, as `_grouped` orders them.
+    """
+    def chain(name: str) -> list[str]:
+        out = [name]
+        while out[0] in tree.parent and out[0] != top:
+            out.insert(0, tree.parent[out[0]])
+        return out
+
+    by_name = {u.name: u for u in units}
+    recency = lambda u: activity.recency(acts.get(u, activity.Activity()))
+    blocks: dict[str, dict[str, list]] = {}
+    for unit in units:
+        line = chain(unit.name)
+        if len(line) > 1:
+            branch = by_name.get(line[1], unit)
+            blocks.setdefault(line[0], {}).setdefault(branch.kind, []).append(
+                (unit, " › ".join(line[1:])))
+    alone: dict[str, list] = {}
+    for unit in units:
+        if len(chain(unit.name)) == 1 and unit.name not in blocks:
+            alone.setdefault(unit.kind, []).append((unit, unit.name))
+
+    def newest(members) -> int:
+        return max((recency(u) for u, _ in members), default=0)
+
+    def ordered(kinds: dict) -> list:
+        for members in kinds.values():
+            members.sort(key=lambda m: recency(m[0]), reverse=True)
+        return sorted(kinds.items(), key=lambda g: newest(g[1]), reverse=True)
+
+    out = [(root, ordered(kinds)) for root, kinds in blocks.items()]
+    out += [(None, [group]) for group in ordered(alone)]
+    out.sort(key=lambda b: max(newest(m) for _, m in b[1]), reverse=True)
+    return out
 
 
 @cli.command()
