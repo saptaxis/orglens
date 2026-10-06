@@ -174,7 +174,7 @@ The tutorial at `capabilities/tutorial/README.md` walks all of it.
 
 ```bash
 orglens check                                   # drift: missing driver docs, undeclared folders, homes under no root, part_of naming no unit or a cycle, a folder disagreeing with its marker, weak or shared homes, a unit its parent nav omits, folders the grammar has no word for, a document in two formats
-orglens view                                    # the page: waiting and running first, then a card per unit; filter by unit, agent, text
+orglens view                                    # the page: Recent (cards banded by time) and Explore (the tree); filter by scope, kind, agent, text
 orglens config <unit> [--workdir <repo>]        # the repos: block scad reads for a container
 orglens reference --out <path>                  # regenerate the grammar reference
 ```

@@ -11,6 +11,18 @@
   others in one line.
 - `start --split` lands the session in a pane beside this one.
 
+### view
+
+- Two tabs: *Recent* and *Explore*.
+- Recent: every unit is its own card at any depth, banded by its own time,
+  with its path; a name in the path scopes the page. Fixes 0.6.0 drawing
+  every unit inside its organisation's card.
+- Units are placed by session or by edit, toggled on the page; each card
+  shows both times.
+- A *last week* band (7 to 14 days); bands through last week start open.
+- Explore: the cards nested as `orglens tree` nests them, siblings by recency.
+- A scope filter: every unit with units under it.
+
 ## [0.6.0] — 2026-10-02
 
 ### Finding units
