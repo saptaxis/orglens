@@ -103,7 +103,7 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 
 | Command | Description |
 |---------|-------------|
-| `orglens list [--type KIND] [--under UNIT]` | List all units, grouped by declared kind; `--under` keeps one unit and its subtree |
+| `orglens list [--type KIND] [--under UNIT]` | List all units, newest first: a block per top of the tree, units in it by their branch's kind with their path, as `tree` groups them; `--under` keeps one unit and its subtree |
 | `orglens status [--under UNIT]` | Where every unit stands, across all of its homes |
 | `orglens tree [UNIT] [--json]` | The units as a tree, each under the unit its `part_of` names, a node's units grouped by kind, each as `name — status`; a `part_of` naming no unit, and a cycle, are marked |
 | `orglens find KIND [UNIT] [--under UNIT] [--in DIR] [--grep TEXT] [--since 2w] [--waiting] [--json]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own. `--in` scopes to a directory the grammar has no name for; `--grep` keeps the ones whose text matches and shows the lines |

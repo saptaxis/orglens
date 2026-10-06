@@ -50,7 +50,7 @@ unscoped one is 500+ lines. The grammar's own words for what may exist are in
 ## Find
 
 ```bash
-orglens list [--type KIND]                      # units, grouped by kind, newest first
+orglens list [--type KIND]                      # units by organisation and branch kind, newest first
 orglens status                                  # where each stands: status line, git, sessions, gates
 orglens find plan <unit>                        # documents of a kind; a nested unit's own home is excluded
 orglens find spec <unit> --grep "text"          # the ones that mention it, with the lines

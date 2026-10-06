@@ -11,6 +11,12 @@
   others in one line.
 - `start --split` lands the session in a pane beside this one.
 
+### list
+
+- Grouped by organisation: a block per top of the tree, units in it by the
+  kind of their branch as `tree` groups them, flat and newest first, each
+  with its path. Units alone at the top are grouped by kind as before.
+
 ### view
 
 - Two tabs: *Recent* and *Explore*.
