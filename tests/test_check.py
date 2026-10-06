@@ -599,6 +599,19 @@ class TestTheTree:
         assert report.unknown_parents == []
         assert report.cycles == []
 
+    def test_a_unit_inside_an_ancestor_of_its_parent_is_quiet(self, declared_tree, grammar):
+        """Filed under the organisation's folder, naming a programme in it."""
+        _declare_in(declared_tree / "projects" / "orglens" / "prog", "prog", part_of="orglens")
+        _declare_in(declared_tree / "projects" / "orglens" / "expt", "expt", part_of="prog")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.misplaced == []
+
+    def test_a_unit_inside_a_unit_that_is_not_its_parents_ancestor(self, declared_tree, grammar):
+        _declare_in(declared_tree / "projects" / "clipcompose" / "prog", "prog", part_of="clipcompose")
+        _declare_in(declared_tree / "projects" / "orglens" / "expt", "expt", part_of="prog")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.misplaced == [("expt", "orglens", "prog")]
+
     def test_a_unit_in_no_other_units_home_is_never_misplaced(self, declared_tree, grammar):
         # A code repository states its parent deliberately.
         _declare_in(declared_tree / "projects" / "free", "free", part_of="orglens")
