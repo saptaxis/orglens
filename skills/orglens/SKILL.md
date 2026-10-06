@@ -115,7 +115,8 @@ line after it is orglens's, and both are right.
 detached one, so the person can switch to it rather than attach. The session is
 named `<unit>-<mon><dd>`; `--about "two words"` puts context in the middle,
 which is what tells two sessions on one unit on one day apart. Both need a scad
-that has `session launch --window`.
+that has `session launch --window`. `--split` lands it in a pane beside the
+one you are in instead.
 
 ## Sessions
 
@@ -123,7 +124,8 @@ that has `session launch --window`.
 orglens sessions <unit>                         # newest first; each says attributed or containment
 orglens sessions                                # every unit's, grouped; unattributed last
 orglens sessions --none                         # belong to no unit: where they ran, last thing said
-orglens resume <unit>                           # its newest open session, through scad
+orglens resume <unit>                           # its newest session, running first, through scad
+orglens resume <unit> <name>                    # the unit's session of that name (TAB lists them)
 orglens resume <session-id>                     # by id or unique prefix
 orglens attribute <session-id> <unit> --why "…" # say whose it was, and what for
 orglens resume <unit> --prompt "…"              # hand a turn to the open session

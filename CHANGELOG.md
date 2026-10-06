@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Sessions
+
+- `resume UNIT NAME` resumes the unit's session of that name; TAB after the
+  unit offers its attributed sessions' names, newest first.
+- `resume UNIT` takes the unit's newest session, a running or just-launched
+  one first (scad attaches to its pane), whatever its outcome, and names the
+  others in one line.
+- `start --split` lands the session in a pane beside this one.
+
 ## [0.6.0] — 2026-10-02
 
 ### Finding units

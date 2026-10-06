@@ -113,11 +113,11 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 | `orglens snapshot [--stdout] [--check] [--json]` | Generate a topology snapshot (markdown), with the same facts as JSON beside it for completion; `--json` prints the data instead. `--check` says whether the written one is older than any declaration or driver document, or the JSON lags it, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
 | `orglens view` | Render where everything stands as a page, and open it: units banded by when they last moved, waiting first, a foldable card each; filter by band, kind, agent or text |
-| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window] [--about WORDS] [--name TEXT] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, and the session is named `unit[-context]-sepDD` |
+| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window\|--split] [--about WORDS] [--name TEXT] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, `--split` in a pane beside this one, and the session is named `unit[-context]-sepDD` |
 | `orglens sessions [UNIT] [--none] [--all] [--json]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
 | `orglens sessions --triage [--one-by-one]`, `--groups`, `--from FILE` | Decide the unclaimed sessions by directory, one at a time, or from a `--none --json` file you edited |
 | `orglens notes [UNIT] [--no-mentions]` | What was written down about a unit, and why each note is the unit's |
-| `orglens resume UNIT\|SESSION-ID [--prompt TEXT] [--print]` | Resume a session, or a unit's newest open one; `--prompt` sends a turn to it instead |
+| `orglens resume UNIT [NAME]\|SESSION-ID [--prompt TEXT] [--print]` | Resume a session by id, a unit's newest (running first), or the unit's session called NAME; `--prompt` sends a turn to it instead |
 | `orglens attribute SESSION-ID UNIT [--why TEXT]` | Say which unit a session was for, after the fact |
 | `orglens dismiss SESSION-ID\|--under PATH [--why TEXT]` | Say a session, or every unclaimed one under a path, belongs to no unit |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
@@ -242,7 +242,8 @@ repository with sixteen homes below it, that is most of the sessions.
 
 `orglens sessions UNIT` lists a unit's sessions and how each is the unit's;
 `orglens sessions --none` lists the ones that belong to no unit. `orglens resume`
-hands a session id, or a unit's newest open session, to `scad session resume`.
+hands a session id, a unit's newest session, or the unit's session of a given
+name to `scad session resume`.
 `orglens attribute SESSION-ID UNIT` records an attribution after the fact, which
 is also how a shared-home session is narrowed to one unit. `orglens dismiss`
 says a session is nobody's, which is what lets the unclaimed pile empty;
