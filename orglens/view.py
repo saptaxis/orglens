@@ -414,19 +414,21 @@ def write(page: str, path: Path) -> Path:
 # the unit in its own band ahead of every other.
 
 BANDS = ("waiting", "today", "yesterday", "this week", "last week", "this month",
-         "earlier")
+         "earlier", "no sessions")
 #: Through last week a band starts open; older ones are folded.
 OPEN_BANDS = ("waiting", "today", "yesterday", "this week", "last week")
 DAY = 86400
 
 #: The two ways of placing a unit. By session: when it was last worked on with
-#: an agent. By edit: when its files last changed. A unit with no clock of the
-#: one kind is placed by the other, so nothing drops to "earlier" for want of
-#: a session. Scripted edits are why both exist: after a tree-wide rewrite,
-#: edit times say the rewrite ran, not what was worked on.
+#: an agent. By edit: when its files last changed. Scripted edits are why both
+#: exist: after a tree-wide rewrite, edit times say the rewrite ran, not what
+#: was worked on. So a unit never worked on with an agent is not placed by its
+#: edits in session mode: it goes to "no sessions" (on 2026-10-06, 23 of the 24
+#: such units would otherwise have filled "this week" with the restructure). In
+#: edit mode a unit with no file change is placed by its session.
 SESSION_CLOCKS = ("live", "idle", "session")
 EDIT_CLOCKS = ("edited", "committed")
-MODES = {"session": (SESSION_CLOCKS, EDIT_CLOCKS), "edit": (EDIT_CLOCKS, SESSION_CLOCKS)}
+MODES = {"session": (SESSION_CLOCKS,), "edit": (EDIT_CLOCKS, SESSION_CLOCKS)}
 
 
 def clocks(a: Activity, now: float | None = None) -> list[tuple[str, int]]:
@@ -459,8 +461,8 @@ def clocks(a: Activity, now: float | None = None) -> list[tuple[str, int]]:
 
 def placing(a: Activity, by: str = "session", now: float | None = None) -> tuple[str, int] | None:
     """The clock that places the unit: a question waiting on the person
-    first, whatever the mode; then the newest clock of the mode's kind; then
-    the newest of the other kind."""
+    first, whatever the mode; then the newest clock of the mode's kind; in
+    edit mode, then the newest session. None when nothing places it."""
     cs = clocks(a, now)
     if cs and cs[0][0] == "waiting":
         return cs[0]
@@ -475,7 +477,7 @@ def band(a: Activity, now: float | None = None, by: str = "session") -> str:
     now = time.time() if now is None else now
     placed = placing(a, by, now)
     if placed is None:
-        return "earlier"
+        return "no sessions" if by == "session" and clocks(a, now) else "earlier"
     name, at = placed
     if name == "waiting":
         return "waiting"

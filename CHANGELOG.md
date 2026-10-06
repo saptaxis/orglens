@@ -25,6 +25,8 @@
   every unit inside its organisation's card.
 - Units are placed by session or by edit, toggled on the page; each card
   shows both times.
+- Placed by session, a unit never worked on with an agent goes to a folded
+  *no sessions* band rather than being placed by its edits.
 - A *last week* band (7 to 14 days); bands through last week start open.
 - Explore: the cards nested as `orglens tree` nests them, siblings by recency.
 - A scope filter: every unit with units under it.

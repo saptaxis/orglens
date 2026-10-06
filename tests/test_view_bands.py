@@ -48,10 +48,10 @@ class TestClocks:
 class TestBand:
     def test_bands_by_the_newest_clock(self):
         assert band(Activity(last_session=NOW - 3 * H), now=NOW) == "today"
-        assert band(Activity(modified=NOW - 30 * H), now=NOW) == "yesterday"
-        assert band(Activity(touched=NOW - 4 * 24 * H), now=NOW) == "this week"
+        assert band(Activity(modified=NOW - 30 * H), now=NOW, by="edit") == "yesterday"
+        assert band(Activity(touched=NOW - 4 * 24 * H), now=NOW, by="edit") == "this week"
         assert band(Activity(last_session=NOW - 20 * 24 * H), now=NOW) == "this month"
-        assert band(Activity(modified=NOW - 90 * 24 * H), now=NOW) == "earlier"
+        assert band(Activity(modified=NOW - 90 * 24 * H), now=NOW, by="edit") == "earlier"
         assert band(Activity(), now=NOW) == "earlier"
 
     def test_waiting_is_its_own_band_whatever_the_clocks_say(self):
@@ -124,8 +124,8 @@ class TestPage:
 
     def test_bands_through_last_week_are_open_and_older_ones_folded(self):
         rows = [_row("a", Activity(last_session=NOW - H)),
-                _row("b", Activity(modified=NOW - 10 * 24 * H)),
-                _row("c", Activity(modified=NOW - 20 * 24 * H))]
+                _row("b", Activity(last_session=NOW - 10 * 24 * H)),
+                _row("c", Activity(last_session=NOW - 20 * 24 * H))]
         page = render([("Projects", rows)], CTX, now=NOW)
         assert "<details class='band' data-band='today' open>" in page
         assert "<details class='band' data-band='last week' open>" in page
@@ -155,9 +155,21 @@ class TestPlacing:
         assert band(a, now=NOW, by="session") == "this week"
         assert band(a, now=NOW, by="edit") == "today"
 
-    def test_a_unit_with_no_session_is_placed_by_its_edit(self):
+    def test_a_unit_with_no_session_is_in_no_sessions_not_placed_by_its_edit(self):
+        """Placed by its edits, a unit nobody worked on filled "this week"
+        with the restructure's scripted rewrite."""
         a = Activity(modified=NOW - 3 * H)
-        assert placing(a, "session", NOW) == ("edited", NOW - 3 * H)
+        assert placing(a, "session", NOW) is None
+        assert band(a, now=NOW, by="session") == "no sessions"
+        assert band(a, now=NOW, by="edit") == "today"
+
+    def test_no_sessions_comes_last_and_folded(self):
+        rows = [_row("worked", Activity(last_session=NOW - 9000 * H)),
+                _row("never", Activity(modified=NOW - H))]
+        page = render([("All", rows)], CTX, now=NOW)
+        assert "<details class='band' data-band='no sessions'>" in page
+        assert page.index("data-band='earlier'") < page.index("data-band='no sessions'")
+        assert "data-bs='no sessions' data-be='today'" in page
 
     def test_a_unit_with_no_edit_is_placed_by_its_session(self):
         a = Activity(last_session=NOW - 3 * H)
