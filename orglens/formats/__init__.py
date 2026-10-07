@@ -56,16 +56,15 @@ def ordered(prefer: str) -> tuple[str, ...]:
 def existing(directory: Path, name: str, prefer: str = "md") -> Path | None:
     """The file `name` refers to in `directory`, in whichever format it is.
 
-    A name written with a suffix (`DECK.md`, as a grammar may still say) is
-    tried as written first; then the stem under each suffix, the preferred
-    format first. When one stem exists in two formats the preferred wins
-    (R11) — `check` is what reports the pair.
+    The stem under each suffix, the preferred format first, whether or not
+    the name carries a suffix (`overview.md`, as a grammar may still say):
+    the grammar's format decides, as everywhere else. Tried as written first,
+    a suffixed name read `overview.md` under `format: org` while `check` said
+    `overview.org` was read. When one stem exists in two formats the
+    preferred wins (R11) — `check` is what reports the pair.
     """
-    candidates: list[Path] = []
-    if Path(name).suffix in SUFFIXES:
-        candidates.append(directory / name)
     base = stem(name)
-    candidates += [directory / f"{base}{s}" for s in ordered(prefer)]
+    candidates = [directory / f"{base}{s}" for s in ordered(prefer)]
     for path in candidates:
         if path.is_file():
             return path

@@ -190,6 +190,15 @@ def test_a_write_with_a_suffix_is_used_as_written(tmp_path):
     assert _output(tmp_path, "draft.md").name == "draft.md"
 
 
+def test_a_write_with_a_suffix_lands_in_the_converted_file(tmp_path, monkeypatch):
+    """`writes: draft.md` on a packet converted to org wrote a new draft.md
+    beside draft.org."""
+    from orglens.workflow import cli as wcli
+    monkeypatch.setattr(wcli, "_preferred_format", lambda: "org")
+    (tmp_path / "draft.org").write_text("x")
+    assert wcli._output(tmp_path, "draft.md").name == "draft.org"
+
+
 def test_the_preferred_format_is_the_configured_grammars(tmp_path, monkeypatch):
     import orglens
     from pathlib import Path
