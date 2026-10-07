@@ -66,6 +66,10 @@ where the grammar has none yet. Fire several in one turn rather than scanning.
 `orglens tree [<unit>]` shows the units as a tree; `--under <unit>` on `list`,
 `status` and `find` keeps one unit and everything under it.
 
+A closing `N hidden` line means the person keeps units off the screen
+(`orglens hide`). Leave the hide as it is; `--show-hidden`, `--json` or naming
+the unit shows them to you.
+
 ## Create
 
 ```bash
