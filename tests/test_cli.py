@@ -726,7 +726,7 @@ def _git(*args, cwd):
 
 
 class TestWhereReportsCommitStatus:
-    """`orglens-adapt`'s safety gate depends on this: it must see uncommitted
+    """A skill that rewrites a unit's documents depends on this: it must see uncommitted
     paths or "no repository" before rewriting a driver document. The old
     single-repo `repo:` line was dropped when a unit grew several homes, so
     neither string it looked for could ever appear — the gate always

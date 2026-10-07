@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Skills
+
+- `orglens-adapt` is no longer shipped. It reshaped a unit's driver document
+  to one tree's conventions, which are not orglens's; the skill card and the
+  grammar reference say what orglens needs of a document.
+
 ## [0.7.0] — 2026-10-07
 
 Needs scad 0.9.0 or later for memos and the index's age, and scad 0.10.0 or

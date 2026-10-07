@@ -830,8 +830,8 @@ def _home_line(home) -> str:
 def _repo_line(home) -> str:
     """Whether this home's files are safely committed, and where.
 
-    `orglens-adapt`'s precondition is exactly this: git is the whole backup
-    model, and it only works if the current version is in it. A unit can
+    Anything that rewrites a unit's documents checks this first: git is the
+    whole backup model, and it only works if the current version is in it. A unit can
     span several repositories now, so this is one line per home rather than
     the single `repo:` line `where` used to print — dropping that block
     silently turned the safety gate into a no-op, since empty output reads

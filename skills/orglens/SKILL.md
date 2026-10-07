@@ -23,7 +23,7 @@ lives in its own venv, and the CLI is `orglens` on PATH).
 Never `ls`, `find`, `glob` or `tree` the documents tree to discover units,
 homes, plans, specs or logs, and never `cat` a sibling's document to learn a
 shape. `orglens list`, `find`, `sessions` and the snapshot answer the first;
-this card and `orglens-adapt` answer the second. A scan sees folders, not
+this card and `references/grammar-reference.md` answer the second. A scan sees folders, not
 declarations, and a folder is not a unit until a marker says so. A document's
 *contents* you read directly, once you know its path.
 </HARD-GATE>
@@ -77,11 +77,10 @@ orglens new <path> --kind project [--part-of <unit>] [--home <name>]
 ```
 
 `new` makes the directory, its marker, a stub driver document (the grammar's
-name for it, in the grammar's format; status line, *What it is*, *State tracking*), every other file the kind's `structure:` declares (seeded with a title and what it is for), and adds the unit to the parent's
-`.nav.yml` when that lists children by name. It prints the next steps. The path
+name for it, in the grammar's format; status line, *What it is*, *State tracking*), every other file the kind's `structure:` declares (seeded with a title and what it is for), and, in a markdown tree, adds the unit to the
+parent's `.nav.yml` when that lists children by name. It prints the next steps. The path
 given is exactly where it lands; `--home` is repeatable and names another place
-the work lives (a code repository). Then write the driver document — `orglens-adapt`
-is the skill for shaping one. Documents are written by hand, following the
+the work lives (a code repository). Then write the driver document. Documents are written by hand, following the
 reference's naming; nothing parses a filename.
 
 **A parent is the person's to state.** `part_of` puts a unit in the tree, and

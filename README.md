@@ -127,8 +127,7 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 
 ## Skills
 
-orglens ships `orglens` and `orglens-adapt` as agent skills. `bootstrap` installs
-them:
+orglens ships `orglens` as an agent skill. `bootstrap` installs it:
 
 ```bash
 ./bootstrap
