@@ -1590,26 +1590,7 @@ def resume(target: str, name: str | None, prompt: str | None, print_only: bool):
             what = "not a unit" if name else "neither a session id nor a unit"
             click.echo(f"'{target}' is {what}.", err=True)
             sys.exit(1)
-        # Running first, a just-launched one with no turns included: scad
-        # attaches to a running session's pane, or refuses when it cannot
-        # name one, so it is never opened twice. "Open" is not a filter: it
-        # is read off the last turn, so a session with none never had it.
-        mine = sessions.listed(sessions.for_unit(every, unit.name), everything=False)
-        if name:
-            named = [s for s in mine if s.label == name]
-            if not named:
-                click.echo(f"{unit.name} has no session named '{name}'. "
-                           "Its named sessions:", err=True)
-                for s in [s for s in mine if s.label][:10]:
-                    click.echo(_session_line(s), err=True)
-                sys.exit(1)
-            session = named[0]
-        elif not mine:
-            click.echo(f"{unit.name}: no sessions to resume.", err=True)
-            sys.exit(1)
-        else:
-            session = mine[0]
-            _name_the_others(unit.name, mine[1:])
+        session = _unit_session(every, unit.name, name, "resume")
 
     if prompt:
         # A turn into the open pane, rather than a terminal to type it in.
@@ -1622,15 +1603,42 @@ def resume(target: str, name: str | None, prompt: str | None, print_only: bool):
     sys.exit(_scad(argv))
 
 
-def _name_the_others(unit: str, others: list, shown: int = 3) -> None:
+def _unit_session(every: list, unit: str, name: str | None, verb: str):
+    """The unit's session a command means: the one of that name, newest
+    first, or with none named the unit's newest, running first. Exits with
+    the reason when there is none.
+
+    Running first, a just-launched one with no turns included: scad attaches
+    to a running session's pane, or refuses when it cannot name one, so it
+    is never opened twice. "Open" is not a filter: it is read off the last
+    turn, so a session with none never had it.
+    """
+    mine = sessions.listed(sessions.for_unit(every, unit), everything=False)
+    if name:
+        named = [s for s in mine if s.label == name]
+        if not named:
+            click.echo(f"{unit} has no session named '{name}'. "
+                       "Its named sessions:", err=True)
+            for s in [s for s in mine if s.label][:10]:
+                click.echo(_session_line(s), err=True)
+            sys.exit(1)
+        return named[0]
+    if not mine:
+        click.echo(f"{unit}: no sessions to {verb}.", err=True)
+        sys.exit(1)
+    _name_the_others(unit, mine[1:], verb)
+    return mine[0]
+
+
+def _name_the_others(unit: str, others: list, verb: str = "resume", shown: int = 3) -> None:
     """One line naming what `resume UNIT` passed over, so picking another is
     a TAB away rather than a listing to read."""
     if not others:
         return
     names = [s.label or s.id[:8] for s in others[:shown]]
     more = f" and {len(others) - shown} more" if len(others) > shown else ""
-    click.echo(f"also {', '.join(names)}{more}; "
-               f"pick one with: orglens resume {unit} NAME", err=True)
+    pick = f"orglens resume {unit} NAME" if verb == "resume" else f"--from NAME"
+    click.echo(f"also {', '.join(names)}{more}; pick one with: {pick}", err=True)
 
 
 def _say_if_stale() -> None:
@@ -1924,12 +1932,19 @@ def _launch_record(output: str) -> dict | None:
     return record
 
 
-def _launch(cwd: Path, agent: str, prompt: str | None,
+def _launch(cwd: Path | None, agent: str, prompt: str | None,
             window: str | None = None, name: str | None = None,
-            split: bool = False) -> dict | None:
+            split: bool = False, from_id: str | None = None) -> dict | None:
     """Start a session through scad and return its launch record — at least
     `session_id`, and the `tmux` pane when scad names one. Never raises."""
-    argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd), "--json"]
+    argv = ["scad", "session", "launch", "--agent", agent, "--json"]
+    # With `--from` and no home asked for, scad works where the source
+    # session did, through its path aliases; it knows that better than a
+    # unit's first home does.
+    if cwd is not None:
+        argv += ["--cwd", str(cwd)]
+    if from_id:
+        argv += ["--from", from_id]
     if prompt:
         argv += ["--prompt", prompt]
     # The unit name is the one thing orglens knows and scad does not, so it
@@ -2046,10 +2061,15 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
                    "day when not given.")
 @click.option("--no-name", "no_name", is_flag=True,
               help="Launch the session unnamed.")
+@click.option("--from", "from_", default=None, is_flag=False, flag_value="",
+              metavar="[NAME|ID]", shell_complete=complete.session_names_of_unit,
+              help="Pick up one of the unit's sessions in a fresh one: its newest, "
+                   "or the one named. scad writes the first turn; --prompt says "
+                   "where to go next.")
 @click.option("--dry-run", is_flag=True, help="Say what would happen; launch nothing.")
 def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
           window: bool, split: bool, about: str | None, name: str | None,
-          no_name: bool, dry_run: bool):
+          no_name: bool, from_: str | None, dry_run: bool):
     """Start a session for a unit, attributed before its first turn.
 
     The unit is what you asked for and the working directory is a consequence,
@@ -2085,7 +2105,25 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         click.echo(f"{unit.name} has no home on this machine.", err=True)
         sys.exit(1)
 
-    if home is not None:
+    # `--from`: a fresh session that picks up one of the unit's. scad owns
+    # the handoff --- it reads the source's handoff memo or its last turns
+    # and writes the first turn --- so orglens only picks the source by unit
+    # and, without --home, lets scad work where the source did.
+    source = None
+    if from_ is not None:
+        every = sessions.all_sessions(registry, EVENTS_DIR)
+        source, matches = _find_session(every, from_) if from_ else (None, [])
+        if source is None and len(matches) > 1:
+            click.echo(f"'{from_}' matches more than one session:", err=True)
+            for s in matches:
+                click.echo(_session_line(s), err=True)
+            sys.exit(1)
+        if source is None:
+            source = _unit_session(every, unit.name, from_ or None, "pick up")
+
+    if source is not None and home is None:
+        chosen = None
+    elif home is not None:
         chosen = next((h for h in present if h.name == home), None)
         if chosen is None:
             click.echo(f"Unknown home '{home}'. {unit.name} has: "
@@ -2101,7 +2139,7 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
             click.echo(f"  {h.name:<40} {h.path}")
         sys.exit(1)
 
-    first_turn = prompt or _arrival(unit, chosen, registry)
+    first_turn = prompt if source is not None else (prompt or _arrival(unit, chosen, registry))
     if no_name:
         chosen_name = None
     else:
@@ -2112,17 +2150,25 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
     if dry_run:
         where = (f"as a window `{window_name}` in your tmux" if window
                  else "in a pane beside this one" if split else "detached in tmux")
-        click.echo(f"would launch {agent} in {chosen.path} for {unit.name}, "
+        place = chosen.path if chosen else "the directory it ran in"
+        click.echo(f"would launch {agent} in {place} for {unit.name}, "
                    f"{where} via `scad session launch`; this command "
                    "returns at once and leaves your terminal alone.")
         click.echo(f"session name: {chosen_name or '(unnamed)'}")
+        if source is not None:
+            click.echo(f"picks up: {source.id[:8]} {source.label or ''}".rstrip()
+                       + " (scad writes the first turn)")
+            if first_turn:
+                click.echo(f"then: {first_turn}")
+            return
         click.echo("first turn:")
         for line in first_turn.splitlines():
             click.echo(f"  {line}")
         return
 
-    record = _launch(chosen.path, agent, first_turn,
-                     window=window_name, name=chosen_name, split=split)
+    record = _launch(chosen.path if chosen else None, agent, first_turn,
+                     window=window_name, name=chosen_name, split=split,
+                     from_id=source.id if source else None)
     if record is None:
         click.echo("scad returned no session id — the session is not attributed. "
                    "Attribute it later, or start it again through orglens.")

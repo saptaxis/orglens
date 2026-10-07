@@ -185,7 +185,9 @@ def session_names_of_unit(ctx, param, incomplete):
     rarely carries a name. One scad call says what each is called. The order
     is kept by the zsh completion (`compadd -V unsorted`).
     """
-    unit = ((ctx.params or {}) if ctx else {}).get("target")
+    params = (ctx.params or {}) if ctx else {}
+    # `resume UNIT <tab>`, and `start UNIT --from <tab>`.
+    unit = params.get("target") or params.get("unit_name")
     if not unit:
         return []
     try:
