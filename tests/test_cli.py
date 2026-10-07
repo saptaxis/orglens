@@ -492,6 +492,21 @@ class TestNewCommand:
         assert nav.read_text() == "title: Projects\nnav:\n  - clipcompose\n  - orglens\n  - test-tool\n"
         assert ".nav.yml" in result.output
 
+    def test_new_in_an_org_tree_leaves_a_parent_nav_alone(self, runner, tmp_path, units_tree):
+        """mkdocs renders markdown; a `.nav.yml` in an org tree is left from an
+        older site."""
+        default = Path(__file__).parent.parent / "orglens" / "grammars" / "default.yaml"
+        org = tmp_path / "org-grammar.yaml"
+        org.write_text(default.read_text().replace("format: md", "format: org"))
+        nav = units_tree / "projects" / ".nav.yml"
+        nav.write_text("title: Projects\nnav:\n  - clipcompose\n")
+        target = units_tree / "projects" / "test-tool"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"],
+                               env=_roots_config(tmp_path, [units_tree], grammar_path=org))
+        assert result.exit_code == 0, result.output
+        assert nav.read_text() == "title: Projects\nnav:\n  - clipcompose\n"
+        assert ".nav.yml" not in result.output
+
     def test_new_leaves_a_parent_nav_with_a_glob_alone(self, runner, cli_env, units_tree):
         nav = units_tree / "projects" / ".nav.yml"
         nav.write_text("title: Projects\nnav:\n  - '*'\n")

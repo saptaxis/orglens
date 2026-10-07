@@ -491,6 +491,15 @@ def test_a_parent_nav_with_a_glob_lists_everything(declared_tree, grammar):
     assert check.run(Registry([declared_tree], grammar)).unlisted == []
 
 
+def test_an_org_tree_ignores_a_parent_nav(declared_tree, grammar):
+    """mkdocs renders markdown; a `.nav.yml` in an org tree is left from an
+    older site."""
+    import dataclasses
+    (declared_tree / "projects" / ".nav.yml").write_text("title: Projects\nnav:\n  - clipcompose\n")
+    org = dataclasses.replace(grammar, format="org")
+    assert check.run(Registry([declared_tree], org)).unlisted == []
+
+
 def test_no_parent_nav_means_nothing_to_report(declared_tree, grammar):
     assert check.run(Registry([declared_tree], grammar)).unlisted == []
 

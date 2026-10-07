@@ -761,7 +761,9 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     driver.write_text(fmt.stub(base.replace("-", " ").capitalize(), target.name,
                                time.strftime("%Y-%m-%d")))
     _seed(target, kind, registry, fmt, base)
-    registered = _register_in_nav(target)
+    # mkdocs renders markdown, so a `.nav.yml` is a markdown tree's: in an
+    # org tree it is left from an older site and `new` leaves it alone.
+    registered = _register_in_nav(target) if registry.grammar.format == "md" else None
 
     click.echo(f"Created {kind or 'unit'}: {target}")
     click.echo("next:")

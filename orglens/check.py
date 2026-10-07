@@ -434,10 +434,13 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
                 twins += [Twin(unit=unit.name, path=directory / s)
                           for s, n in sorted(stems.items()) if n > 1]
 
+    # mkdocs renders markdown, so a `.nav.yml` matters only in a markdown
+    # tree; in an org tree one is left from an older site.
     unlisted = [
         Unlisted(unit=unit.name, nav=unit.declared_at.parent / ".nav.yml")
         for unit in units
-        if _nav_omits(unit.declared_at.parent / ".nav.yml", unit.declared_at.name)
+        if grammar.format == "md"
+        and _nav_omits(unit.declared_at.parent / ".nav.yml", unit.declared_at.name)
     ]
 
     stale: list[Stale] = []
