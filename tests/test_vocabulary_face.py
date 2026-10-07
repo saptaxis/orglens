@@ -31,7 +31,7 @@ ENGINE = ROOT / "orglens"
 #: drift they would otherwise be blamed for.
 FACE = ("cli.py", "check.py", "complete.py", "config.py", "declaration.py",
         "documents.py",
-        "events.py", "grammar.py", "homes.py", "propose.py", "reference.py",
+        "events.py", "grammar.py", "hide.py", "homes.py", "propose.py", "reference.py",
         "scadconfig.py", "sessions.py", "skip.py", "snapshot.py", "state.py", "tree.py", "units.py",
         "workflow/definition.py", "workflow/session.py", "workflow/cli.py")
 

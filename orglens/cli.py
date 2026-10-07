@@ -26,7 +26,7 @@ from pathlib import Path
 import click
 
 from orglens import (activity, check as check_module, complete, documents, formats,
-                     reference, sessions, tree as tree_mod, view)
+                     hide as hide_mod, reference, sessions, tree as tree_mod, view)
 from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
 from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
@@ -262,15 +262,36 @@ def _under(registry: Registry, name: str | None) -> list[Unit]:
 
 UNDER_HELP = "Only this unit and the units under it in the tree."
 
+SHOW_HIDDEN_HELP = "Show the units `orglens hide` keeps off the screen, for this run."
+
+
+def _hidden(registry: Registry, config: Config, show_hidden: bool,
+            named: str | None = None) -> set[str]:
+    """The units a display leaves out: `hide:` and their subtrees, less the
+    one the command was asked about by name. None with `--show-hidden`."""
+    if show_hidden or not config.hide:
+        return set()
+    return hide_mod.expand(registry.tree(), config.hide, named)
+
+
+def _say_hidden(count: int) -> None:
+    """The closing line of a display that hid something, so a forgotten hide
+    is noticed."""
+    if count:
+        click.echo(f"\n{count} hidden · orglens unhide --all, or --show-hidden for one run")
+
 
 @cli.command()
 @click.option("--type", "kind_filter", default=None, help="Filter by kind")
 @click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
               shell_complete=complete.units)
-def list(kind_filter: str | None, under: str | None):
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+def list(kind_filter: str | None, under: str | None, show_hidden: bool):
     """List everything in the tree."""
-    registry, _ = _load_registry()
+    registry, config = _load_registry()
     units = _under(registry, under)
+    hidden = _hidden(registry, config, show_hidden,
+                     registry.resolve(under).name if under else None)
     kinds_present = sorted({u.kind for u in registry.units()})
 
     if kind_filter is not None and kind_filter not in kinds_present:
@@ -278,9 +299,12 @@ def list(kind_filter: str | None, under: str | None):
 
     if kind_filter is not None:
         units = [u for u in units if u.kind == kind_filter]
+    shown = [u for u in units if u.name not in hidden]
+    left_out, units = len(units) - len(shown), shown
 
     if not units:
         click.echo("Nothing found.")
+        _say_hidden(left_out)
         return
 
     every, by_unit = _sessions_by_unit(registry)
@@ -307,6 +331,7 @@ def list(kind_filter: str | None, under: str | None):
             click.echo(f"  {kind}:" if root else f"\n{_heading(kind)}:")
             for unit, path in members:
                 click.echo(f"{indent}{path}{_list_tail(registry, unit, acts)}")
+    _say_hidden(left_out)
 
 
 def _list_tail(registry: Registry, unit: Unit, acts: dict) -> str:
@@ -364,11 +389,16 @@ def _by_organisation(units: list, acts: dict, tree, top: str | None = None):
 @cli.command()
 @click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
               shell_complete=complete.units)
-def status(under: str | None):
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+def status(under: str | None, show_hidden: bool):
     """Where everything stands — the authored line, dated, beside derived facts."""
-    registry, _ = _load_registry()
+    registry, config = _load_registry()
     _say_if_stale()
     units = _under(registry, under)
+    hidden = _hidden(registry, config, show_hidden,
+                     registry.resolve(under).name if under else None)
+    shown = [u for u in units if u.name not in hidden]
+    left_out, units = len(units) - len(shown), shown
 
     every, by_unit = _sessions_by_unit(registry)
     memos = _warm(registry, units, every)
@@ -426,20 +456,22 @@ def status(under: str | None):
                 when = f" ({_ago(ask['at'])} ago)" if ask["at"] else ""
                 first = ask["question"].strip().splitlines()[0]
                 click.echo(f"  {name}: {first[:88]}{when}")
+    _say_hidden(left_out)
 
 
 @cli.command(name="tree")
 @click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--json", "as_json", is_flag=True,
               help="The same tree as nested data.")
-def tree_cmd(unit_name: str | None, as_json: bool):
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+def tree_cmd(unit_name: str | None, as_json: bool, show_hidden: bool):
     """The units as a tree: each under the unit its `part_of` names.
 
     Every top-level unit and what is under it, or one unit's subtree. A
     `part_of` naming no unit, and a cycle, leave a unit top-level and are
     marked; `check` reports both.
     """
-    registry, _ = _load_registry()
+    registry, config = _load_registry()
     units = registry.units()
     if not units:
         click.echo("Nothing found.")
@@ -467,11 +499,18 @@ def tree_cmd(unit_name: str | None, as_json: bool):
         click.echo(json.dumps([tree_mod.nested(shape, t, node) for t in tops], indent=2))
         return
 
+    # The drawn tree leaves out what `hide` keeps off the screen; `--json`
+    # above is read by scripts and keeps everything.
+    hidden = _hidden(registry, config, show_hidden, start)
+    if hidden:
+        shape = tree_mod.build({n: u.part_of for n, u in by_name.items() if n not in hidden})
+    in_view = set(tree_mod.below(registry.tree(), start)) if start else set(by_name)
     # Cut to the terminal's width so a status never wraps; piped, whole.
     width = shutil.get_terminal_size().columns if sys.stdout.isatty() else None
     for line in tree_mod.draw(shape, lambda name: by_name[name].kind, start=start,
                               status=status_of):
         click.echo(line[:width] if width else line)
+    _say_hidden(len(hidden & in_view))
 
 
 @cli.command()
@@ -1139,7 +1178,9 @@ def _refresh_snapshot(registry: Registry, config: Config):
               help="Where the docs are served. Defaults to config docs_base_url.")
 @click.option("--reindex/--no-reindex", default=True,
               help="Bring scad's session index up to date first (about a second).")
-def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool):
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool,
+             show_hidden: bool):
     """Render where every unit stands, and open it.
 
     Joins what the tree knows (plans, packets, uncommitted work) with what scad
@@ -1148,9 +1189,13 @@ def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool):
     """
     registry, config = _load_registry()
 
+    # Off the page, with its running sessions and questions: a hidden unit
+    # is not on screen at all. The page says how many.
+    hidden = _hidden(registry, config, show_hidden)
     by_kind: dict[str, list] = {}
     for unit in registry.units():
-        by_kind.setdefault(unit.kind, []).append(unit)
+        if unit.name not in hidden:
+            by_kind.setdefault(unit.kind, []).append(unit)
 
     headings = [
         (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
@@ -1196,7 +1241,8 @@ def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool):
             groups.append((_heading(kind), rows))
 
     ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url,
-           "link": config.view_link}
+           "link": config.view_link,
+           "hidden": len(hidden & {u.name for u in registry.units()})}
     page = view.render(groups, ctx, unattributed=sessions.unattributed(every))
     path = view.write(page, Path(out))
     click.echo(f"wrote {path}")
@@ -1333,6 +1379,61 @@ def memos_cmd(unit_name: str | None, want_mentions: bool):
         click.echo(f"{unit_name or 'every unit'}: no memos")
 
 
+@cli.command(name="hide")
+@click.argument("unit_names", nargs=-1, required=True, shell_complete=complete.units)
+def hide_cmd(unit_names: tuple[str, ...]):
+    """Keep units off the screen, each with what is under it, until unhidden.
+
+    For showing the setup to someone. `view`, `tree`, `list`, `status` and
+    `sessions` leave them out and say how many; `snapshot`, `--json`, `find`
+    and `where` do not, and naming a hidden unit still shows it.
+    """
+    registry, config = _load_registry()
+    names = []
+    for name in unit_names:
+        try:
+            names.append(registry.resolve(name).name)
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+    kept = [*config.hide, *(n for n in names if n not in config.hide)]
+    hide_mod.write(config.path, kept)
+    below = hide_mod.expand(registry.tree(), names) - set(names)
+    more = f", and {_count(len(below), 'unit')} under them" if below else ""
+    click.echo(f"hidden: {', '.join(names)}{more}")
+
+
+@cli.command(name="unhide")
+@click.argument("unit_names", nargs=-1, shell_complete=complete.units)
+@click.option("--all", "everything", is_flag=True, help="Unhide every unit.")
+def unhide_cmd(unit_names: tuple[str, ...], everything: bool):
+    """Put hidden units back on the screen."""
+    if not unit_names and not everything:
+        raise click.UsageError("name a unit, or --all")
+    registry, config = _load_registry()
+    if everything:
+        gone = [*config.hide]
+    else:
+        names = {n for name in unit_names
+                 for n in [_resolved_or(registry, name)]}
+        gone = [n for n in config.hide if n in names]
+        if not gone:
+            click.echo(f"not hidden: {', '.join(unit_names)}"
+                       + (f"; hidden: {', '.join(config.hide)}" if config.hide else ""))
+            return
+    hide_mod.write(config.path, [n for n in config.hide if n not in gone])
+    click.echo(f"unhidden: {', '.join(gone)}" if gone else "nothing was hidden")
+
+
+def _resolved_or(registry: Registry, name: str) -> str:
+    """The unit's own name, or what was typed when no unit has it: a unit
+    hidden and since removed can still be unhidden."""
+    try:
+        return registry.resolve(name).name
+    except ValueError:
+        return name
+
+
 @cli.command(name="sessions")
 @click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--none", "only_none", is_flag=True,
@@ -1351,9 +1452,11 @@ def memos_cmd(unit_name: str | None, want_mentions: bool):
               help="Apply decisions from a `--none --json` file you edited.")
 @click.option("--json", "as_json", is_flag=True,
               help="The rows as JSON, each with a `unit` to fill in.")
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
 def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
                  triage: bool, one_by_one: bool, as_groups: bool,
-                 only_dismissed: bool, from_file: str | None, as_json: bool):
+                 only_dismissed: bool, from_file: str | None, as_json: bool,
+                 show_hidden: bool):
     """List a unit's sessions, or every unit's, newest first.
 
     A session is a unit's because `orglens start` or `orglens attribute`
@@ -1427,16 +1530,21 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
         return
 
     groups: list[tuple[str, list]] = []
+    hidden = _hidden(registry, _load_config(), show_hidden)
+    left_out = 0
     if not only_none:
         for unit in registry.units():
             rows = sessions.listed(sessions.for_unit(every, unit.name), everything)
-            if rows:
+            if rows and unit.name in hidden:
+                left_out += 1
+            elif rows:
                 groups.append((unit.name, rows))
     loose = sessions.listed(sessions.unattributed(every), everything)
     if loose:
         groups.append(("unattributed", loose))
     if not groups:
         click.echo("no sessions")
+        _say_hidden(left_out)
         return
     for label, rows in groups:
         click.echo(f"\n{label}:")
@@ -1447,6 +1555,7 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
                 click.echo(_session_detail(s))
             elif (why := _why_line(s)):
                 click.echo(why)
+    _say_hidden(left_out)
 
 
 @cli.command()

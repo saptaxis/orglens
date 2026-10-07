@@ -781,6 +781,8 @@ def render(
         body.append(f"<div class='badge'>{waiting} waiting on you</div>")
     else:
         body.append("<div class='badge clear'>nothing waiting</div>")
+    if ctx.get("hidden"):
+        body.append(f" <div class='badge clear'>{ctx['hidden']} hidden</div>")
 
     # ── Recent ──
     body.append("<section data-tab='recent'>")
