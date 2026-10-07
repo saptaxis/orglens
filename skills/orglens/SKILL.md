@@ -136,7 +136,8 @@ orglens sessions --none --groups                # the unclaimed, counted by dire
 A session belongs to every unit with a home containing where it ran, or to
 the one an attribution names, which wins. A shared home shows the session on
 both units; `attribute` narrows it to one. A session started by hand is listed
-after scad's next reindex.
+after scad's next reindex. When `sessions`, `resume` or `status` says the index
+is old, run `scad reindex` before trusting what they list; `view` does it itself.
 
 `--why` is the person's own words about a session and is shown wherever it is
 listed; ask for it rather than inventing one. `resume --prompt` delivers a turn

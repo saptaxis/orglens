@@ -4,6 +4,9 @@
 
 ### Sessions
 
+- `sessions`, `resume` and `status` say when scad's index is more than an
+  hour old, or was never built, from `scad index status` (scad 0.9.0). An
+  older scad is no warning.
 - scad's notes are memos (scad 0.9.0): `orglens notes` is now `orglens memos`,
   with no alias, and reads `scad memos ls`. When scad refuses, as it does
   until a machine's memo store is moved, its message is shown instead of an
