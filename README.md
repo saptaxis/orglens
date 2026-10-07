@@ -10,8 +10,8 @@ orglens is built alongside [scad](https://github.com/saptaxis/scoped-agent-dispa
 a lower-level tool that runs agent sessions and records what happened.
 
 scad is optional and not a dependency. `orglens start` and `resume` shell out to
-it, and sessions and notes come from `scad session ls --json` and `scad notes ls
---about` when it is present (scad 0.5 or later; an older scad or none means no
+it, and sessions and memos come from `scad session ls --json` and `scad memos ls`
+when it is present (scad 0.9 or later for memos; an older scad or none means no
 sessions, which is ordinary). Every other command works without it.
 
 ## What it assumes
@@ -116,7 +116,7 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 | `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window\|--split] [--about WORDS] [--name TEXT] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, `--split` in a pane beside this one, and the session is named `unit[-context]-sepDD` |
 | `orglens sessions [UNIT] [--none] [--all] [--json]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
 | `orglens sessions --triage [--one-by-one]`, `--groups`, `--from FILE` | Decide the unclaimed sessions by directory, one at a time, or from a `--none --json` file you edited |
-| `orglens notes [UNIT] [--no-mentions]` | What was written down about a unit, and why each note is the unit's |
+| `orglens memos [UNIT] [--no-mentions]` | What was written down about a unit in scad's memos, and why each is the unit's |
 | `orglens resume UNIT [NAME]\|SESSION-ID [--prompt TEXT] [--print]` | Resume a session by id, a unit's newest (running first), or the unit's session called NAME; `--prompt` sends a turn to it instead |
 | `orglens attribute SESSION-ID UNIT [--why TEXT]` | Say which unit a session was for, after the fact |
 | `orglens dismiss SESSION-ID\|--under PATH [--why TEXT]` | Say a session, or every unclaimed one under a path, belongs to no unit |
@@ -253,8 +253,8 @@ says a session is nobody's, which is what lets the unclaimed pile empty;
 be any of the units under it, and guessing from its title is the containment
 mistake one layer up.
 
-`orglens notes UNIT` prints what was written down about it. A note is the
-unit's because the session that wrote it is (`written here`), because scad
+`orglens memos UNIT` prints what was written down about it in scad's memos. A
+memo is the unit's because the session that wrote it is (`written here`), because scad
 filed it there (`filed here`), or because it names the unit (`mentions this`);
 each row says which.
 
@@ -276,7 +276,7 @@ proposal without starting a session, and `orglens new` asks the same question.
 `orglens config UNIT` renders a unit's homes into the `repos:` block of the
 config a container launcher reads. Homes absent from this machine are left out.
 This is the only command that writes under `~/.scad`; nothing else in orglens
-touches that directory, and scad's index is never opened — sessions and notes
+touches that directory, and scad's index is never opened — sessions and memos
 come through scad's own commands. Launching on this machine needs no config.
 
 ## Demo

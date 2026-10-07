@@ -129,7 +129,7 @@ orglens resume <unit> <name>                    # the unit's session of that nam
 orglens resume <session-id>                     # by id or unique prefix
 orglens attribute <session-id> <unit> --why "…" # say whose it was, and what for
 orglens resume <unit> --prompt "…"              # hand a turn to the open session
-orglens notes <unit>                            # what was written down about it
+orglens memos <unit>                            # what was written down about it (scad's memos)
 orglens sessions --none --groups                # the unclaimed, counted by directory
 ```
 
@@ -144,7 +144,7 @@ to a pane that is already open, which is not the same as resuming — and `resum
 names any other live process on that session id before opening it, because two
 writers on one transcript is how a session forks.
 
-`orglens notes <unit>` says why each note is the unit's: `written here` (the
+`orglens memos <unit>` says why each memo is the unit's: `written here` (the
 session that wrote it belongs to the unit), `filed here` (scad's project for
 it), or `mentions this` (the name appears in it). `--no-mentions` drops the
 weakest, `--kind` is not there yet.

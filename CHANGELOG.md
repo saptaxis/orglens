@@ -4,6 +4,10 @@
 
 ### Sessions
 
+- scad's notes are memos (scad 0.9.0): `orglens notes` is now `orglens memos`,
+  with no alias, and reads `scad memos ls`. When scad refuses, as it does
+  until a machine's memo store is moved, its message is shown instead of an
+  empty list.
 - `resume UNIT NAME` resumes the unit's session of that name; TAB after the
   unit offers its attributed sessions' names, newest first.
 - `resume UNIT` takes the unit's newest session, a running or just-launched
