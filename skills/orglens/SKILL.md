@@ -93,7 +93,8 @@ naming it, and pass `--part-of` only on a yes. Run without a terminal, `new` and
 A tree may hold markdown and org side by side, and both are read. Write a new
 document in the grammar's `format` (the reference says which); keep an existing
 one in the format it is in. The status line is `#+STATUS: …` under `#+TITLE:` in
-org, `> **Status:** …` in markdown. `check` reports a document written in both.
+org, `> **Status:** …` in markdown, one sentence: only the first is shown.
+`check` reports a document written in both.
 
 ```bash
 orglens declare <path> [--yes] [--part-of <unit>]  # a folder that exists and looks like a unit but never said so
@@ -120,7 +121,14 @@ detached one, so the person can switch to it rather than attach. The session is
 named `<unit>-<mon><dd>`; `--about "two words"` puts context in the middle,
 which is what tells two sessions on one unit on one day apart. Both need a scad
 that has `session launch --window`. `--split` lands it in a pane beside the
-one you are in instead.
+one you are in instead, with a scad that has `session launch --split`.
+
+`--from [<name>|<id>]` starts a *fresh* session that picks up one of the unit's:
+its newest, or the one named (TAB lists them). Use it when a session is too
+full to go on, rather than `resume`. scad writes the first turn (read the
+source's handoff memo or its last turns, write a new handoff); `--prompt` says
+where to go next. Without `--home` it works where the source ran. Needs scad
+0.10.0 or later.
 
 ## Sessions
 

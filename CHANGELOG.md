@@ -1,12 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.0] — 2026-10-07
+
+Needs scad 0.9.0 or later for memos and the index's age, and scad 0.10.0 or
+later for `start --from`. With an older scad, `orglens memos`
+and `start --from` show scad's own error and no stale-index line is printed.
 
 ### Sessions
 
 - `sessions`, `resume` and `status` say when scad's index is more than an
   hour old, or was never built, from `scad index status` (scad 0.9.0). An
-  older scad is no warning.
+  older scad gives no warning.
 - scad's notes are memos (scad 0.9.0): `orglens notes` is now `orglens memos`,
   with no alias, and reads `scad memos ls`. When scad refuses, as it does
   until a machine's memo store is moved, its message is shown instead of an
@@ -17,6 +21,18 @@
   one first (scad attaches to its pane), whatever its outcome, and names the
   others in one line.
 - `start --split` lands the session in a pane beside this one.
+- `start UNIT --from [NAME|ID]` starts a fresh session that picks up one of
+  the unit's, its newest or the one named. scad does the handoff (`session
+  launch --from`): it reads the source's handoff memo or its last turns and
+  writes the first turn; `--prompt` says where to go next.
+
+### Hiding units
+
+- `orglens hide UNIT...` keeps units off the screen, each with what is under
+  it, until `orglens unhide UNIT...|--all`: a `hide:` list in the config.
+  `view`, `tree`, `list`, `status` and `sessions` leave them out and say how
+  many; `--show-hidden` shows them for one run. `--json`, `snapshot`, `find`
+  and `where` keep them, and naming a hidden unit shows it.
 
 ### Status lines
 
@@ -24,10 +40,19 @@
   (code marks, emphasis, links) is dropped, and the line is no longer cut at
   the first comma or a trailing parenthesis, nor ever inside brackets.
   Shown so in `list`, `tree`, `view` and TAB hints.
+- An empty status line is no status; it no longer reads the next line. A
+  status line inside a source or example block, or a markdown fence, is not
+  the document's.
+- A document named with a suffix (`driver: overview.md`) is found in the
+  grammar's format first, so under `format: org` the status comes from
+  `overview.org`, as `check` says. A workflow node's `writes: draft.md`
+  writes into an existing `draft.org`, not a new `draft.md` beside it.
 
 ### check
 
 - A unit inside an ancestor of its stated parent is not misplaced.
+- `.nav.yml` belongs to a markdown tree: in an org tree, `new` no longer adds
+  a unit to one and `check` no longer reports a unit missing from one.
 
 ### list
 
@@ -51,6 +76,14 @@
 - `file://` links are percent-encoded.
 - `view` runs scad's incremental reindex first (about a second), so running
   sessions show their turns; `--no-reindex` skips it.
+
+### Not yet
+
+- `start --from` was checked against scad 0.10.0 by `--dry-run`; no session
+  was started from it.
+- scad's refusal to list memos was checked against scad 0.9.0 only in
+  tests; live, the store had already moved.
+- A status's later sentences are shown nowhere; only the first is.
 
 ## [0.6.0] — 2026-10-02
 

@@ -113,7 +113,7 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 | `orglens snapshot [--stdout] [--check] [--json]` | Generate a topology snapshot (markdown), with the same facts as JSON beside it for completion; `--json` prints the data instead. `--check` says whether the written one is older than any declaration or driver document, or the JSON lags it, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
 | `orglens view` | Render where everything stands as a page, and open it. *Recent*: a card per unit at any depth, with its path, banded by when it last moved (by session or by edit), waiting first. *Explore*: the same cards as the tree. Filter by band, kind, agent, scope or text. Reindexes scad first (`--no-reindex` to skip) |
-| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window\|--split] [--about WORDS] [--name TEXT] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, `--split` in a pane beside this one, and the session is named `unit[-context]-sepDD` |
+| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window\|--split] [--about WORDS] [--name TEXT] [--from [NAME\|ID]] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, `--split` in a pane beside this one, and the session is named `unit[-context]-sepDD`. `--from` makes it a fresh session that picks up one of the unit's, the newest or the one named, through `scad session launch --from` |
 | `orglens sessions [UNIT] [--none] [--all] [--json]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
 | `orglens sessions --triage [--one-by-one]`, `--groups`, `--from FILE` | Decide the unclaimed sessions by directory, one at a time, or from a `--none --json` file you edited |
 | `orglens memos [UNIT] [--no-mentions]` | What was written down about a unit in scad's memos, and why each is the unit's |
@@ -231,7 +231,9 @@ Status is the first status line (`> **Status:**` in markdown, `#+STATUS:` in
 org) in a unit's documents, looking at the
 ones `structure` names first. Nothing declares a state file, so
 moving the line into whichever document you actually maintain works. It is
-always reported with its age, since an authored sentence can go stale.
+shown as its first sentence in plain text, markup dropped, so write it as one
+sentence. It is always reported with its age, since an authored sentence can
+go stale.
 
 ## How Sessions Get Attributed
 
@@ -255,9 +257,9 @@ be any of the units under it, and guessing from its title is the containment
 mistake one layer up.
 
 `orglens memos UNIT` prints what was written down about it in scad's memos. A
-memo is the unit's because the session that wrote it is (`written here`), because scad
-filed it there (`filed here`), or because it names the unit (`mentions this`);
-each row says which.
+memo is the unit's because the session that wrote it is (`written here`),
+because scad filed it there (`filed here`), or because it names the unit
+(`mentions this`); each row says which.
 
 `orglens start UNIT` records the unit before the session's first turn. It picks
 one of the unit's homes, asking with `--home` when more than one resolves,
@@ -277,7 +279,7 @@ proposal without starting a session, and `orglens new` asks the same question.
 `orglens config UNIT` renders a unit's homes into the `repos:` block of the
 config a container launcher reads. Homes absent from this machine are left out.
 This is the only command that writes under `~/.scad`; nothing else in orglens
-touches that directory, and scad's index is never opened — sessions and memos
+touches that directory, and scad's index is never opened: sessions and memos
 come through scad's own commands. Launching on this machine needs no config.
 
 ## Demo
