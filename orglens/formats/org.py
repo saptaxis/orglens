@@ -12,7 +12,12 @@ import re
 from orglens.formats.base import Format, clean
 
 #: Org keywords are case-insensitive; `#+status:` is as valid as `#+STATUS:`.
-STATUS = re.compile(r"^#\+STATUS:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+#: Within its own line: an empty `#+STATUS:` is no status, not the next line.
+STATUS = re.compile(r"^#\+STATUS:[ \t]*(\S.*?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
+#: `#+begin_src` ... `#+end_src`, and every other block: an example of a
+#: status line in a document is not that document's status.
+BLOCK = re.compile(r"^[ \t]*#\+begin_(\w+)\b.*?^[ \t]*#\+end_\1\b[^\n]*",
+                   re.IGNORECASE | re.MULTILINE | re.DOTALL)
 
 
 #: `[[target][description]]` and `[[target]]`.
@@ -48,7 +53,7 @@ def _dashes(text: str) -> str:
 
 
 def status(text: str) -> str | None:
-    match = STATUS.search(text)
+    match = STATUS.search(BLOCK.sub("", text))
     return clean(plain(match.group(1))) if match else None
 
 

@@ -6,7 +6,10 @@ import re
 
 from orglens.formats.base import Format, clean
 
-STATUS = re.compile(r"\*\*Status:\*\*\s*(.+)")
+#: Within its own line: an empty status is no status, not the next line.
+STATUS = re.compile(r"\*\*Status:\*\*[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
+#: A fenced block: an example of a status line is not the document's status.
+FENCE = re.compile(r"^[ \t]*(```|~~~).*?^[ \t]*\1[^\n]*", re.MULTILINE | re.DOTALL)
 
 
 LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
@@ -21,7 +24,7 @@ def plain(raw: str) -> str:
 
 
 def status(text: str) -> str | None:
-    match = STATUS.search(text)
+    match = STATUS.search(FENCE.sub("", text))
     return clean(plain(match.group(1))) if match else None
 
 

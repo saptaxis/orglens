@@ -120,10 +120,13 @@ def test_existing_prefers_the_grammars_format_when_both_exist(tmp_path):
     assert formats.existing(tmp_path, "overview", prefer="md").name == "overview.md"
 
 
-def test_existing_honours_an_explicit_suffix_first(tmp_path):
+def test_the_grammars_format_wins_over_a_suffix_as_written(tmp_path):
+    """Read as written first, `overview.md` under `format: org` was read
+    while `check` said `overview.org` was."""
     (tmp_path / "DECK.md").write_text("x")
     (tmp_path / "DECK.org").write_text("x")
-    assert formats.existing(tmp_path, "DECK.md", prefer="org").name == "DECK.md"
+    assert formats.existing(tmp_path, "DECK.md", prefer="org").name == "DECK.org"
+    assert formats.existing(tmp_path, "DECK.org", prefer="md").name == "DECK.md"
 
 
 def test_existing_finds_the_other_format_when_the_named_one_is_absent(tmp_path):
@@ -142,3 +145,25 @@ def test_file_globs_expand_a_bare_pattern_to_every_suffix():
 
 def test_file_globs_leave_an_unregistered_suffix_alone():
     assert formats.file_globs("*.txt") == ["*.txt"]
+
+
+@pytest.mark.parametrize("name", ALL)
+def test_an_empty_status_is_none_not_the_next_line(name):
+    text = ("# X\n\n> **Status:**\nnext line\n" if name == "md"
+            else "#+TITLE: X\n#+STATUS:\n* Heading one\n")
+    assert formats.get(name).status(text) is None
+
+
+def test_an_org_status_in_a_block_is_not_the_documents():
+    org = formats.get("org")
+    example = "#+begin_src org\n#+STATUS: example only\n#+end_src\n"
+    assert org.status("#+TITLE: x\n" + example) is None
+    assert org.status("#+TITLE: x\n" + example + "#+STATUS: Real\n") == "Real"
+    assert org.status("#+BEGIN_EXAMPLE\n#+STATUS: no\n#+END_EXAMPLE\n#+STATUS: Yes\n") == "Yes"
+
+
+def test_a_markdown_status_in_a_fence_is_not_the_documents():
+    md = formats.get("md")
+    fence = "```\n> **Status:** in a fence\n```\n"
+    assert md.status("# X\n\n" + fence) is None
+    assert md.status("# X\n\n" + fence + "\n> **Status:** Real\n") == "Real"
