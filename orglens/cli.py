@@ -169,21 +169,28 @@ def _git_paths(registry: Registry, units: list) -> list[Path]:
 def _warm(registry: Registry, units: list, every: list) -> dict[str, list[dict]]:
     """Everything `status` and `view` will ask a subprocess or a file walk
     for, fetched at once: git per home and driver document, the newest
-    mtime per home, and `scad notes ls --about` per unit. Independent and
-    mostly waiting, so one pool runs them side by side; in series they were
-    most of a 10s `status`. Returns the notes by unit; the rest is cached.
+    mtime per home, and scad's memos. Independent and mostly waiting, so one
+    pool runs them side by side; in series they were most of a 10s
+    `status`. Returns the memos by unit; the rest is cached. scad's refusal
+    to list memos is said once, and the page or listing goes on without.
     """
-    # One read of scad's notes export for the whole tree, joined here. It
+    # One read of scad's memos export for the whole tree, joined here. It
     # was one `--about` subprocess per unit, which is 31 launches to read
     # one file; the join itself needs the sessions, so the caller passes
     # them in.
-    notes: dict[str, list[dict]] = {}
+    memos: dict[str, list[dict]] = {u.name: [] for u in units}
+    refused: list[str] = []
 
     def fetch(_: None = None) -> None:
-        notes.update(activity.notes_by_unit([u.name for u in units], every))
+        try:
+            memos.update(activity.memos_by_unit([u.name for u in units], every))
+        except sessions.ScadFailed as exc:
+            refused.append(str(exc))
 
     activity.prefetch(_git_paths(registry, units), extra=[(fetch, None)])
-    return notes
+    for said in refused:
+        click.echo(f"memos: {said}", err=True)
+    return memos
 
 
 def _status_of(registry: Registry, unit):
@@ -363,10 +370,10 @@ def status(under: str | None):
     units = _under(registry, under)
 
     every, by_unit = _sessions_by_unit(registry)
-    notes = _warm(registry, units, every)
+    memos = _warm(registry, units, every)
     acts = {
         unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name],
-                            notes=notes[unit.name])
+                            memos=memos[unit.name])
         for unit in units
     }
 
@@ -1135,7 +1142,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool):
     """Render where every unit stands, and open it.
 
     Joins what the tree knows (plans, packets, uncommitted work) with what scad
-    knows (sessions, notes, open questions). Everything is recomputed here, so
+    knows (sessions, memos, open questions). Everything is recomputed here, so
     the page cannot drift the way a written status line does.
     """
     registry, config = _load_registry()
@@ -1155,7 +1162,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool):
         click.echo(f"scad reindex failed ({why}); sessions may be out of date.",
                    err=True)
     every, by_unit = _sessions_by_unit(registry)
-    notes = _warm(registry, [u for us in by_kind.values() for u in us], every)
+    memos = _warm(registry, [u for us in by_kind.values() for u in us], every)
 
     groups = []
     for kind in sorted(by_kind):
@@ -1172,7 +1179,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool):
                     "why_edited": status.edited if status else None,
                     "activity": activity.read(
                         unit.paths, unit.name, sessions=by_unit[unit.name],
-                        notes=notes[unit.name],
+                        memos=memos[unit.name],
                     ),
                     "artifacts": [
                         (heading, documents.find(registry, artifact_kind, unit))
@@ -1274,20 +1281,20 @@ def _session_detail(s) -> str:
     return line
 
 
-@cli.command(name="notes")
+@cli.command(name="memos")
 @click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--mentions/--no-mentions", "want_mentions", default=True,
-              help="Include notes that only name the unit. On by default.")
-def notes_cmd(unit_name: str | None, want_mentions: bool):
+              help="Include memos that only name the unit. On by default.")
+def memos_cmd(unit_name: str | None, want_mentions: bool):
     """What was written down about a unit, newest first.
 
-    Three ways a note reaches a unit, shown per row. *written here* is the
-    exact one: the note's session is the unit's, by attribution or by
+    Three ways a memo reaches a unit, shown per row. *written here* is the
+    exact one: the memo's session is the unit's, by attribution or by
     containment. *filed here* is scad's project for it, a directory name.
-    *mentions this* is the name in the note's topic, tags or entities —
+    *mentions this* is the name in the memo's topic, tags or entities —
     the weakest, and the only one before this.
 
-    The notes themselves stay in scad; this reads its export and joins.
+    The memos themselves stay in scad; this reads its export and joins.
     """
     registry, _ = _load_registry()
     every = sessions.all_sessions(registry, EVENTS_DIR)
@@ -1302,7 +1309,11 @@ def notes_cmd(unit_name: str | None, want_mentions: bool):
     else:
         names = [u.name for u in registry.units()]
 
-    found = activity.notes_by_unit(names, every)
+    try:
+        found = activity.memos_by_unit(names, every)
+    except sessions.ScadFailed as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
     shown = 0
     for name in names:
         rows = [n for n in found[name]
@@ -1318,7 +1329,7 @@ def notes_cmd(unit_name: str | None, want_mentions: bool):
                 f"{str(n.get('how') or ''):<13} {str(n['title'] or '')[:88]}"
             )
     if not shown:
-        click.echo(f"{unit_name or 'every unit'}: no notes")
+        click.echo(f"{unit_name or 'every unit'}: no memos")
 
 
 @cli.command(name="sessions")

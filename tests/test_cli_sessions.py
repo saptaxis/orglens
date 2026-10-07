@@ -622,3 +622,65 @@ class TestTriageInGroups:
         run.invoke(cli, ["dismiss", "0000aaaa", "--why", "actually nobody's"])
         out = run.invoke(cli, ["sessions", "--dismissed"]).output
         assert "why: actually nobody's" in out and "the last thing said" not in out
+
+
+class TestMemos:
+    """scad 0.9.0 refuses every memo command until a machine's store is
+    moved, and says what to run. That has to reach the person."""
+
+    MOVE = "Error: memos moved to ~/.scad/memos. Run: mv ~/.scad/notes ~/.scad/memos"
+
+    def _refuse(self, monkeypatch):
+        from orglens import sessions
+
+        def refuse(argv):
+            raise sessions.ScadFailed(self.MOVE)
+        monkeypatch.setattr("orglens.sessions.run_scad_or_say", refuse)
+
+    def test_memos_lists_what_was_written_about_a_unit(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        monkeypatch.setattr("orglens.sessions.run_scad_or_say", fake_scad(memos=[
+            {"session_id": "x", "topic": "the-topic", "title": "a memo about it",
+             "ts": "2026-10-01T00:00:00", "project": "orglens", "tags": [], "entities": []},
+        ]))
+        result = CliRunner().invoke(cli, ["memos", "orglens"])
+        assert result.exit_code == 0, result.output
+        assert "the-topic" in result.output and "a memo about it" in result.output
+
+    def test_a_refusal_is_shown_not_an_empty_list(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._refuse(monkeypatch)
+        result = CliRunner().invoke(cli, ["memos", "orglens"])
+        assert result.exit_code == 1
+        assert "mv ~/.scad/notes ~/.scad/memos" in result.output
+        assert "no memos" not in result.output
+
+    def test_status_says_the_refusal_once_and_goes_on(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._refuse(monkeypatch)
+        result = CliRunner().invoke(cli, ["status"])
+        assert result.exit_code == 0, result.output
+        assert result.output.count("mv ~/.scad/notes ~/.scad/memos") == 1
+
+    def test_notes_is_no_longer_a_command(self, two_root_tree_config):
+        assert CliRunner().invoke(cli, ["notes"]).exit_code != 0
+
+
+#: The real call, taken before the autouse fixture stands it in.
+from orglens import sessions as _sessions
+OR_SAY = _sessions.run_scad_or_say
+
+
+def test_scads_own_words_come_back_when_it_refuses(monkeypatch):
+    import subprocess as sp
+    import pytest
+    monkeypatch.setattr("orglens.sessions.subprocess.run",
+                        lambda argv, **k: sp.CompletedProcess(argv, 1, "", "Error: run mv a b\n"))
+    with pytest.raises(_sessions.ScadFailed, match="^Error: run mv a b$"):
+        OR_SAY(["memos", "ls"])

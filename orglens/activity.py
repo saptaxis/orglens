@@ -54,7 +54,7 @@ class Activity:
     live: list[dict] = field(default_factory=list)     # processes running now
     agents: list[str] = field(default_factory=list)
     needs: list[dict] = field(default_factory=list)   # {question, at}
-    notes: list[dict] = field(default_factory=list)   # the authored tier
+    memos: list[dict] = field(default_factory=list)   # the authored tier
 
     @property
     def live_sessions(self) -> int:
@@ -125,8 +125,8 @@ def prefetch(paths: list[Path], extra: list[tuple] = (), workers: int = 8) -> No
     ninety in series on a 25-unit tree, 2.5s of a 5s `view`. They do not
     depend on each other, so a small pool runs them side by side and the
     per-unit loop afterwards finds every answer cached. `extra` is more
-    (function, argument) pairs to run in the same pool — the notes fetch
-    per unit, which is one scad subprocess each.
+    (function, argument) pairs to run in the same pool — the memos fetch,
+    one scad subprocess.
     """
     from concurrent.futures import ThreadPoolExecutor
 
@@ -239,7 +239,7 @@ def _packets(path: Path) -> tuple[int, int]:
 
 
 def _epoch(ts) -> int | None:
-    """scad writes note timestamps as ISO strings; the view wants seconds."""
+    """scad writes memo timestamps as ISO strings; the view wants seconds."""
     if ts is None:
         return None
     if isinstance(ts, (int, float)):
@@ -261,54 +261,55 @@ def _json_list(raw: str | None) -> list[str]:
     return [str(v) for v in value] if isinstance(value, list) else []
 
 
-#: How a note reached a unit, strongest first. `written here` is the only
-#: one that is exact: it is the unit the note's own session belongs to.
+#: How a memo reached a unit, strongest first. `written here` is the only
+#: one that is exact: it is the unit the memo's own session belongs to.
 WRITTEN, FILED, MENTIONS = "written here", "filed here", "mentions this"
 
 
-def all_notes(limit: int = 2000) -> list[dict]:
-    """Every note scad has, newest first, in one call.
+def all_memos(limit: int = 2000) -> list[dict]:
+    """Every memo scad has, newest first, in one call. Raises `ScadFailed`
+    when scad refuses, as it does until a machine's memo store is moved.
 
     One subprocess for the whole tree rather than one per unit: `--about
     NAME` answered a single unit, so a 31-unit tree paid 31 launches to
     read the same file. The export carries `session_id`, `entities`,
     `tags` and `project`, which is everything the join below needs.
     """
-    return sessions_mod.run_scad(["notes", "ls", "--limit", str(limit)])
+    return sessions_mod.run_scad_or_say(["memos", "ls", "--limit", str(limit)])
 
 
-def _mentions(note: dict, name: str) -> bool:
+def _mentions(memo: dict, name: str) -> bool:
     """scad's own `--about` rule, applied here: the name is in the tags or
     the entities, or it is the topic."""
-    if note.get("topic") == name:
+    if memo.get("topic") == name:
         return True
-    named = _json_list_or_list(note.get("tags")) + _json_list_or_list(note.get("entities"))
+    named = _json_list_or_list(memo.get("tags")) + _json_list_or_list(memo.get("entities"))
     return name in named
 
 
-def _shape(note: dict, how: str) -> dict:
+def _shape(memo: dict, how: str) -> dict:
     return {
-        "topic": note.get("topic"),
-        "title": note.get("title"),
-        "at": _epoch(note.get("ts")),
-        "written_in": note.get("project"),
-        "session": note.get("session_id"),
+        "topic": memo.get("topic"),
+        "title": memo.get("title"),
+        "at": _epoch(memo.get("ts")),
+        "written_in": memo.get("project"),
+        "session": memo.get("session_id"),
         "how": how,
         # Kept for callers that predate `how`: true unless the only reason
-        # this note reached the unit was the session it was written in.
-        "about": how != WRITTEN or _mentions(note, note.get("project") or ""),
+        # this memo reached the unit was the session it was written in.
+        "about": how != WRITTEN or _mentions(memo, memo.get("project") or ""),
     }
 
 
-def notes_by_unit(names, sessions: list[Session] | None = None,
-                  notes: list[dict] | None = None) -> dict[str, list[dict]]:
-    """Every named unit's notes, from one read of scad's export.
+def memos_by_unit(names, sessions: list[Session] | None = None,
+                  memos: list[dict] | None = None) -> dict[str, list[dict]]:
+    """Every named unit's memos, from one read of scad's export.
 
-    Three ways a note reaches a unit, and the strongest wins. **Written
-    here** is the exact one: the note's session belongs to the unit, by
+    Three ways a memo reaches a unit, and the strongest wins. **Written
+    here** is the exact one: the memo's session belongs to the unit, by
     attribution or by containment — the same rule `sessions` already
     decides, and the only one that does not depend on someone having
-    tagged the note. **Filed here** is scad's project for it, which is a
+    tagged the memo. **Filed here** is scad's project for it, which is a
     directory name and so answers only for the units whose name is their
     repository's. **Mentions this** is the old `--about` match, kept as a
     weaker source rather than the only one.
@@ -317,29 +318,29 @@ def notes_by_unit(names, sessions: list[Session] | None = None,
     degrades to what `--about` did.
     """
     names = list(names)
-    rows = all_notes() if notes is None else notes
+    rows = all_memos() if memos is None else memos
     by_session: dict[str, frozenset[str]] = {
         s.id: s.units for s in (sessions or []) if s.units
     }
     out: dict[str, list[dict]] = {name: [] for name in names}
     wanted = set(names)
-    for note in rows:
-        written = by_session.get(str(note.get("session_id") or "")) or frozenset()
-        filed = note.get("project")
+    for memo in rows:
+        written = by_session.get(str(memo.get("session_id") or "")) or frozenset()
+        filed = memo.get("project")
         for name in wanted:
             if name in written:
-                out[name].append(_shape(note, WRITTEN))
+                out[name].append(_shape(memo, WRITTEN))
             elif name == filed:
-                out[name].append(_shape(note, FILED))
-            elif _mentions(note, name):
-                out[name].append(_shape(note, MENTIONS))
+                out[name].append(_shape(memo, FILED))
+            elif _mentions(memo, name):
+                out[name].append(_shape(memo, MENTIONS))
     return out
 
 
-def notes_about(name: str, sessions: list[Session] | None = None,
-                notes: list[dict] | None = None) -> list[dict]:
-    """One unit's notes. See `notes_by_unit`, which this is a slice of."""
-    return notes_by_unit([name], sessions, notes)[name]
+def memos_about(name: str, sessions: list[Session] | None = None,
+                memos: list[dict] | None = None) -> list[dict]:
+    """One unit's memos. See `memos_by_unit`, which this is a slice of."""
+    return memos_by_unit([name], sessions, memos)[name]
 
 
 def _json_list_or_list(raw) -> list[str]:
@@ -431,13 +432,13 @@ def read(
     paths: list[Path],
     name: str,
     sessions: list[Session] | None = None,
-    notes: list[dict] | None = None,
+    memos: list[dict] | None = None,
 ) -> Activity:
     """Everything derivable about one unit. Never raises.
 
     `sessions` is the unit's, decided by `sessions.for_unit`; nothing here
-    asks which sessions belong. None given means none. `notes` is what
-    `notes_about` returns, passed in when the caller fetched it already.
+    asks which sessions belong. None given means none. `memos` is what
+    `memos_about` returns, passed in when the caller fetched it already.
     """
     paths = [Path(p) for p in paths]
     sessions = sessions or []
@@ -465,5 +466,11 @@ def read(
     for key, value in _from_sessions(sessions).items():
         setattr(activity, key, value)
     # The session join needs the unit's sessions, which are in hand here.
-    activity.notes = notes_about(name, sessions) if notes is None else notes
+    if memos is None:
+        try:
+            memos = memos_about(name, sessions)
+        except sessions_mod.ScadFailed:
+            # The commands that show memos say why; this one never raises.
+            memos = []
+    activity.memos = memos
     return activity

@@ -5,8 +5,8 @@ project but knows nothing about the work — no plans, no packets, no documents.
 orglens knows the artifacts and nothing about the running. Neither is the
 question a human actually asks, which is *where does this project stand*.
 
-orglens asks scad for its sessions (`scad session ls --json`) and its notes
-(`scad notes ls --about`) and joins them to units itself; it never opens
+orglens asks scad for its sessions (`scad session ls --json`) and its memos
+(`scad memos ls`) and joins them to units itself; it never opens
 scad's index file. A command's output is a contract between two repos and a
 schema is not.
 
@@ -142,8 +142,8 @@ h2.grp .n { color:var(--dim); font-weight:400; font-size:.78rem; margin-left:.4r
 .name { font-weight:600; font-size:1.02rem; white-space:nowrap }
 .facts { color:var(--dim); font-size:.82rem; font-variant-numeric:tabular-nums }
 .why { margin-top:.3rem; font-size:.9rem }
-.notes { margin-top:.5rem; font-size:.8rem; color:var(--dim) }
-.notes b { color:var(--fg); font-weight:500 }
+.memos { margin-top:.5rem; font-size:.8rem; color:var(--dim) }
+.memos b { color:var(--fg); font-weight:500 }
 .gate { color:var(--warn); font-weight:600 }
 ol.loose li { margin:.45rem 0 }
 .sid { font-family:ui-monospace,Menlo,monospace; font-size:.78rem; color:var(--dim) }
@@ -278,12 +278,12 @@ def _detail(row: dict, ctx: dict) -> str:
             f"<div class='said'>{html.escape(a.last_turn['text'].strip()[:240])}</div>"
         )
 
-    if a.notes:
-        out.append(f"<h4>Notes ({len(a.notes)})</h4><ol class='list'>")
-        for n in a.notes[:8]:
-            # Why this note is here, when it is not simply the unit's own.
+    if a.memos:
+        out.append(f"<h4>Memos ({len(a.memos)})</h4><ol class='list'>")
+        for n in a.memos[:8]:
+            # Why this memo is here, when it is not simply the unit's own.
             # `written in X` reads as provenance and was the only label;
-            # a note that merely names the unit now says so instead of
+            # a memo that merely names the unit now says so instead of
             # borrowing that sentence.
             how, wrote = n.get("how"), n["written_in"]
             if how == MENTIONS:
@@ -387,12 +387,12 @@ def _unattributed(loose: list) -> str:
 
 def _searchable(row: dict) -> str:
     """Everything the find box matches on a card, lowercased: the unit's
-    name, its status line, session labels, note titles, document names."""
+    name, its status line, session labels, memo titles, document names."""
     a = row["activity"]
     parts = [row["name"], row.get("why") or ""]
     parts += [str(s.get("name") or "") for s in a.recent]
     parts += [str(s.get("name") or "") for s in a.live]
-    parts += [str(n.get("title") or "") + " " + str(n.get("topic") or "") for n in a.notes]
+    parts += [str(n.get("title") or "") + " " + str(n.get("topic") or "") for n in a.memos]
     parts += [d.name for d in row.get("docs", [])]
     parts += [art.name for _, items in row.get("artifacts", []) for art in items]
     return html.escape(" ".join(p for p in parts if p).lower(), quote=True)
@@ -592,10 +592,10 @@ def _card(row: dict, ctx: dict, now: float, above: list[str],
     if row.get("why"):
         age = f"<span class='age'>{ago(why_edited, now).replace(' ago', ' old')}{' · stale' if is_stale else ''}</span>" if why_edited else ""
         out.append(f"<div class='why{' stale' if is_stale else ''}'>&#x201C;{html.escape(row['why'])}&#x201D;{age}</div>")
-    if a.notes:
-        recent = ", ".join(f"<b>{html.escape(str(n['topic']))}</b>" for n in a.notes[:4])
-        more = f" +{len(a.notes) - 4}" if len(a.notes) > 4 else ""
-        out.append(f"<div class='notes'>{len(a.notes)} note(s): {recent}{more}</div>")
+    if a.memos:
+        recent = ", ".join(f"<b>{html.escape(str(n['topic']))}</b>" for n in a.memos[:4])
+        more = f" +{len(a.memos) - 4}" if len(a.memos) > 4 else ""
+        out.append(f"<div class='memos'>{len(a.memos)} memo{'s' * (len(a.memos) != 1)}: {recent}{more}</div>")
     out.append("</summary>")
     out.append(_detail(row, ctx))
     out.append("</details>")
@@ -772,7 +772,7 @@ def render(
         "<div class='facet'><span class='flabel'>scope</span>"
         f"<select id='scope'>{''.join(scopes)}</select></div>"
         "<div class='facet'><span class='flabel'>find</span>"
-        "<input id='find' placeholder='unit, session, document, note…' autocomplete='off'></div>"
+        "<input id='find' placeholder='unit, session, document, memo…' autocomplete='off'></div>"
         "</div>"
     ]
     if running:
@@ -841,7 +841,7 @@ def render(
         f"<style>{CSS}</style><main data-tab='recent' data-by='session'>"
         "<h1>Where things stand</h1>"
         "<div class='sub'>Derived on render — plans and packets from the tree, "
-        "sessions and notes from scad. Nothing here is stored, so nothing here "
+        "sessions and memos from scad. Nothing here is stored, so nothing here "
         "can be stale.</div>"
         + "".join(body)
         + f"<footer>rendered {stamp} · links open {html.escape(ctx['base_url'])}"

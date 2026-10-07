@@ -36,6 +36,31 @@ from orglens.units import Registry
 OPEN = frozenset({"awaiting-user", "awaiting-question", "in-flight"})
 
 
+class ScadFailed(Exception):
+    """scad ran and said no, with its own words for why."""
+
+
+def run_scad_or_say(argv: list[str]) -> list[dict]:
+    """`scad <argv> --json`, parsed, where scad's refusal is the answer the
+    person needs. scad 0.9.0 exits 1 on every memo command until a machine's
+    store is moved, printing the `mv` to run; an empty list would hide that.
+    No scad at all is still an empty answer. Tests replace this too."""
+    try:
+        done = subprocess.run(
+            ["scad", *argv, "--json"], capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if done.returncode != 0:
+        said = (done.stderr or done.stdout).strip()
+        raise ScadFailed(said or f"scad {' '.join(argv)} exited {done.returncode}")
+    try:
+        rows = json.loads(done.stdout)
+    except ValueError:
+        return []
+    return rows if isinstance(rows, list) else []
+
+
 def run_scad(argv: list[str]) -> list[dict]:
     """`scad <argv> --json`, parsed. No scad, an old scad, or a failure is an
     empty answer, not an error: a machine without scad has no sessions to

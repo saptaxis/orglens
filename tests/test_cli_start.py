@@ -224,7 +224,7 @@ def _attributed_elsewhere(tmp_path, monkeypatch):
 
 
 def _spy(calls):
-    def fake(paths, name, sessions=None, notes=None):
+    def fake(paths, name, sessions=None, memos=None):
         calls[name] = sessions or []
         return activity.Activity()
     return fake

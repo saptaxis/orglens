@@ -2,7 +2,7 @@
 
 Which sessions a unit has is decided in `sessions.py` and tested there.
 `read` takes that list and answers the rest: counts, the last thing said,
-open questions, the recent few, what is running, and the notes about the
+open questions, the recent few, what is running, and the memos about the
 unit. Nothing here matches a cwd; a session is the unit's because it was
 passed in.
 """
@@ -98,17 +98,17 @@ def test_needs_are_the_sessions_open_questions_newest_first(tmp_path):
     ]
 
 
-def test_notes_come_from_scad_notes_about_the_unit(tmp_path, monkeypatch):
+def test_memos_come_from_scad_about_the_unit(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("orglens.sessions.run_scad", fake_scad(notes=[
-        {"topic": "u", "title": "a note in u", "ts": "2024-02-01T00:00:00", "tags": ["x"], "project": "u"},
+    monkeypatch.setattr("orglens.sessions.run_scad_or_say", fake_scad(memos=[
+        {"topic": "u", "title": "a memo in u", "ts": "2024-02-01T00:00:00", "tags": ["x"], "project": "u"},
         {"topic": "other", "title": "written elsewhere", "ts": "2024-01-01T00:00:00", "tags": ["u"], "project": "elsewhere"},
     ]))
     act = activity.read([home], "u")
-    assert [n["title"] for n in act.notes] == ["a note in u", "written elsewhere"]
-    assert act.notes[1]["written_in"] == "elsewhere" and act.notes[1]["about"] is True
-    assert act.notes[0]["at"] == activity._epoch("2024-02-01T00:00:00")
+    assert [n["title"] for n in act.memos] == ["a memo in u", "written elsewhere"]
+    assert act.memos[1]["written_in"] == "elsewhere" and act.memos[1]["about"] is True
+    assert act.memos[0]["at"] == activity._epoch("2024-02-01T00:00:00")
 
 
 def test_peek_reaches_the_same_count_and_time_as_read(tmp_path):
@@ -121,7 +121,7 @@ def test_peek_reaches_the_same_count_and_time_as_read(tmp_path):
         read.sessions, read.last_session, read.live_sessions)
 
 
-def _note(session_id, *, topic="t", title="a note", project=None,
+def _memo(session_id, *, topic="t", title="a memo", project=None,
           tags=(), entities=(), ts="2024-02-01T00:00:00"):
     return {"session_id": session_id, "topic": topic, "title": title,
             "project": project, "tags": list(tags), "entities": list(entities),
@@ -132,41 +132,41 @@ def test_a_note_reaches_the_unit_its_session_belongs_to_untagged():
     """The join the name match could not make. Nothing in this note names
     `u` — not the topic, not the tags, not the project it was filed under.
     It is the unit's because the session that wrote it is."""
-    notes = [_note("s1", topic="something-else", project="some-directory")]
-    out = activity.notes_by_unit(["u"], [_s("s1", units=("u",))], notes)
+    memos = [_memo("s1", topic="something-else", project="some-directory")]
+    out = activity.memos_by_unit(["u"], [_s("s1", units=("u",))], memos)
     assert [n["how"] for n in out["u"]] == [activity.WRITTEN]
     assert out["u"][0]["written_in"] == "some-directory"
 
 
 def test_a_note_that_only_mentions_the_unit_is_marked_weaker():
-    notes = [_note("s9", topic="other", project="elsewhere", tags=["u"])]
-    out = activity.notes_by_unit(["u"], [_s("s1", units=("u",))], notes)
+    memos = [_memo("s9", topic="other", project="elsewhere", tags=["u"])]
+    out = activity.memos_by_unit(["u"], [_s("s1", units=("u",))], memos)
     assert [n["how"] for n in out["u"]] == [activity.MENTIONS]
 
 
 def test_entities_count_as_a_mention_as_scad_about_counts_them():
-    notes = [_note("s9", topic="other", project="elsewhere", entities=["u"])]
-    out = activity.notes_by_unit(["u"], [], notes)
+    memos = [_memo("s9", topic="other", project="elsewhere", entities=["u"])]
+    out = activity.memos_by_unit(["u"], [], memos)
     assert [n["how"] for n in out["u"]] == [activity.MENTIONS]
 
 
 def test_the_project_it_was_filed_under_is_its_own_reason():
-    notes = [_note("s9", topic="other", project="u")]
-    out = activity.notes_by_unit(["u"], [], notes)
+    memos = [_memo("s9", topic="other", project="u")]
+    out = activity.memos_by_unit(["u"], [], memos)
     assert [n["how"] for n in out["u"]] == [activity.FILED]
 
 
 def test_written_here_wins_over_the_weaker_reasons():
     """One note, one unit, several reasons — the exact one is reported."""
-    notes = [_note("s1", topic="u", project="u", tags=["u"])]
-    out = activity.notes_by_unit(["u"], [_s("s1", units=("u",))], notes)
+    memos = [_memo("s1", topic="u", project="u", tags=["u"])]
+    out = activity.memos_by_unit(["u"], [_s("s1", units=("u",))], memos)
     assert [n["how"] for n in out["u"]] == [activity.WRITTEN]
 
 
 def test_one_note_reaches_every_unit_that_has_a_claim_on_it():
-    notes = [_note("s1", topic="v", project="w", tags=["x"])]
-    out = activity.notes_by_unit(["u", "v", "w", "x", "z"],
-                                 [_s("s1", units=("u",))], notes)
+    memos = [_memo("s1", topic="v", project="w", tags=["x"])]
+    out = activity.memos_by_unit(["u", "v", "w", "x", "z"],
+                                 [_s("s1", units=("u",))], memos)
     assert {k: [n["how"] for n in v] for k, v in out.items()} == {
         "u": [activity.WRITTEN], "v": [activity.MENTIONS],
         "w": [activity.FILED], "x": [activity.MENTIONS], "z": [],
@@ -180,19 +180,19 @@ def test_the_export_is_read_once_for_the_whole_tree(monkeypatch):
 
     def counting(argv):
         calls.append(argv)
-        return [_note("s1", project="u")]
+        return [_memo("s1", project="u")]
 
-    monkeypatch.setattr("orglens.sessions.run_scad", counting)
-    activity.notes_by_unit([f"unit-{i}" for i in range(31)], [])
-    assert len(calls) == 1 and calls[0][:2] == ["notes", "ls"]
+    monkeypatch.setattr("orglens.sessions.run_scad_or_say", counting)
+    activity.memos_by_unit([f"unit-{i}" for i in range(31)], [])
+    assert len(calls) == 1 and calls[0][:2] == ["memos", "ls"]
 
 
 def test_read_passes_its_sessions_to_the_join(tmp_path, monkeypatch):
-    """`read` has the unit's sessions in hand, so its notes get the exact
+    """`read` has the unit's sessions in hand, so its memos get the exact
     join too — not only the tree-wide callers."""
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setattr("orglens.sessions.run_scad",
-                        fake_scad(notes=[_note("s1", topic="x", project="y")]))
+    monkeypatch.setattr("orglens.sessions.run_scad_or_say",
+                        fake_scad(memos=[_memo("s1", topic="x", project="y")]))
     act = activity.read([home], "u", sessions=[_s("s1", units=("u",))])
-    assert [n["how"] for n in act.notes] == [activity.WRITTEN]
+    assert [n["how"] for n in act.memos] == [activity.WRITTEN]
