@@ -12,11 +12,11 @@ class TestStatusExtraction:
 
     def test_extract_status_with_parens(self):
         content = '> **Status:** Packaged and shipped (Plan 01 complete)\n'
-        assert extract_status(content) == "Packaged and shipped"
+        assert extract_status(content) == "Packaged and shipped (Plan 01 complete)"
 
-    def test_extract_design_complete(self):
-        content = '> **Status:** Design complete, implementation pending\n'
-        assert extract_status(content) == "Design complete"
+    def test_extract_the_first_sentence(self):
+        content = '> **Status:** Design complete, implementation pending. Next: Plan 2.\n'
+        assert extract_status(content) == "Design complete, implementation pending"
 
     def test_no_status_returns_none(self):
         content = "# Overview\n\nJust some text.\n"

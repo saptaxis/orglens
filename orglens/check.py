@@ -224,16 +224,28 @@ class Report:
 
 def _misplaced(registry: Registry, units: list) -> list[tuple[str, str, str | None]]:
     """Units whose folder sits inside another unit's home while the marker
-    names a different parent, or none. Membership is the marker's; this only
-    says the two disagree. A unit inside no other unit's home is never
-    reported: a code repository states its parent deliberately."""
+    names a parent outside it, or none. Membership is the marker's; this only
+    says the two disagree. A folder inside an ancestor of the stated parent
+    agrees: a project filed under its organisation's folder may name a
+    programme in that organisation as its parent. A unit inside no other
+    unit's home is never reported: a code repository states its parent
+    deliberately."""
+    tree = registry.tree()
+
+    def ancestors(name: str | None) -> list[str]:
+        out: list[str] = []
+        while name is not None and name not in out:
+            out.append(name)
+            name = tree.parent.get(name)
+        return out
+
     out = []
     for unit in units:
         above = unit.declared_at.parent
         container = registry.at(above) if above != unit.declared_at else None
         if container is None or container.name == unit.name:
             continue
-        if unit.part_of != container.name:
+        if container.name not in ancestors(unit.part_of):
             out.append((unit.name, container.name, unit.part_of))
     return sorted(out, key=lambda row: row[0])
 
@@ -422,10 +434,13 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
                 twins += [Twin(unit=unit.name, path=directory / s)
                           for s, n in sorted(stems.items()) if n > 1]
 
+    # mkdocs renders markdown, so a `.nav.yml` matters only in a markdown
+    # tree; in an org tree one is left from an older site.
     unlisted = [
         Unlisted(unit=unit.name, nav=unit.declared_at.parent / ".nav.yml")
         for unit in units
-        if _nav_omits(unit.declared_at.parent / ".nav.yml", unit.declared_at.name)
+        if grammar.format == "md"
+        and _nav_omits(unit.declared_at.parent / ".nav.yml", unit.declared_at.name)
     ]
 
     stale: list[Stale] = []

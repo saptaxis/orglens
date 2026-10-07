@@ -19,6 +19,9 @@ def no_real_machine_state(tmp_path, monkeypatch):
     `monkeypatch.setattr` still does.
     """
     monkeypatch.setattr("orglens.sessions.run_scad", fake_scad())
+    monkeypatch.setattr("orglens.sessions.run_scad_or_say", fake_scad())
+    monkeypatch.setattr("orglens.sessions.reindex", lambda: None)
+    monkeypatch.setattr("orglens.sessions.index_status", lambda: None)
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "no-events")
     # Per-process caches: one command is one process, but the suite is one
     # process running hundreds of trees.
@@ -271,13 +274,13 @@ def export_row(id, cwd, **extra) -> dict:
     return row
 
 
-def fake_scad(sessions: list[dict] | None = None, notes: list[dict] | None = None):
+def fake_scad(sessions: list[dict] | None = None, memos: list[dict] | None = None):
     """A stand-in for `sessions.run_scad`: answers `session ls` with `sessions`
-    (main rows only, as the real call is asked for) and `notes ls` with `notes`."""
+    (main rows only, as the real call is asked for) and `memos ls` with `memos`."""
     def run(argv: list[str]) -> list[dict]:
         if argv[:2] == ["session", "ls"]:
             return [r for r in (sessions or []) if r.get("kind", "main") == "main"]
-        if argv[:2] == ["notes", "ls"]:
-            return list(notes or [])
+        if argv[:2] == ["memos", "ls"]:
+            return list(memos or [])
         return []
     return run

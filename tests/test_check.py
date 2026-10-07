@@ -491,6 +491,15 @@ def test_a_parent_nav_with_a_glob_lists_everything(declared_tree, grammar):
     assert check.run(Registry([declared_tree], grammar)).unlisted == []
 
 
+def test_an_org_tree_ignores_a_parent_nav(declared_tree, grammar):
+    """mkdocs renders markdown; a `.nav.yml` in an org tree is left from an
+    older site."""
+    import dataclasses
+    (declared_tree / "projects" / ".nav.yml").write_text("title: Projects\nnav:\n  - clipcompose\n")
+    org = dataclasses.replace(grammar, format="org")
+    assert check.run(Registry([declared_tree], org)).unlisted == []
+
+
 def test_no_parent_nav_means_nothing_to_report(declared_tree, grammar):
     assert check.run(Registry([declared_tree], grammar)).unlisted == []
 
@@ -598,6 +607,19 @@ class TestTheTree:
         assert report.misplaced == []
         assert report.unknown_parents == []
         assert report.cycles == []
+
+    def test_a_unit_inside_an_ancestor_of_its_parent_is_quiet(self, declared_tree, grammar):
+        """Filed under the organisation's folder, naming a programme in it."""
+        _declare_in(declared_tree / "projects" / "orglens" / "prog", "prog", part_of="orglens")
+        _declare_in(declared_tree / "projects" / "orglens" / "expt", "expt", part_of="prog")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.misplaced == []
+
+    def test_a_unit_inside_a_unit_that_is_not_its_parents_ancestor(self, declared_tree, grammar):
+        _declare_in(declared_tree / "projects" / "clipcompose" / "prog", "prog", part_of="clipcompose")
+        _declare_in(declared_tree / "projects" / "orglens" / "expt", "expt", part_of="prog")
+        report = check.run(Registry([declared_tree], grammar))
+        assert report.misplaced == [("expt", "orglens", "prog")]
 
     def test_a_unit_in_no_other_units_home_is_never_misplaced(self, declared_tree, grammar):
         # A code repository states its parent deliberately.

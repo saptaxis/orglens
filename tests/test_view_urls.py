@@ -78,3 +78,13 @@ def test_served_mode_is_the_default(tmp_path):
     path = tmp_path / "docs" / "a.org"
     ctx = {"docs_roots": [tmp_path / "docs"], "base_url": "http://x"}
     assert "href='http://x/a/'" in view._link(path, "a", ctx)
+
+
+def test_a_file_link_is_percent_encoded():
+    """A space or a `#` in a path broke the `file://` link: the browser
+    read `#` as the start of a fragment."""
+    from orglens import view
+    path = Path("/docs/a dir/notes #2.org")
+    assert view.doc_url(path, Path("/elsewhere"), BASE) == "file:///docs/a%20dir/notes%20%232.org"
+    href = view._link(path, "a", {"link": "file", "docs_roots": [], "base_url": ""})
+    assert "href='file:///docs/a%20dir/notes%20%232.org'" in href

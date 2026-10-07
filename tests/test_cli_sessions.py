@@ -163,38 +163,141 @@ class TestResume:
         CliRunner().invoke(cli, ["resume", "abcd1234", "--print"])
         assert seen == [["session", "resume", "abcd1234-full-id", "--print"]]
 
-    def test_a_unit_name_resumes_its_newest_open_session(
+    def test_a_unit_name_resumes_its_newest_session_whatever_its_outcome(
         self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
     ):
+        """'Open' is read off the last turn, so it filtered out the sessions
+        most worth resuming. The newest stopped session is the one."""
         home = tmp_path / "code" / "orglens"
         _setup(tmp_path, monkeypatch, two_root_tree, [
             _row("1111-newest-but-done", str(home), ended=9000_000, outcome="done"),
             _row("2222-open-older", str(home), ended=5000_000, outcome="awaiting-user"),
-            _row("3333-open-oldest", str(home), ended=1000_000, outcome="in-flight"),
         ])
         seen = []
         monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
 
         result = CliRunner().invoke(cli, ["resume", "orglens"])
         assert result.exit_code == 0, result.output
-        assert seen == [["session", "resume", "2222-open-older"]]
+        assert seen == [["session", "resume", "1111-newest-but-done"]]
 
-    def test_a_unit_with_nothing_open_lists_its_newest_three(
+    def test_a_session_just_launched_is_the_one_resumed(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """Observed 2026-09-27: a live session with no turns yet has no
+        outcome, so it was passed over for an older one."""
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-just-launched", str(home), n_turns=0, started=9000_000,
+                 live={"pid": 7, "name": None, "status": "idle", "waiting_for": ""}),
+            _row("2222-stopped", str(home), ended=5000_000, outcome="awaiting-user"),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        result = CliRunner().invoke(cli, ["resume", "orglens"])
+        assert result.exit_code == 0, result.output
+        assert seen == [["session", "resume", "1111-just-launched"]]
+
+    def test_a_running_session_goes_first_and_to_scad(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        """scad attaches to a running session's pane, or refuses when it
+        cannot name one; a stopped session newer by its clock does not win."""
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-stopped-newer", str(home), ended=9000_000),
+            _row("2222-running", str(home), started=1000_000,
+                 live={"pid": 7, "name": None, "status": "busy", "waiting_for": ""}),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        CliRunner().invoke(cli, ["resume", "orglens"])
+        assert seen == [["session", "resume", "2222-running"]]
+
+    def test_the_others_are_named_in_one_line(
         self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
     ):
         home = tmp_path / "code" / "orglens"
         _setup(tmp_path, monkeypatch, two_root_tree, [
-            _row(f"{i}{i}{i}{i}-done", str(home), ended=i * 1000_000, outcome="done")
-            for i in range(1, 6)
+            _row("1111-newest", str(home), ended=9000_000, name="orglens-a-oct06"),
+            _row("2222-older", str(home), ended=5000_000, name="orglens-b-oct05"),
+            _row("3333-oldest", str(home), ended=1000_000),
         ])
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: 0)
+
+        out = CliRunner().invoke(cli, ["resume", "orglens"]).output
+        others = [l for l in out.splitlines() if "orglens-b-oct05" in l]
+        assert len(others) == 1
+        assert "3333" in others[0] and "orglens resume orglens" in others[0]
+
+    def test_a_unit_with_no_sessions_says_so(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
         seen = []
         monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
 
         result = CliRunner().invoke(cli, ["resume", "orglens"])
         assert result.exit_code == 1
         assert seen == []
-        assert "nothing open" in result.output
-        assert "5555" in result.output and "3333" in result.output and "2222" not in result.output
+        assert "no sessions" in result.output
+
+    def test_a_name_resumes_that_session(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-newest", str(home), ended=9000_000, name="orglens-a-oct06"),
+            _row("2222-named", str(home), ended=5000_000, name="orglens-b-oct05"),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        result = CliRunner().invoke(cli, ["resume", "orglens", "orglens-b-oct05"])
+        assert result.exit_code == 0, result.output
+        assert seen == [["session", "resume", "2222-named"]]
+
+    def test_two_sessions_with_one_name_resume_the_newest(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-newer", str(home), ended=9000_000, name="twice"),
+            _row("2222-older", str(home), ended=5000_000, name="twice"),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        CliRunner().invoke(cli, ["resume", "orglens", "twice"])
+        assert seen == [["session", "resume", "1111-newer"]]
+
+    def test_an_unknown_name_lists_the_units_names(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [
+            _row("1111-named", str(home), ended=9000_000, name="orglens-a-oct06"),
+        ])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        result = CliRunner().invoke(cli, ["resume", "orglens", "nope"])
+        assert result.exit_code == 1
+        assert seen == []
+        assert "nope" in result.output and "orglens-a-oct06" in result.output
+
+    def test_a_name_after_a_session_id_is_refused(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [_row("abcd1234-full-id", str(home))])
+        seen = []
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: seen.append(argv) or 0)
+
+        result = CliRunner().invoke(cli, ["resume", "abcd1234", "some-name"])
+        assert result.exit_code != 0
+        assert seen == []
 
     def test_an_ambiguous_prefix_names_the_matches(
         self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
@@ -519,3 +622,118 @@ class TestTriageInGroups:
         run.invoke(cli, ["dismiss", "0000aaaa", "--why", "actually nobody's"])
         out = run.invoke(cli, ["sessions", "--dismissed"]).output
         assert "why: actually nobody's" in out and "the last thing said" not in out
+
+
+class TestMemos:
+    """scad 0.9.0 refuses every memo command until a machine's store is
+    moved, and says what to run. That has to reach the person."""
+
+    MOVE = "Error: memos moved to ~/.scad/memos. Run: mv ~/.scad/notes ~/.scad/memos"
+
+    def _refuse(self, monkeypatch):
+        from orglens import sessions
+
+        def refuse(argv):
+            raise sessions.ScadFailed(self.MOVE)
+        monkeypatch.setattr("orglens.sessions.run_scad_or_say", refuse)
+
+    def test_memos_lists_what_was_written_about_a_unit(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        monkeypatch.setattr("orglens.sessions.run_scad_or_say", fake_scad(memos=[
+            {"session_id": "x", "topic": "the-topic", "title": "a memo about it",
+             "ts": "2026-10-01T00:00:00", "project": "orglens", "tags": [], "entities": []},
+        ]))
+        result = CliRunner().invoke(cli, ["memos", "orglens"])
+        assert result.exit_code == 0, result.output
+        assert "the-topic" in result.output and "a memo about it" in result.output
+
+    def test_a_refusal_is_shown_not_an_empty_list(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._refuse(monkeypatch)
+        result = CliRunner().invoke(cli, ["memos", "orglens"])
+        assert result.exit_code == 1
+        assert "mv ~/.scad/notes ~/.scad/memos" in result.output
+        assert "no memos" not in result.output
+
+    def test_status_says_the_refusal_once_and_goes_on(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._refuse(monkeypatch)
+        result = CliRunner().invoke(cli, ["status"])
+        assert result.exit_code == 0, result.output
+        assert result.output.count("mv ~/.scad/notes ~/.scad/memos") == 1
+
+    def test_notes_is_no_longer_a_command(self, two_root_tree_config):
+        assert CliRunner().invoke(cli, ["notes"]).exit_code != 0
+
+
+#: The real call, taken before the autouse fixture stands it in.
+from orglens import sessions as _sessions
+OR_SAY = _sessions.run_scad_or_say
+
+
+def test_scads_own_words_come_back_when_it_refuses(monkeypatch):
+    import subprocess as sp
+    import pytest
+    monkeypatch.setattr("orglens.sessions.subprocess.run",
+                        lambda argv, **k: sp.CompletedProcess(argv, 1, "", "Error: run mv a b\n"))
+    with pytest.raises(_sessions.ScadFailed, match="^Error: run mv a b$"):
+        OR_SAY(["memos", "ls"])
+
+
+class TestStaleIndex:
+    """Nothing reindexes on a timer; the commands that list or pick sessions
+    say when scad's index is behind."""
+
+    def _age(self, monkeypatch, status):
+        monkeypatch.setattr("orglens.sessions.index_status", lambda: status)
+
+    def test_an_old_index_is_said_by_sessions_resume_and_status(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [_row("abcd1234-full-id", str(home))])
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: 0)
+        self._age(monkeypatch, {"indexed_at": "x", "age_s": 3 * 3600})
+        for argv in (["sessions", "orglens"], ["resume", "abcd1234"], ["status"]):
+            out = CliRunner().invoke(cli, argv).output
+            assert "index is 3h old" in out and "scad reindex" in out, argv
+
+    def test_a_fresh_index_says_nothing(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._age(monkeypatch, {"indexed_at": "x", "age_s": 600})
+        assert "reindex" not in CliRunner().invoke(cli, ["sessions", "orglens"]).output
+
+    def test_never_indexed_is_said(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._age(monkeypatch, {"indexed_at": None, "age_s": None})
+        assert "never indexed" in CliRunner().invoke(cli, ["sessions", "orglens"]).output
+
+    def test_an_old_scad_is_no_warning(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._age(monkeypatch, None)
+        assert "reindex" not in CliRunner().invoke(cli, ["sessions", "orglens"]).output
+
+
+INDEX_STATUS = _sessions.index_status
+
+
+def test_index_status_reads_scads_json_and_tolerates_an_old_scad(monkeypatch):
+    import subprocess as sp
+    monkeypatch.setattr("orglens.sessions.subprocess.run", lambda argv, **k: sp.CompletedProcess(
+        argv, 0, '{"indexed_at": "2026-10-07T10:53:02+05:30", "age_s": 412}', ""))
+    assert INDEX_STATUS()["age_s"] == 412
+    monkeypatch.setattr("orglens.sessions.subprocess.run", lambda argv, **k: sp.CompletedProcess(
+        argv, 2, "", "Error: No such command 'index'."))
+    assert INDEX_STATUS() is None

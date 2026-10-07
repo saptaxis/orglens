@@ -26,7 +26,7 @@ from pathlib import Path
 import click
 
 from orglens import (activity, check as check_module, complete, documents, formats,
-                     reference, sessions, tree as tree_mod, view)
+                     hide as hide_mod, reference, sessions, tree as tree_mod, view)
 from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
 from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
@@ -169,21 +169,28 @@ def _git_paths(registry: Registry, units: list) -> list[Path]:
 def _warm(registry: Registry, units: list, every: list) -> dict[str, list[dict]]:
     """Everything `status` and `view` will ask a subprocess or a file walk
     for, fetched at once: git per home and driver document, the newest
-    mtime per home, and `scad notes ls --about` per unit. Independent and
-    mostly waiting, so one pool runs them side by side; in series they were
-    most of a 10s `status`. Returns the notes by unit; the rest is cached.
+    mtime per home, and scad's memos. Independent and mostly waiting, so one
+    pool runs them side by side; in series they were most of a 10s
+    `status`. Returns the memos by unit; the rest is cached. scad's refusal
+    to list memos is said once, and the page or listing goes on without.
     """
-    # One read of scad's notes export for the whole tree, joined here. It
+    # One read of scad's memos export for the whole tree, joined here. It
     # was one `--about` subprocess per unit, which is 31 launches to read
     # one file; the join itself needs the sessions, so the caller passes
     # them in.
-    notes: dict[str, list[dict]] = {}
+    memos: dict[str, list[dict]] = {u.name: [] for u in units}
+    refused: list[str] = []
 
     def fetch(_: None = None) -> None:
-        notes.update(activity.notes_by_unit([u.name for u in units], every))
+        try:
+            memos.update(activity.memos_by_unit([u.name for u in units], every))
+        except sessions.ScadFailed as exc:
+            refused.append(str(exc))
 
     activity.prefetch(_git_paths(registry, units), extra=[(fetch, None)])
-    return notes
+    for said in refused:
+        click.echo(f"memos: {said}", err=True)
+    return memos
 
 
 def _status_of(registry: Registry, unit):
@@ -255,15 +262,36 @@ def _under(registry: Registry, name: str | None) -> list[Unit]:
 
 UNDER_HELP = "Only this unit and the units under it in the tree."
 
+SHOW_HIDDEN_HELP = "Show the units `orglens hide` keeps off the screen, for this run."
+
+
+def _hidden(registry: Registry, config: Config, show_hidden: bool,
+            named: str | None = None) -> set[str]:
+    """The units a display leaves out: `hide:` and their subtrees, less the
+    one the command was asked about by name. None with `--show-hidden`."""
+    if show_hidden or not config.hide:
+        return set()
+    return hide_mod.expand(registry.tree(), config.hide, named)
+
+
+def _say_hidden(count: int) -> None:
+    """The closing line of a display that hid something, so a forgotten hide
+    is noticed."""
+    if count:
+        click.echo(f"\n{count} hidden · orglens unhide --all, or --show-hidden for one run")
+
 
 @cli.command()
 @click.option("--type", "kind_filter", default=None, help="Filter by kind")
 @click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
               shell_complete=complete.units)
-def list(kind_filter: str | None, under: str | None):
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+def list(kind_filter: str | None, under: str | None, show_hidden: bool):
     """List everything in the tree."""
-    registry, _ = _load_registry()
+    registry, config = _load_registry()
     units = _under(registry, under)
+    hidden = _hidden(registry, config, show_hidden,
+                     registry.resolve(under).name if under else None)
     kinds_present = sorted({u.kind for u in registry.units()})
 
     if kind_filter is not None and kind_filter not in kinds_present:
@@ -271,9 +299,12 @@ def list(kind_filter: str | None, under: str | None):
 
     if kind_filter is not None:
         units = [u for u in units if u.kind == kind_filter]
+    shown = [u for u in units if u.name not in hidden]
+    left_out, units = len(units) - len(shown), shown
 
     if not units:
         click.echo("Nothing found.")
+        _say_hidden(left_out)
         return
 
     every, by_unit = _sessions_by_unit(registry)
@@ -286,30 +317,94 @@ def list(kind_filter: str | None, under: str | None):
         for unit in units
     }
 
-    for kind, members in _grouped(units, acts):
-        click.echo(f"\n{_heading(kind)}:")
-        for unit in members:
-            status = _status_of(registry, unit)
-            shown = f"  ({status.text})" if status else ""
-            within = f"  [{unit.part_of}]" if unit.part_of else ""
-            dated = _dated(acts[unit])
-            when = f"  {' · '.join(dated)}" if dated else ""
-            click.echo(f"  {unit.name}{shown}{within}{when}")
+    tree = registry.tree()
+    top = registry.resolve(under).name if under else None
+    for root, groups in _by_organisation(units, acts, tree, top):
+        # A block per unit with units under it; units alone at the top of the
+        # tree are grouped by kind as they always were.
+        indent = "    " if root else "  "
+        if root:
+            unit = next((u for u in units if u.name == root), None)
+            click.echo(f"\n{root}{_list_tail(registry, unit, acts) if unit else ''}")
+        for kind, members in groups:
+            # The kind as markers write it, as `tree` shows it.
+            click.echo(f"  {kind}:" if root else f"\n{_heading(kind)}:")
+            for unit, path in members:
+                click.echo(f"{indent}{path}{_list_tail(registry, unit, acts)}")
+    _say_hidden(left_out)
+
+
+def _list_tail(registry: Registry, unit: Unit, acts: dict) -> str:
+    status = _status_of(registry, unit)
+    dated = _dated(acts[unit])
+    return ((f"  ({status.text})" if status else "")
+            + (f"  {' · '.join(dated)}" if dated else ""))
+
+
+def _by_organisation(units: list, acts: dict, tree, top: str | None = None):
+    """`list`'s shape: a block per unit at the top of the tree with units
+    under it, then the units in it by the kind of their branch, as `orglens
+    tree` groups them, flat and newest first. An experiment under a research
+    programme is listed under the programme's kind, with its path from the
+    block's top. Units alone at the top come as `(None, groups)`,
+    grouped by their own kind.
+
+    `top` is `--under`'s unit, which then heads the only block. Blocks and
+    kinds are led by their newest member, as `_grouped` orders them.
+    """
+    def chain(name: str) -> list[str]:
+        out = [name]
+        while out[0] in tree.parent and out[0] != top:
+            out.insert(0, tree.parent[out[0]])
+        return out
+
+    by_name = {u.name: u for u in units}
+    recency = lambda u: activity.recency(acts.get(u, activity.Activity()))
+    blocks: dict[str, dict[str, list]] = {}
+    for unit in units:
+        line = chain(unit.name)
+        if len(line) > 1:
+            branch = by_name.get(line[1], unit)
+            blocks.setdefault(line[0], {}).setdefault(branch.kind, []).append(
+                (unit, " › ".join(line[1:])))
+    alone: dict[str, list] = {}
+    for unit in units:
+        if len(chain(unit.name)) == 1 and unit.name not in blocks:
+            alone.setdefault(unit.kind, []).append((unit, unit.name))
+
+    def newest(members) -> int:
+        return max((recency(u) for u, _ in members), default=0)
+
+    def ordered(kinds: dict) -> list:
+        for members in kinds.values():
+            members.sort(key=lambda m: recency(m[0]), reverse=True)
+        return sorted(kinds.items(), key=lambda g: newest(g[1]), reverse=True)
+
+    out = [(root, ordered(kinds)) for root, kinds in blocks.items()]
+    out += [(None, [group]) for group in ordered(alone)]
+    out.sort(key=lambda b: max(newest(m) for _, m in b[1]), reverse=True)
+    return out
 
 
 @cli.command()
 @click.option("--under", default=None, metavar="UNIT", help=UNDER_HELP,
               shell_complete=complete.units)
-def status(under: str | None):
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+def status(under: str | None, show_hidden: bool):
     """Where everything stands — the authored line, dated, beside derived facts."""
-    registry, _ = _load_registry()
+    registry, config = _load_registry()
+    _say_if_stale()
     units = _under(registry, under)
+    hidden = _hidden(registry, config, show_hidden,
+                     registry.resolve(under).name if under else None)
+    shown = [u for u in units if u.name not in hidden]
+    left_out, units = len(units) - len(shown), shown
 
     every, by_unit = _sessions_by_unit(registry)
-    notes = _warm(registry, units, every)
+    memos = _warm(registry, units, every)
     acts = {
         unit: activity.read(unit.paths, unit.name, sessions=by_unit[unit.name],
-                            notes=notes[unit.name])
+                            memos=memos[unit.name])
         for unit in units
     }
 
@@ -361,20 +456,22 @@ def status(under: str | None):
                 when = f" ({_ago(ask['at'])} ago)" if ask["at"] else ""
                 first = ask["question"].strip().splitlines()[0]
                 click.echo(f"  {name}: {first[:88]}{when}")
+    _say_hidden(left_out)
 
 
 @cli.command(name="tree")
 @click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--json", "as_json", is_flag=True,
               help="The same tree as nested data.")
-def tree_cmd(unit_name: str | None, as_json: bool):
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+def tree_cmd(unit_name: str | None, as_json: bool, show_hidden: bool):
     """The units as a tree: each under the unit its `part_of` names.
 
     Every top-level unit and what is under it, or one unit's subtree. A
     `part_of` naming no unit, and a cycle, leave a unit top-level and are
     marked; `check` reports both.
     """
-    registry, _ = _load_registry()
+    registry, config = _load_registry()
     units = registry.units()
     if not units:
         click.echo("Nothing found.")
@@ -402,11 +499,18 @@ def tree_cmd(unit_name: str | None, as_json: bool):
         click.echo(json.dumps([tree_mod.nested(shape, t, node) for t in tops], indent=2))
         return
 
+    # The drawn tree leaves out what `hide` keeps off the screen; `--json`
+    # above is read by scripts and keeps everything.
+    hidden = _hidden(registry, config, show_hidden, start)
+    if hidden:
+        shape = tree_mod.build({n: u.part_of for n, u in by_name.items() if n not in hidden})
+    in_view = set(tree_mod.below(registry.tree(), start)) if start else set(by_name)
     # Cut to the terminal's width so a status never wraps; piped, whole.
     width = shutil.get_terminal_size().columns if sys.stdout.isatty() else None
     for line in tree_mod.draw(shape, lambda name: by_name[name].kind, start=start,
                               status=status_of):
         click.echo(line[:width] if width else line)
+    _say_hidden(len(hidden & in_view))
 
 
 @cli.command()
@@ -657,7 +761,9 @@ def new(path: str, kind: str | None, part_of: str | None, extra_homes: tuple[str
     driver.write_text(fmt.stub(base.replace("-", " ").capitalize(), target.name,
                                time.strftime("%Y-%m-%d")))
     _seed(target, kind, registry, fmt, base)
-    registered = _register_in_nav(target)
+    # mkdocs renders markdown, so a `.nav.yml` is a markdown tree's: in an
+    # org tree it is left from an older site and `new` leaves it alone.
+    registered = _register_in_nav(target) if registry.grammar.format == "md" else None
 
     click.echo(f"Created {kind or 'unit'}: {target}")
     click.echo("next:")
@@ -1072,25 +1178,39 @@ def _refresh_snapshot(registry: Registry, config: Config):
 @click.option("--open/--no-open", "do_open", default=True, help="Open it after writing.")
 @click.option("--base-url", default=None,
               help="Where the docs are served. Defaults to config docs_base_url.")
-def view_cmd(out: str, do_open: bool, base_url: str | None):
+@click.option("--reindex/--no-reindex", default=True,
+              help="Bring scad's session index up to date first (about a second).")
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool,
+             show_hidden: bool):
     """Render where every unit stands, and open it.
 
     Joins what the tree knows (plans, packets, uncommitted work) with what scad
-    knows (sessions, notes, open questions). Everything is recomputed here, so
+    knows (sessions, memos, open questions). Everything is recomputed here, so
     the page cannot drift the way a written status line does.
     """
     registry, config = _load_registry()
 
+    # Off the page, with its running sessions and questions: a hidden unit
+    # is not on screen at all. The page says how many.
+    hidden = _hidden(registry, config, show_hidden)
     by_kind: dict[str, list] = {}
     for unit in registry.units():
-        by_kind.setdefault(unit.kind, []).append(unit)
+        if unit.name not in hidden:
+            by_kind.setdefault(unit.kind, []).append(unit)
 
     headings = [
         (kind, kind.title() + "s") for kind in registry.grammar.artifact_types
     ]
 
+    # The page is read to act on, so it is drawn from a fresh index. The
+    # other commands only read; this is the one that brings it up to date.
+    # A failed reindex still draws the page, from the index as it is.
+    if reindex and (why := sessions.reindex()):
+        click.echo(f"scad reindex failed ({why}); sessions may be out of date.",
+                   err=True)
     every, by_unit = _sessions_by_unit(registry)
-    notes = _warm(registry, [u for us in by_kind.values() for u in us], every)
+    memos = _warm(registry, [u for us in by_kind.values() for u in us], every)
 
     groups = []
     for kind in sorted(by_kind):
@@ -1107,7 +1227,7 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
                     "why_edited": status.edited if status else None,
                     "activity": activity.read(
                         unit.paths, unit.name, sessions=by_unit[unit.name],
-                        notes=notes[unit.name],
+                        memos=memos[unit.name],
                     ),
                     "artifacts": [
                         (heading, documents.find(registry, artifact_kind, unit))
@@ -1123,7 +1243,8 @@ def view_cmd(out: str, do_open: bool, base_url: str | None):
             groups.append((_heading(kind), rows))
 
     ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url,
-           "link": config.view_link}
+           "link": config.view_link,
+           "hidden": len(hidden & {u.name for u in registry.units()})}
     page = view.render(groups, ctx, unattributed=sessions.unattributed(every))
     path = view.write(page, Path(out))
     click.echo(f"wrote {path}")
@@ -1209,20 +1330,20 @@ def _session_detail(s) -> str:
     return line
 
 
-@cli.command(name="notes")
+@cli.command(name="memos")
 @click.argument("unit_name", required=False, shell_complete=complete.units)
 @click.option("--mentions/--no-mentions", "want_mentions", default=True,
-              help="Include notes that only name the unit. On by default.")
-def notes_cmd(unit_name: str | None, want_mentions: bool):
+              help="Include memos that only name the unit. On by default.")
+def memos_cmd(unit_name: str | None, want_mentions: bool):
     """What was written down about a unit, newest first.
 
-    Three ways a note reaches a unit, shown per row. *written here* is the
-    exact one: the note's session is the unit's, by attribution or by
+    Three ways a memo reaches a unit, shown per row. *written here* is the
+    exact one: the memo's session is the unit's, by attribution or by
     containment. *filed here* is scad's project for it, a directory name.
-    *mentions this* is the name in the note's topic, tags or entities —
+    *mentions this* is the name in the memo's topic, tags or entities —
     the weakest, and the only one before this.
 
-    The notes themselves stay in scad; this reads its export and joins.
+    The memos themselves stay in scad; this reads its export and joins.
     """
     registry, _ = _load_registry()
     every = sessions.all_sessions(registry, EVENTS_DIR)
@@ -1237,7 +1358,11 @@ def notes_cmd(unit_name: str | None, want_mentions: bool):
     else:
         names = [u.name for u in registry.units()]
 
-    found = activity.notes_by_unit(names, every)
+    try:
+        found = activity.memos_by_unit(names, every)
+    except sessions.ScadFailed as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
     shown = 0
     for name in names:
         rows = [n for n in found[name]
@@ -1253,7 +1378,62 @@ def notes_cmd(unit_name: str | None, want_mentions: bool):
                 f"{str(n.get('how') or ''):<13} {str(n['title'] or '')[:88]}"
             )
     if not shown:
-        click.echo(f"{unit_name or 'every unit'}: no notes")
+        click.echo(f"{unit_name or 'every unit'}: no memos")
+
+
+@cli.command(name="hide")
+@click.argument("unit_names", nargs=-1, required=True, shell_complete=complete.units)
+def hide_cmd(unit_names: tuple[str, ...]):
+    """Keep units off the screen, each with what is under it, until unhidden.
+
+    For showing the setup to someone. `view`, `tree`, `list`, `status` and
+    `sessions` leave them out and say how many; `snapshot`, `--json`, `find`
+    and `where` do not, and naming a hidden unit still shows it.
+    """
+    registry, config = _load_registry()
+    names = []
+    for name in unit_names:
+        try:
+            names.append(registry.resolve(name).name)
+        except ValueError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+    kept = [*config.hide, *(n for n in names if n not in config.hide)]
+    hide_mod.write(config.path, kept)
+    below = hide_mod.expand(registry.tree(), names) - set(names)
+    more = f", and {_count(len(below), 'unit')} under them" if below else ""
+    click.echo(f"hidden: {', '.join(names)}{more}")
+
+
+@cli.command(name="unhide")
+@click.argument("unit_names", nargs=-1, shell_complete=complete.units)
+@click.option("--all", "everything", is_flag=True, help="Unhide every unit.")
+def unhide_cmd(unit_names: tuple[str, ...], everything: bool):
+    """Put hidden units back on the screen."""
+    if not unit_names and not everything:
+        raise click.UsageError("name a unit, or --all")
+    registry, config = _load_registry()
+    if everything:
+        gone = [*config.hide]
+    else:
+        names = {n for name in unit_names
+                 for n in [_resolved_or(registry, name)]}
+        gone = [n for n in config.hide if n in names]
+        if not gone:
+            click.echo(f"not hidden: {', '.join(unit_names)}"
+                       + (f"; hidden: {', '.join(config.hide)}" if config.hide else ""))
+            return
+    hide_mod.write(config.path, [n for n in config.hide if n not in gone])
+    click.echo(f"unhidden: {', '.join(gone)}" if gone else "nothing was hidden")
+
+
+def _resolved_or(registry: Registry, name: str) -> str:
+    """The unit's own name, or what was typed when no unit has it: a unit
+    hidden and since removed can still be unhidden."""
+    try:
+        return registry.resolve(name).name
+    except ValueError:
+        return name
 
 
 @cli.command(name="sessions")
@@ -1274,9 +1454,11 @@ def notes_cmd(unit_name: str | None, want_mentions: bool):
               help="Apply decisions from a `--none --json` file you edited.")
 @click.option("--json", "as_json", is_flag=True,
               help="The rows as JSON, each with a `unit` to fill in.")
+@click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
 def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
                  triage: bool, one_by_one: bool, as_groups: bool,
-                 only_dismissed: bool, from_file: str | None, as_json: bool):
+                 only_dismissed: bool, from_file: str | None, as_json: bool,
+                 show_hidden: bool):
     """List a unit's sessions, or every unit's, newest first.
 
     A session is a unit's because `orglens start` or `orglens attribute`
@@ -1287,6 +1469,7 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
     an editor over the JSON. Neither proposes a unit; both only record.
     """
     registry, _ = _load_registry()
+    _say_if_stale()
     every = sessions.all_sessions(registry, EVENTS_DIR)
     short = sessions.short_ids([s.id for s in every])
 
@@ -1349,16 +1532,21 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
         return
 
     groups: list[tuple[str, list]] = []
+    hidden = _hidden(registry, _load_config(), show_hidden)
+    left_out = 0
     if not only_none:
         for unit in registry.units():
             rows = sessions.listed(sessions.for_unit(every, unit.name), everything)
-            if rows:
+            if rows and unit.name in hidden:
+                left_out += 1
+            elif rows:
                 groups.append((unit.name, rows))
     loose = sessions.listed(sessions.unattributed(every), everything)
     if loose:
         groups.append(("unattributed", loose))
     if not groups:
         click.echo("no sessions")
+        _say_hidden(left_out)
         return
     for label, rows in groups:
         click.echo(f"\n{label}:")
@@ -1369,24 +1557,27 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
                 click.echo(_session_detail(s))
             elif (why := _why_line(s)):
                 click.echo(why)
+    _say_hidden(left_out)
 
 
 @cli.command()
 @click.argument("target", shell_complete=complete.units_or_sessions)
+@click.argument("name", required=False, shell_complete=complete.session_names_of_unit)
 @click.option("--prompt", default=None,
               help="Send this as the next turn instead of going in yourself.")
 @click.option("--print", "print_only", is_flag=True,
               help="Print the resume command instead of running it.")
-def resume(target: str, prompt: str | None, print_only: bool):
-    """Resume a session by id, or a unit's newest open session.
+def resume(target: str, name: str | None, prompt: str | None, print_only: bool):
+    """Resume a session by id, a unit's newest session, or one by its name.
 
     Hands the id to `scad session resume`, which knows where the session
     ran; orglens does no working-directory work of its own.
     """
     registry, _ = _load_registry()
+    _say_if_stale()
     every = sessions.all_sessions(registry, EVENTS_DIR)
 
-    session, matches = _find_session(every, target)
+    session, matches = (None, []) if name else _find_session(every, target)
     if session is None and matches:
         click.echo(f"'{target}' matches more than one session:", err=True)
         for s in matches:
@@ -1396,16 +1587,10 @@ def resume(target: str, prompt: str | None, print_only: bool):
         try:
             unit = registry.resolve(target)
         except ValueError:
-            click.echo(f"'{target}' is neither a session id nor a unit.", err=True)
+            what = "not a unit" if name else "neither a session id nor a unit"
+            click.echo(f"'{target}' is {what}.", err=True)
             sys.exit(1)
-        mine = sessions.listed(sessions.for_unit(every, unit.name), everything=False)
-        open_ = [s for s in mine if s.open]
-        if not open_:
-            click.echo(f"{unit.name}: nothing open to resume. Newest:", err=True)
-            for s in mine[:3]:
-                click.echo(_session_line(s), err=True)
-            sys.exit(1)
-        session = open_[0]
+        session = _unit_session(every, unit.name, name, "resume")
 
     if prompt:
         # A turn into the open pane, rather than a terminal to type it in.
@@ -1416,6 +1601,52 @@ def resume(target: str, prompt: str | None, print_only: bool):
     _warn_if_held_twice(session)
     argv = ["session", "resume", session.id] + (["--print"] if print_only else [])
     sys.exit(_scad(argv))
+
+
+def _unit_session(every: list, unit: str, name: str | None, verb: str):
+    """The unit's session a command means: the one of that name, newest
+    first, or with none named the unit's newest, running first. Exits with
+    the reason when there is none.
+
+    Running first, a just-launched one with no turns included: scad attaches
+    to a running session's pane, or refuses when it cannot name one, so it
+    is never opened twice. "Open" is not a filter: it is read off the last
+    turn, so a session with none never had it.
+    """
+    mine = sessions.listed(sessions.for_unit(every, unit), everything=False)
+    if name:
+        named = [s for s in mine if s.label == name]
+        if not named:
+            click.echo(f"{unit} has no session named '{name}'. "
+                       "Its named sessions:", err=True)
+            for s in [s for s in mine if s.label][:10]:
+                click.echo(_session_line(s), err=True)
+            sys.exit(1)
+        return named[0]
+    if not mine:
+        click.echo(f"{unit}: no sessions to {verb}.", err=True)
+        sys.exit(1)
+    _name_the_others(unit, mine[1:], verb)
+    return mine[0]
+
+
+def _name_the_others(unit: str, others: list, verb: str = "resume", shown: int = 3) -> None:
+    """One line naming what `resume UNIT` passed over, so picking another is
+    a TAB away rather than a listing to read."""
+    if not others:
+        return
+    names = [s.label or s.id[:8] for s in others[:shown]]
+    more = f" and {len(others) - shown} more" if len(others) > shown else ""
+    pick = f"orglens resume {unit} NAME" if verb == "resume" else f"--from NAME"
+    click.echo(f"also {', '.join(names)}{more}; pick one with: {pick}", err=True)
+
+
+def _say_if_stale() -> None:
+    """One line on stderr when scad's index is behind. Only the commands that
+    list or pick sessions ask; `view` reindexes instead."""
+    said = sessions.staleness()
+    if said:
+        click.echo(said, err=True)
 
 
 def _warn_if_held_twice(session) -> None:
@@ -1701,11 +1932,19 @@ def _launch_record(output: str) -> dict | None:
     return record
 
 
-def _launch(cwd: Path, agent: str, prompt: str | None,
-            window: str | None = None, name: str | None = None) -> dict | None:
+def _launch(cwd: Path | None, agent: str, prompt: str | None,
+            window: str | None = None, name: str | None = None,
+            split: bool = False, from_id: str | None = None) -> dict | None:
     """Start a session through scad and return its launch record — at least
     `session_id`, and the `tmux` pane when scad names one. Never raises."""
-    argv = ["scad", "session", "launch", "--agent", agent, "--cwd", str(cwd), "--json"]
+    argv = ["scad", "session", "launch", "--agent", agent, "--json"]
+    # With `--from` and no home asked for, scad works where the source
+    # session did, through its path aliases; it knows that better than a
+    # unit's first home does.
+    if cwd is not None:
+        argv += ["--cwd", str(cwd)]
+    if from_id:
+        argv += ["--from", from_id]
     if prompt:
         argv += ["--prompt", prompt]
     # The unit name is the one thing orglens knows and scad does not, so it
@@ -1714,6 +1953,10 @@ def _launch(cwd: Path, agent: str, prompt: str | None,
     # detached sibling; without it scad behaves as before.
     if window:
         argv += ["--window", window]
+    # `--split` puts it in a pane beside the one you typed in, which scad
+    # finds from `$TMUX_PANE`.
+    if split:
+        argv += ["--split"]
     if name:
         argv += ["--name", name]
     try:
@@ -1809,6 +2052,8 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
 @click.option("--prompt", default=None, help="The session's first turn.")
 @click.option("--window", is_flag=True,
               help="Land it as a window in your tmux, named for the unit.")
+@click.option("--split", is_flag=True,
+              help="Land it in a pane beside this one, in the window you are in.")
 @click.option("--about", default=None, metavar="WORDS",
               help="A word or two of context, for the session's name and window.")
 @click.option("--name", default=None, metavar="TEXT",
@@ -1816,10 +2061,15 @@ def _arrival(unit: Unit, chosen: Home, registry: Registry) -> str:
                    "day when not given.")
 @click.option("--no-name", "no_name", is_flag=True,
               help="Launch the session unnamed.")
+@click.option("--from", "from_", default=None, is_flag=False, flag_value="",
+              metavar="[NAME|ID]", shell_complete=complete.session_names_of_unit,
+              help="Pick up one of the unit's sessions in a fresh one: its newest, "
+                   "or the one named. scad writes the first turn; --prompt says "
+                   "where to go next.")
 @click.option("--dry-run", is_flag=True, help="Say what would happen; launch nothing.")
 def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
-          window: bool, about: str | None, name: str | None, no_name: bool,
-          dry_run: bool):
+          window: bool, split: bool, about: str | None, name: str | None,
+          no_name: bool, from_: str | None, dry_run: bool):
     """Start a session for a unit, attributed before its first turn.
 
     The unit is what you asked for and the working directory is a consequence,
@@ -1828,6 +2078,8 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
     still attributed by containment where that is unambiguous, and sit
     unattributed where it is not.
     """
+    if split and window:
+        raise click.UsageError("--split or --window, not both")
     registry, _ = _load_registry()
     try:
         unit = registry.resolve(unit_name)
@@ -1853,7 +2105,25 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
         click.echo(f"{unit.name} has no home on this machine.", err=True)
         sys.exit(1)
 
-    if home is not None:
+    # `--from`: a fresh session that picks up one of the unit's. scad owns
+    # the handoff --- it reads the source's handoff memo or its last turns
+    # and writes the first turn --- so orglens only picks the source by unit
+    # and, without --home, lets scad work where the source did.
+    source = None
+    if from_ is not None:
+        every = sessions.all_sessions(registry, EVENTS_DIR)
+        source, matches = _find_session(every, from_) if from_ else (None, [])
+        if source is None and len(matches) > 1:
+            click.echo(f"'{from_}' matches more than one session:", err=True)
+            for s in matches:
+                click.echo(_session_line(s), err=True)
+            sys.exit(1)
+        if source is None:
+            source = _unit_session(every, unit.name, from_ or None, "pick up")
+
+    if source is not None and home is None:
+        chosen = None
+    elif home is not None:
         chosen = next((h for h in present if h.name == home), None)
         if chosen is None:
             click.echo(f"Unknown home '{home}'. {unit.name} has: "
@@ -1869,7 +2139,7 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
             click.echo(f"  {h.name:<40} {h.path}")
         sys.exit(1)
 
-    first_turn = prompt or _arrival(unit, chosen, registry)
+    first_turn = prompt if source is not None else (prompt or _arrival(unit, chosen, registry))
     if no_name:
         chosen_name = None
     else:
@@ -1878,18 +2148,27 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
     window_name = (_slug(about) if about else unit.name) if window else None
 
     if dry_run:
-        where = f"as a window `{window_name}` in your tmux" if window else "detached in tmux"
-        click.echo(f"would launch {agent} in {chosen.path} for {unit.name}, "
+        where = (f"as a window `{window_name}` in your tmux" if window
+                 else "in a pane beside this one" if split else "detached in tmux")
+        place = chosen.path if chosen else "the directory it ran in"
+        click.echo(f"would launch {agent} in {place} for {unit.name}, "
                    f"{where} via `scad session launch`; this command "
                    "returns at once and leaves your terminal alone.")
         click.echo(f"session name: {chosen_name or '(unnamed)'}")
+        if source is not None:
+            click.echo(f"picks up: {source.id[:8]} {source.label or ''}".rstrip()
+                       + " (scad writes the first turn)")
+            if first_turn:
+                click.echo(f"then: {first_turn}")
+            return
         click.echo("first turn:")
         for line in first_turn.splitlines():
             click.echo(f"  {line}")
         return
 
-    record = _launch(chosen.path, agent, first_turn,
-                     window=window_name, name=chosen_name)
+    record = _launch(chosen.path if chosen else None, agent, first_turn,
+                     window=window_name, name=chosen_name, split=split,
+                     from_id=source.id if source else None)
     if record is None:
         click.echo("scad returned no session id — the session is not attributed. "
                    "Attribute it later, or start it again through orglens.")
@@ -1902,7 +2181,10 @@ def start(unit_name: str, home: str | None, agent: str, prompt: str | None,
     # printed the pane on stderr, which is easy to miss, and never said
     # `orglens resume`, which it cannot know about.
     pane = record.get("tmux")
-    click.echo(f"running detached in {pane or 'tmux'}; your terminal is free.")
-    if pane:
+    if split:
+        click.echo(f"running in the pane beside this one{f' ({pane})' if pane else ''}.")
+    else:
+        click.echo(f"running detached in {pane or 'tmux'}; your terminal is free.")
+    if pane and not split:
         click.echo(f"  watch it:   tmux attach -t {pane.split(':')[0]}")
     click.echo(f"  come back:  orglens resume {unit.name}")

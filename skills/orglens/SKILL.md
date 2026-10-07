@@ -50,7 +50,7 @@ unscoped one is 500+ lines. The grammar's own words for what may exist are in
 ## Find
 
 ```bash
-orglens list [--type KIND]                      # units, grouped by kind, newest first
+orglens list [--type KIND]                      # units by organisation and branch kind, newest first
 orglens status                                  # where each stands: status line, git, sessions, gates
 orglens find plan <unit>                        # documents of a kind; a nested unit's own home is excluded
 orglens find spec <unit> --grep "text"          # the ones that mention it, with the lines
@@ -65,6 +65,10 @@ The kind is the grammar's word for where to look; `--in` is the tree's word
 where the grammar has none yet. Fire several in one turn rather than scanning.
 `orglens tree [<unit>]` shows the units as a tree; `--under <unit>` on `list`,
 `status` and `find` keeps one unit and everything under it.
+
+A closing `N hidden` line means the person keeps units off the screen
+(`orglens hide`). Leave the hide as it is; `--show-hidden`, `--json` or naming
+the unit shows them to you.
 
 ## Create
 
@@ -89,7 +93,8 @@ naming it, and pass `--part-of` only on a yes. Run without a terminal, `new` and
 A tree may hold markdown and org side by side, and both are read. Write a new
 document in the grammar's `format` (the reference says which); keep an existing
 one in the format it is in. The status line is `#+STATUS: …` under `#+TITLE:` in
-org, `> **Status:** …` in markdown. `check` reports a document written in both.
+org, `> **Status:** …` in markdown, one sentence: only the first is shown.
+`check` reports a document written in both.
 
 ```bash
 orglens declare <path> [--yes] [--part-of <unit>]  # a folder that exists and looks like a unit but never said so
@@ -115,7 +120,15 @@ line after it is orglens's, and both are right.
 detached one, so the person can switch to it rather than attach. The session is
 named `<unit>-<mon><dd>`; `--about "two words"` puts context in the middle,
 which is what tells two sessions on one unit on one day apart. Both need a scad
-that has `session launch --window`.
+that has `session launch --window`. `--split` lands it in a pane beside the
+one you are in instead, with a scad that has `session launch --split`.
+
+`--from [<name>|<id>]` starts a *fresh* session that picks up one of the unit's:
+its newest, or the one named (TAB lists them). Use it when a session is too
+full to go on, rather than `resume`. scad writes the first turn (read the
+source's handoff memo or its last turns, write a new handoff); `--prompt` says
+where to go next. Without `--home` it works where the source ran. Needs scad
+0.10.0 or later.
 
 ## Sessions
 
@@ -123,18 +136,20 @@ that has `session launch --window`.
 orglens sessions <unit>                         # newest first; each says attributed or containment
 orglens sessions                                # every unit's, grouped; unattributed last
 orglens sessions --none                         # belong to no unit: where they ran, last thing said
-orglens resume <unit>                           # its newest open session, through scad
+orglens resume <unit>                           # its newest session, running first, through scad
+orglens resume <unit> <name>                    # the unit's session of that name (TAB lists them)
 orglens resume <session-id>                     # by id or unique prefix
 orglens attribute <session-id> <unit> --why "…" # say whose it was, and what for
 orglens resume <unit> --prompt "…"              # hand a turn to the open session
-orglens notes <unit>                            # what was written down about it
+orglens memos <unit>                            # what was written down about it (scad's memos)
 orglens sessions --none --groups                # the unclaimed, counted by directory
 ```
 
 A session belongs to every unit with a home containing where it ran, or to
 the one an attribution names, which wins. A shared home shows the session on
 both units; `attribute` narrows it to one. A session started by hand is listed
-after scad's next reindex.
+after scad's next reindex. When `sessions`, `resume` or `status` says the index
+is old, run `scad reindex` before trusting what they list; `view` does it itself.
 
 `--why` is the person's own words about a session and is shown wherever it is
 listed; ask for it rather than inventing one. `resume --prompt` delivers a turn
@@ -142,7 +157,7 @@ to a pane that is already open, which is not the same as resuming — and `resum
 names any other live process on that session id before opening it, because two
 writers on one transcript is how a session forks.
 
-`orglens notes <unit>` says why each note is the unit's: `written here` (the
+`orglens memos <unit>` says why each memo is the unit's: `written here` (the
 session that wrote it belongs to the unit), `filed here` (scad's project for
 it), or `mentions this` (the name appears in it). `--no-mentions` drops the
 weakest, `--kind` is not there yet.
@@ -172,7 +187,7 @@ The tutorial at `capabilities/tutorial/README.md` walks all of it.
 
 ```bash
 orglens check                                   # drift: missing driver docs, undeclared folders, homes under no root, part_of naming no unit or a cycle, a folder disagreeing with its marker, weak or shared homes, a unit its parent nav omits, folders the grammar has no word for, a document in two formats
-orglens view                                    # the page: waiting and running first, then a card per unit; filter by unit, agent, text
+orglens view                                    # the page: Recent (cards banded by time) and Explore (the tree); filter by scope, kind, agent, text
 orglens config <unit> [--workdir <repo>]        # the repos: block scad reads for a container
 orglens reference --out <path>                  # regenerate the grammar reference
 ```

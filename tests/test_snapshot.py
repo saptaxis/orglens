@@ -98,6 +98,18 @@ class TestWhatItContains:
         assert "01-testbed-Feb032026.md" in expt
 
 
+    def test_a_status_is_carried_as_plain_text(self, units_tree, registry, config):
+        """Completion hints and the view read status lines from here; org
+        markup showed raw in both."""
+        from orglens.snapshot import snapshot_data
+        overview = next(units_tree.rglob("overview.*"))
+        overview.write_text("#+STATUS: Done: =orglens tree= and [[file:x.org][the log]]. More.\n"
+                            if overview.suffix == ".org" else
+                            "> **Status:** Done: `orglens tree` and [the log](x.md). More.\n")
+        data = snapshot_data(Registry(registry.roots, registry.grammar), config)
+        assert "Done: orglens tree and the log" in [u.get("status") for u in data["units"]]
+
+
 class TestWhatOnlyTheTreeKnows:
     def test_undeclared_directories_are_listed(self, units_tree, registry, config):
         """`archive/` and `presentation/` are real and in no grammar.

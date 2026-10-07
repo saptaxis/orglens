@@ -6,18 +6,32 @@ import re
 
 from orglens.formats.base import Format, clean
 
-STATUS = re.compile(r"\*\*Status:\*\*\s*(.+)")
+#: Within its own line: an empty status is no status, not the next line.
+STATUS = re.compile(r"\*\*Status:\*\*[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
+#: A fenced block: an example of a status line is not the document's status.
+FENCE = re.compile(r"^[ \t]*(```|~~~).*?^[ \t]*\1[^\n]*", re.MULTILINE | re.DOTALL)
+
+
+LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+CODE = re.compile(r"`([^`]+)`")
+EMPHASIS = re.compile(r"(?<![\w*_])(\*\*|__|\*|_)(?=\S)(.+?)(?<=\S)\1(?![\w*_])")
+
+
+def plain(raw: str) -> str:
+    """A line of markdown as plain text: links by their text, code and
+    emphasis marks dropped."""
+    return EMPHASIS.sub(r"\2", CODE.sub(r"\1", LINK.sub(r"\1", raw)))
 
 
 def status(text: str) -> str | None:
-    match = STATUS.search(text)
-    return clean(match.group(1)) if match else None
+    match = STATUS.search(FENCE.sub("", text))
+    return clean(plain(match.group(1))) if match else None
 
 
 def stub(title: str, name: str, today: str) -> str:
     return (
         f"# {title}\n\n"
-        f"> **Status:** Opened {today}. Nothing done yet.\n\n"
+        f"> **Status:** Opened {today}; nothing done yet.\n\n"
         "## What it is\n\n"
         f"What {name} is for, in a paragraph.\n\n"
         "## State tracking\n\n"

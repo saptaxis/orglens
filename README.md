@@ -10,8 +10,8 @@ orglens is built alongside [scad](https://github.com/saptaxis/scoped-agent-dispa
 a lower-level tool that runs agent sessions and records what happened.
 
 scad is optional and not a dependency. `orglens start` and `resume` shell out to
-it, and sessions and notes come from `scad session ls --json` and `scad notes ls
---about` when it is present (scad 0.5 or later; an older scad or none means no
+it, and sessions and memos come from `scad session ls --json` and `scad memos ls`
+when it is present (scad 0.9 or later for memos; an older scad or none means no
 sessions, which is ordinary). Every other command works without it.
 
 ## What it assumes
@@ -103,7 +103,7 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 
 | Command | Description |
 |---------|-------------|
-| `orglens list [--type KIND] [--under UNIT]` | List all units, grouped by declared kind; `--under` keeps one unit and its subtree |
+| `orglens list [--type KIND] [--under UNIT]` | List all units, newest first: a block per top of the tree, units in it by their branch's kind with their path, as `tree` groups them; `--under` keeps one unit and its subtree |
 | `orglens status [--under UNIT]` | Where every unit stands, across all of its homes |
 | `orglens tree [UNIT] [--json]` | The units as a tree, each under the unit its `part_of` names, a node's units grouped by kind, each as `name — status`; a `part_of` naming no unit, and a cycle, are marked |
 | `orglens find KIND [UNIT] [--under UNIT] [--in DIR] [--grep TEXT] [--since 2w] [--waiting] [--json]` | Find documents of a kind, optionally scoped to one unit — never its nested units, which own their own. `--in` scopes to a directory the grammar has no name for; `--grep` keeps the ones whose text matches and shows the lines |
@@ -112,16 +112,17 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 | `orglens check` | Report where the tree has drifted: missing driver documents and declared files, undeclared folders, homes under no root, a `part_of` naming no unit or a cycle, a folder disagreeing with its marker, weak or shared homes, kinds that match nothing, folders of documents the grammar has no word for, a document written in two formats side by side. Reports only — never gates |
 | `orglens snapshot [--stdout] [--check] [--json]` | Generate a topology snapshot (markdown), with the same facts as JSON beside it for completion; `--json` prints the data instead. `--check` says whether the written one is older than any declaration or driver document, or the JSON lags it, exit 1 if so |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
-| `orglens view` | Render where everything stands as a page, and open it: units banded by when they last moved, waiting first, a foldable card each; filter by band, kind, agent or text |
-| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window] [--about WORDS] [--name TEXT] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, and the session is named `unit[-context]-sepDD` |
+| `orglens view` | Render where everything stands as a page, and open it. *Recent*: a card per unit at any depth, with its path, banded by when it last moved (by session or by edit), waiting first. *Explore*: the same cards as the tree. Filter by band, kind, agent, scope or text. Reindexes scad first (`--no-reindex` to skip) |
+| `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window\|--split] [--about WORDS] [--name TEXT] [--from [NAME\|ID]] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, `--split` in a pane beside this one, and the session is named `unit[-context]-sepDD`. `--from` makes it a fresh session that picks up one of the unit's, the newest or the one named, through `scad session launch --from` |
 | `orglens sessions [UNIT] [--none] [--all] [--json]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
 | `orglens sessions --triage [--one-by-one]`, `--groups`, `--from FILE` | Decide the unclaimed sessions by directory, one at a time, or from a `--none --json` file you edited |
-| `orglens notes [UNIT] [--no-mentions]` | What was written down about a unit, and why each note is the unit's |
-| `orglens resume UNIT\|SESSION-ID [--prompt TEXT] [--print]` | Resume a session, or a unit's newest open one; `--prompt` sends a turn to it instead |
+| `orglens memos [UNIT] [--no-mentions]` | What was written down about a unit in scad's memos, and why each is the unit's |
+| `orglens resume UNIT [NAME]\|SESSION-ID [--prompt TEXT] [--print]` | Resume a session by id, a unit's newest (running first), or the unit's session called NAME; `--prompt` sends a turn to it instead |
 | `orglens attribute SESSION-ID UNIT [--why TEXT]` | Say which unit a session was for, after the fact |
 | `orglens dismiss SESSION-ID\|--under PATH [--why TEXT]` | Say a session, or every unclaimed one under a path, belongs to no unit |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 | `orglens where [NAME]` | Which roots are configured, and which unit a name or this directory resolves to |
+| `orglens hide UNIT...`, `orglens unhide UNIT...\|--all` | Keep units off the screen, each with what is under it, until unhidden: a `hide:` list in the config. `view`, `tree`, `list`, `status` and `sessions` leave them out and say how many (`--show-hidden` for one run); `--json`, `snapshot`, `find` and `where` keep them, and naming a hidden unit shows it |
 | `orglens workflow next\|done\|note\|goto PACKET` | Run a capability's workflow over a packet, one pass at a time, with a human between. See `capabilities/tutorial/README.md` |
 
 ## Skills
@@ -230,7 +231,9 @@ Status is the first status line (`> **Status:**` in markdown, `#+STATUS:` in
 org) in a unit's documents, looking at the
 ones `structure` names first. Nothing declares a state file, so
 moving the line into whichever document you actually maintain works. It is
-always reported with its age, since an authored sentence can go stale.
+shown as its first sentence in plain text, markup dropped, so write it as one
+sentence. It is always reported with its age, since an authored sentence can
+go stale.
 
 ## How Sessions Get Attributed
 
@@ -242,7 +245,8 @@ repository with sixteen homes below it, that is most of the sessions.
 
 `orglens sessions UNIT` lists a unit's sessions and how each is the unit's;
 `orglens sessions --none` lists the ones that belong to no unit. `orglens resume`
-hands a session id, or a unit's newest open session, to `scad session resume`.
+hands a session id, a unit's newest session, or the unit's session of a given
+name to `scad session resume`.
 `orglens attribute SESSION-ID UNIT` records an attribution after the fact, which
 is also how a shared-home session is narrowed to one unit. `orglens dismiss`
 says a session is nobody's, which is what lets the unclaimed pile empty;
@@ -252,10 +256,10 @@ says a session is nobody's, which is what lets the unclaimed pile empty;
 be any of the units under it, and guessing from its title is the containment
 mistake one layer up.
 
-`orglens notes UNIT` prints what was written down about it. A note is the
-unit's because the session that wrote it is (`written here`), because scad
-filed it there (`filed here`), or because it names the unit (`mentions this`);
-each row says which.
+`orglens memos UNIT` prints what was written down about it in scad's memos. A
+memo is the unit's because the session that wrote it is (`written here`),
+because scad filed it there (`filed here`), or because it names the unit
+(`mentions this`); each row says which.
 
 `orglens start UNIT` records the unit before the session's first turn. It picks
 one of the unit's homes, asking with `--home` when more than one resolves,
@@ -275,7 +279,7 @@ proposal without starting a session, and `orglens new` asks the same question.
 `orglens config UNIT` renders a unit's homes into the `repos:` block of the
 config a container launcher reads. Homes absent from this machine are left out.
 This is the only command that writes under `~/.scad`; nothing else in orglens
-touches that directory, and scad's index is never opened — sessions and notes
+touches that directory, and scad's index is never opened: sessions and memos
 come through scad's own commands. Launching on this machine needs no config.
 
 ## Demo

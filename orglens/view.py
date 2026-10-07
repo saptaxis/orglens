@@ -5,8 +5,8 @@ project but knows nothing about the work — no plans, no packets, no documents.
 orglens knows the artifacts and nothing about the running. Neither is the
 question a human actually asks, which is *where does this project stand*.
 
-orglens asks scad for its sessions (`scad session ls --json`) and its notes
-(`scad notes ls --about`) and joins them to units itself; it never opens
+orglens asks scad for its sessions (`scad session ls --json`) and its memos
+(`scad memos ls`) and joins them to units itself; it never opens
 scad's index file. A command's output is a contract between two repos and a
 schema is not.
 
@@ -80,8 +80,28 @@ details.band.waiting > summary { color:var(--warn); border-bottom-color:var(--wa
 .why.stale .age { color:var(--warn) }
 .tag { font-size:.72rem; color:var(--warn); border:1px solid var(--warn); border-radius:4px;
   padding:0 .35rem; margin-left:.5rem; vertical-align:middle }
-.nested { margin:.6rem 0 0 1rem; border-left:2px solid var(--line); padding-left:.8rem }
-.nested .card { margin-bottom:.4rem }
+.nested { margin:.2rem 0 .6rem 1rem; border-left:2px solid var(--line); padding-left:.8rem }
+.tabs { display:flex; gap:.3rem; margin:0 0 .8rem; border-bottom:1px solid var(--line) }
+.tab-btn { font:inherit; font-size:.9rem; background:transparent; color:var(--dim); border:0;
+  border-bottom:2px solid transparent; padding:.3rem .8rem; cursor:pointer; margin-bottom:-1px }
+.tab-btn.on { color:var(--fg); border-bottom-color:var(--fg); font-weight:600 }
+main[data-tab='recent'] section[data-tab='explore'],
+main[data-tab='explore'] section[data-tab='recent'],
+main[data-tab='explore'] [data-only='recent'] { display:none }
+main[data-by='session'] .facts.by-edit, main[data-by='edit'] .facts.by-session { display:none }
+#scope { font:inherit; font-size:.8rem; border:1px solid var(--line); border-radius:6px;
+  background:var(--card); color:var(--fg); padding:.1rem .3rem }
+.name.pathed { white-space:normal }
+.seg { color:var(--dim); font-weight:400; cursor:pointer }
+.seg:hover { color:var(--fg); text-decoration:underline }
+.sep { color:var(--dim); font-weight:400; margin:0 .3rem }
+.card.ctx { opacity:.5 }
+details.kgroup > summary { cursor:pointer; list-style:none; font-size:.7rem; text-transform:uppercase;
+  letter-spacing:.07em; color:var(--dim); margin:.5rem 0 .35rem }
+details.kgroup > summary::-webkit-details-marker { display:none }
+details.kgroup > summary .n { margin-left:.4rem }
+.node > .card { margin-bottom:.4rem }
+.chip[hidden], .node[hidden], details[hidden] { display:none }
 details.card > summary { cursor:pointer; list-style:none; outline:none }
 details.card > summary::-webkit-details-marker { display:none }
 details.card[open] { background:transparent }
@@ -122,8 +142,8 @@ h2.grp .n { color:var(--dim); font-weight:400; font-size:.78rem; margin-left:.4r
 .name { font-weight:600; font-size:1.02rem; white-space:nowrap }
 .facts { color:var(--dim); font-size:.82rem; font-variant-numeric:tabular-nums }
 .why { margin-top:.3rem; font-size:.9rem }
-.notes { margin-top:.5rem; font-size:.8rem; color:var(--dim) }
-.notes b { color:var(--fg); font-weight:500 }
+.memos { margin-top:.5rem; font-size:.8rem; color:var(--dim) }
+.memos b { color:var(--fg); font-weight:500 }
 .gate { color:var(--warn); font-weight:600 }
 ol.loose li { margin:.45rem 0 }
 .sid { font-family:ui-monospace,Menlo,monospace; font-size:.78rem; color:var(--dim) }
@@ -172,7 +192,7 @@ def doc_url(path: Path, roots: Path | list[Path], base: str) -> str:
                 rel = rel.parent
         tail = "" if str(rel) == "." else f"{rel}/"
         return f"{base}/{tail}"
-    return "file://" + str(path)
+    return Path(path).absolute().as_uri()
 
 
 _DATE = re.compile(r"([A-Z][a-z]{2})(\d{2})(\d{4})")
@@ -189,7 +209,7 @@ def _link(path, label: str, ctx: dict) -> str:
     `file` — the setting for a tree read in an editor rather than served.
     The copy affordance always yields the real path."""
     if ctx.get("link") == "file":
-        url = "file://" + str(path)
+        url = Path(path).absolute().as_uri()
     else:
         url = doc_url(path, ctx["docs_roots"], ctx["base_url"])
     fs = html.escape(str(path))
@@ -258,12 +278,12 @@ def _detail(row: dict, ctx: dict) -> str:
             f"<div class='said'>{html.escape(a.last_turn['text'].strip()[:240])}</div>"
         )
 
-    if a.notes:
-        out.append(f"<h4>Notes ({len(a.notes)})</h4><ol class='list'>")
-        for n in a.notes[:8]:
-            # Why this note is here, when it is not simply the unit's own.
+    if a.memos:
+        out.append(f"<h4>Memos ({len(a.memos)})</h4><ol class='list'>")
+        for n in a.memos[:8]:
+            # Why this memo is here, when it is not simply the unit's own.
             # `written in X` reads as provenance and was the only label;
-            # a note that merely names the unit now says so instead of
+            # a memo that merely names the unit now says so instead of
             # borrowing that sentence.
             how, wrote = n.get("how"), n["written_in"]
             if how == MENTIONS:
@@ -367,12 +387,12 @@ def _unattributed(loose: list) -> str:
 
 def _searchable(row: dict) -> str:
     """Everything the find box matches on a card, lowercased: the unit's
-    name, its status line, session labels, note titles, document names."""
+    name, its status line, session labels, memo titles, document names."""
     a = row["activity"]
     parts = [row["name"], row.get("why") or ""]
     parts += [str(s.get("name") or "") for s in a.recent]
     parts += [str(s.get("name") or "") for s in a.live]
-    parts += [str(n.get("title") or "") + " " + str(n.get("topic") or "") for n in a.notes]
+    parts += [str(n.get("title") or "") + " " + str(n.get("topic") or "") for n in a.memos]
     parts += [d.name for d in row.get("docs", [])]
     parts += [art.name for _, items in row.get("artifacts", []) for art in items]
     return html.escape(" ".join(p for p in parts if p).lower(), quote=True)
@@ -393,8 +413,22 @@ def write(page: str, path: Path) -> Path:
 # gate — a session that stopped and asked — is not recency at all and puts
 # the unit in its own band ahead of every other.
 
-BANDS = ("waiting", "today", "yesterday", "this week", "this month", "earlier")
+BANDS = ("waiting", "today", "yesterday", "this week", "last week", "this month",
+         "earlier", "no sessions")
+#: Through last week a band starts open; older ones are folded.
+OPEN_BANDS = ("waiting", "today", "yesterday", "this week", "last week")
 DAY = 86400
+
+#: The two ways of placing a unit. By session: when it was last worked on with
+#: an agent. By edit: when its files last changed. Scripted edits are why both
+#: exist: after a tree-wide rewrite, edit times say the rewrite ran, not what
+#: was worked on. So a unit never worked on with an agent is not placed by its
+#: edits in session mode: it goes to "no sessions" (on 2026-10-06, 23 of the 24
+#: such units would otherwise have filled "this week" with the restructure). In
+#: edit mode a unit with no file change is placed by its session.
+SESSION_CLOCKS = ("live", "idle", "session")
+EDIT_CLOCKS = ("edited", "committed")
+MODES = {"session": (SESSION_CLOCKS,), "edit": (EDIT_CLOCKS, SESSION_CLOCKS)}
 
 
 def clocks(a: Activity, now: float | None = None) -> list[tuple[str, int]]:
@@ -425,12 +459,26 @@ def clocks(a: Activity, now: float | None = None) -> list[tuple[str, int]]:
     return sorted(out, key=lambda c: (rank.get(c[0], 2), -c[1]))
 
 
-def band(a: Activity, now: float | None = None) -> str:
-    now = time.time() if now is None else now
+def placing(a: Activity, by: str = "session", now: float | None = None) -> tuple[str, int] | None:
+    """The clock that places the unit: a question waiting on the person
+    first, whatever the mode; then the newest clock of the mode's kind; in
+    edit mode, then the newest session. None when nothing places it."""
     cs = clocks(a, now)
-    if not cs:
-        return "earlier"
-    name, at = cs[0]
+    if cs and cs[0][0] == "waiting":
+        return cs[0]
+    for kinds in MODES[by]:
+        found = next((c for c in cs if c[0] in kinds), None)
+        if found:
+            return found
+    return None
+
+
+def band(a: Activity, now: float | None = None, by: str = "session") -> str:
+    now = time.time() if now is None else now
+    placed = placing(a, by, now)
+    if placed is None:
+        return "no sessions" if by == "session" and clocks(a, now) else "earlier"
+    name, at = placed
     if name == "waiting":
         return "waiting"
     age = now - at
@@ -440,6 +488,8 @@ def band(a: Activity, now: float | None = None) -> str:
         return "yesterday"
     if age < 7 * DAY:
         return "this week"
+    if age < 14 * DAY:
+        return "last week"
     if age < 30 * DAY:
         return "this month"
     return "earlier"
@@ -470,20 +520,23 @@ def _drift_tag(a: Activity, now: float | None = None) -> str:
 # ── the page ─────────────────────────────────────────────────────────────
 
 
-def _placed(a: Activity, now: float) -> str:
+def _placed(a: Activity, now: float, by: str = "session") -> str:
     """The one-line reason the unit is where it is: the clock that placed it
     first and in ink, the others after it, then the counts."""
+    first = placing(a, by, now)
+    cs = [c for c in clocks(a, now) if c[0] != "waiting"]
+    if first in cs:
+        cs.remove(first)
+        cs.insert(0, first)
     bits = []
-    for i, (name, at) in enumerate(clocks(a, now)):
-        if name == "waiting":
-            continue
+    for name, at in cs:
         if name == "live":
             text = "&#x25CF; live"
         elif name == "idle":
             text = f"&#x25CB; open pane, idle {ago(at, now).replace(' ago', '')}"
         else:
             text = f"{name} {ago(at, now)}"
-        bits.append(f"<span class='placed'>{text}</span>" if i == 0 else text)
+        bits.append(f"<span class='placed'>{text}</span>" if (name, at) == first else text)
     if a.sessions:
         who = "/".join(a.agents) if a.agents else "?"
         bits.append(f"{a.sessions} sessions ({who})")
@@ -499,81 +552,151 @@ def _placed(a: Activity, now: float) -> str:
     return " · ".join(bits)
 
 
-def _card(row: dict, ctx: dict, now: float,
-          children: dict[str, list[dict]] | None = None) -> str:
+def _attr(value: str) -> str:
+    return html.escape(value, quote=True)
+
+
+def _card(row: dict, ctx: dict, now: float, above: list[str],
+          show_path: bool = False) -> str:
+    """One unit's card. `above` is its ancestors, top first: on Recent they
+    are drawn before the name, each a link that scopes the page to it; on
+    Explore the card's place in the tree already says them."""
     a = row["activity"]
     name = row["name"]
     agents = " ".join(sorted({str(s.get("agent") or "") for s in a.recent} - {""}))
     why_edited = row.get("why_edited")
     is_stale = stale(a, why_edited, now)
+    line = [*above, name]
     attrs = (
-        f" data-unit='{html.escape(name, quote=True)}'"
-        f" data-parent='{html.escape(row.get('part_of') or '', quote=True)}'"
-        f" data-kind='{html.escape(row.get('kind') or '', quote=True)}'"
+        f" data-unit='{_attr(name)}'"
+        f" data-parent='{_attr(row.get('part_of') or '')}'"
+        f" data-kind='{_attr(row.get('kind') or '')}'"
         f" data-agents='{agents}' data-text='{_searchable(row)}'"
+        f" data-path='{_attr('/'.join(line))}'"
+        f" data-anc='{_attr(' ' + ' '.join(line) + ' ')}'"
+        f" data-bs='{band(a, now, 'session')}' data-be='{band(a, now, 'edit')}'"
     )
+    path = ""
+    if show_path and above:
+        path = "".join(f"<a class='seg' data-scope='{_attr(u)}'>{html.escape(u)}</a>"
+                       "<span class='sep'>&#x203A;</span>" for u in above)
     out = [f"<details{attrs} class='card'><summary><div class='top'>"
-           f"<span class='name'>{html.escape(name)}"
+           f"<span class='name{' pathed' if path else ''}'>{path}{html.escape(name)}"
            f"<span class='kind'>{html.escape(row.get('kind') or 'unit')}</span>"
            f"{_drift_tag(a, now)}</span>"
-           f"<span class='facts'>{_placed(a, now)}</span></div>"]
+           f"<span class='facts by-session'>{_placed(a, now, 'session')}</span>"
+           f"<span class='facts by-edit'>{_placed(a, now, 'edit')}</span></div>"]
     for ask in a.needs[:2]:
         out.append(f"<div class='ask'>{html.escape(ask['question'].strip()[:200])}"
                    f"<span class='when'> · asked {ago(ask.get('at'), now)}</span></div>")
     if row.get("why"):
         age = f"<span class='age'>{ago(why_edited, now).replace(' ago', ' old')}{' · stale' if is_stale else ''}</span>" if why_edited else ""
         out.append(f"<div class='why{' stale' if is_stale else ''}'>&#x201C;{html.escape(row['why'])}&#x201D;{age}</div>")
-    if a.notes:
-        recent = ", ".join(f"<b>{html.escape(str(n['topic']))}</b>" for n in a.notes[:4])
-        more = f" +{len(a.notes) - 4}" if len(a.notes) > 4 else ""
-        out.append(f"<div class='notes'>{len(a.notes)} note(s): {recent}{more}</div>")
+    if a.memos:
+        recent = ", ".join(f"<b>{html.escape(str(n['topic']))}</b>" for n in a.memos[:4])
+        more = f" +{len(a.memos) - 4}" if len(a.memos) > 4 else ""
+        out.append(f"<div class='memos'>{len(a.memos)} memo{'s' * (len(a.memos) != 1)}: {recent}{more}</div>")
     out.append("</summary>")
     out.append(_detail(row, ctx))
-    nested = (children or {}).get(name, [])
-    if nested:
-        out.append("<div class='nested'>")
-        for child in sorted(nested, key=lambda r: recency(r["activity"]), reverse=True):
-            out.append(_card(child, ctx, now, children))
-        out.append("</div>")
     out.append("</details>")
     return "".join(out)
 
 
 JS = """
-const chips = document.querySelectorAll('.chip');
+const main = document.querySelector('main');
 const find = document.getElementById('find');
+const scopeSel = document.getElementById('scope');
+const recent = document.querySelector("section[data-tab='recent']");
+const explore = document.querySelector("section[data-tab='explore']");
 const on = {band: '', kind: '', agent: ''};
-let q = '';
+let q = '', scope = '';
+// A remembered tab or mode is a convenience: storage can be missing or
+// refused, and the page works the same without it.
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+function matches(card) {
+  const kind = !on.kind || card.dataset.kind === on.kind;
+  const agent = !on.agent || (card.dataset.agents || '').split(' ').includes(on.agent);
+  const text = !q || (card.dataset.text || '').includes(q);
+  const sc = !scope || (card.dataset.anc || '').includes(' ' + scope + ' ');
+  return kind && agent && text && sc;
+}
+// Recent: each card goes to the band its mode places it in, sorted by path
+// so a unit's descendants sit together.
+function place() {
+  const key = main.dataset.by === 'edit' ? 'be' : 'bs';
+  const cards = [...recent.querySelectorAll('details.band > .cards > details.card')];
+  cards.sort((a, b) => a.dataset.path.localeCompare(b.dataset.path));
+  cards.forEach(c => recent.querySelector(
+    `details.band[data-band='${c.dataset[key]}'] > .cards`).appendChild(c));
+}
 function apply() {
-  document.querySelectorAll('details.card').forEach(el => {
-    const kind = !on.kind || el.dataset.kind === on.kind;
-    const agents = (el.dataset.agents || '').split(' ');
-    const agent = !on.agent || agents.includes(on.agent);
-    const text = !q || (el.dataset.text || '').includes(q);
-    el.hidden = !(kind && agent && text);
-  });
-  document.querySelectorAll('details.band').forEach(b => {
+  recent.querySelectorAll('details.band').forEach(b => {
+    const cards = [...b.querySelectorAll(':scope > .cards > details.card')];
+    if (b.dataset.band === 'unattributed') {
+      b.hidden = !!(on.band || on.kind || scope);
+      return;
+    }
+    cards.forEach(c => { c.hidden = !matches(c); });
+    const shown = cards.filter(c => !c.hidden).length;
     const mine = !on.band || b.dataset.band === on.band;
-    const any = [...b.querySelectorAll(':scope > details.card')].some(c => !c.hidden);
-    b.hidden = !(mine && any);
+    b.querySelector(':scope > summary .n').textContent = shown;
+    b.hidden = !(mine && shown);
     if (on.band && mine) b.open = true;
+    const chip = document.querySelector(`.chip[data-facet='band'][data-value='${b.dataset.band}']`);
+    if (chip) { chip.hidden = !cards.length; chip.querySelector('.n').textContent = cards.length; }
+  });
+  // Explore: a node stays when it matches or something under it does; an
+  // ancestor kept only for what is under it is drawn faint, as context.
+  [...explore.querySelectorAll('.node')].reverse().forEach(node => {
+    const card = node.querySelector(':scope > details.card');
+    const own = matches(card);
+    const kids = [...node.querySelectorAll(':scope > .nested > .node, :scope > .nested > details.kgroup > .node')];
+    const any = kids.some(k => !k.hidden);
+    node.hidden = !(own || any);
+    card.classList.toggle('ctx', !own && any);
+  });
+  explore.querySelectorAll('details.kgroup').forEach(g => {
+    const kids = [...g.querySelectorAll(':scope > .node')];
+    g.hidden = !kids.some(k => !k.hidden);
   });
   document.querySelectorAll('.loose li').forEach(li => {
     li.hidden = !!on.agent && li.dataset.agent !== on.agent;
   });
 }
-chips.forEach(c => c.addEventListener('click', () => {
+function setTab(t) {
+  main.dataset.tab = t;
+  document.querySelectorAll('.tab-btn').forEach(x => x.classList.toggle('on', x.dataset.tab === t));
+  store.set('orglens.view.tab', t);
+}
+function setBy(by) {
+  main.dataset.by = by;
+  document.querySelectorAll(".chip[data-facet='by']").forEach(x => x.classList.toggle('on', x.dataset.value === by));
+  store.set('orglens.view.by', by);
+  place(); apply();
+}
+function setScope(s) { scope = s; scopeSel.value = s; apply(); }
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
   const facet = c.dataset.facet;
+  if (facet === 'by') { setBy(c.dataset.value); return; }
   on[facet] = c.dataset.value;
   document.querySelectorAll(`.chip[data-facet='${facet}']`).forEach(x => x.classList.toggle('on', x === c));
   apply();
 }));
+scopeSel.addEventListener('change', () => setScope(scopeSel.value));
 find.addEventListener('input', () => { q = find.value.trim().toLowerCase(); apply(); });
 document.addEventListener('click', e => {
+  const seg = e.target.closest('.seg');
+  if (seg) { e.preventDefault(); e.stopPropagation(); setScope(seg.dataset.scope); return; }
   const c = e.target.closest('.cp'); if (!c) return; e.preventDefault();
   navigator.clipboard.writeText(c.dataset.path).then(() => {
     c.classList.add('done'); setTimeout(() => c.classList.remove('done'), 900); });
 });
+setTab(store.get('orglens.view.tab') === 'explore' ? 'explore' : 'recent');
+if (store.get('orglens.view.by') === 'edit') setBy('edit');
 """
 
 
@@ -582,8 +705,9 @@ def _chips(facet: str, values: list[tuple[str, str, int | None]], colour: bool =
     for value, label, count in values:
         cls = f" {value}" if colour else ""
         n = f"<span class='n'>{count}</span>" if count is not None else ""
+        hidden = " hidden" if count == 0 else ""
         out.append(f"<button class='chip{cls}' data-facet='{facet}' "
-                   f"data-value='{html.escape(value, quote=True)}'>{html.escape(label)}{n}</button>")
+                   f"data-value='{_attr(value)}'{hidden}>{html.escape(label)}{n}</button>")
     return "".join(out)
 
 
@@ -592,49 +716,63 @@ def render(
     now: float | None = None,
 ) -> str:
     """`groups` is [(label, [row, ...]), ...]; a row is what `cli.view` builds.
-    The labels are ignored: units are banded by when they last moved, and
-    their kind is a chip on the card and a filter, not a section.
+    The labels are ignored: kind is a chip on the card and a filter.
 
-    Every card folds. A unit that is part of another is a card inside its
-    parent's. The page embeds every row and scopes itself in the browser.
+    Two tabs over the same rows. *Recent* answers what moved: every unit is
+    its own card at any depth, banded by its own time, its path drawn on the
+    card. *Explore* is the tree `orglens tree` draws, each node a card,
+    siblings by recency. The page embeds every row and filters, scopes and
+    re-bands itself in the browser.
     """
     now = time.time() if now is None else now
     rows = [r for _, group in groups for r in group]
     by_name = {r["name"]: r for r in rows}
     # The tree over the page's rows: a unit whose parent is not on the page,
-    # or which is in a cycle, is a top-level card rather than drawn nowhere.
+    # or which is in a cycle, is a top-level node rather than drawn nowhere.
     shape = tree.build({r["name"]: r.get("part_of") for r in rows})
-    children: dict[str, list[dict]] = {}
-    for r in rows:
-        parent = shape.parent.get(r["name"])
-        if parent:
-            children.setdefault(parent, []).append(r)
-    top = [r for r in rows if r["name"] not in shape.parent]
 
-    # A parent's band is the newest of its own clocks and its subtree's.
-    def band_of(r: dict) -> str:
-        own = band(r["activity"], now)
-        kids = [band_of(c) for c in children.get(r["name"], [])]
-        return min([own, *kids], key=BANDS.index)
+    def above(name: str) -> list[str]:
+        out: list[str] = []
+        while name in shape.parent:
+            name = shape.parent[name]
+            out.insert(0, name)
+        return out
 
-    banded: dict[str, list[dict]] = {b: [] for b in BANDS}
-    for r in top:
-        banded[band_of(r)].append(r)
+    def newest_first(names) -> list[str]:
+        return sorted(names, key=lambda n: (-recency(by_name[n]["activity"]), n))
 
     running = sum(r["activity"].live_sessions for r in rows)
     waiting = sum(r["activity"].waiting for r in rows)
     kinds = sorted({r.get("kind") or "" for r in rows} - {""})
+    placed = {r["name"]: band(r["activity"], now, "session") for r in rows}
+    counts = {b: sum(1 for v in placed.values() if v == b) for b in BANDS}
+
+    # Every unit with units under it, at any depth and of any kind, in tree order.
+    scopes = ["<option value=''>everything</option>"]
+    for top in shape.top:
+        for name in tree.below(shape, top):
+            if shape.children.get(name):
+                indent = "&#xA0;&#xA0;" * len(above(name))
+                scopes.append(f"<option value='{_attr(name)}'>{indent}{html.escape(name)}</option>")
 
     body = [
+        "<nav class='tabs'>"
+        "<button class='tab-btn on' data-tab='recent'>Recent</button>"
+        "<button class='tab-btn' data-tab='explore'>Explore</button></nav>"
         "<div class='filters'>"
-        "<div class='facet'><span class='flabel'>when</span>"
-        + _chips("band", [(b, b, len(banded[b])) for b in BANDS if banded[b]]) + "</div>"
+        "<div class='facet' data-only='recent'><span class='flabel'>when</span>"
+        + _chips("band", [(b, b, counts[b]) for b in BANDS]) + "</div>"
+        "<div class='facet' data-only='recent'><span class='flabel'>placed by</span>"
+        "<button class='chip on' data-facet='by' data-value='session'>session</button>"
+        "<button class='chip' data-facet='by' data-value='edit'>edit</button></div>"
         "<div class='facet'><span class='flabel'>kind</span>"
         + _chips("kind", [(k, k, None) for k in kinds]) + "</div>"
         "<div class='facet'><span class='flabel'>agent</span>"
         + _chips("agent", [(a, a, None) for a in ("claude", "codex", "kimi")], colour=True) + "</div>"
+        "<div class='facet'><span class='flabel'>scope</span>"
+        f"<select id='scope'>{''.join(scopes)}</select></div>"
         "<div class='facet'><span class='flabel'>find</span>"
-        "<input id='find' placeholder='unit, session, document, note…' autocomplete='off'></div>"
+        "<input id='find' placeholder='unit, session, document, memo…' autocomplete='off'></div>"
         "</div>"
     ]
     if running:
@@ -643,18 +781,23 @@ def render(
         body.append(f"<div class='badge'>{waiting} waiting on you</div>")
     else:
         body.append("<div class='badge clear'>nothing waiting</div>")
+    if ctx.get("hidden"):
+        body.append(f" <div class='badge clear'>{ctx['hidden']} hidden</div>")
 
+    # ── Recent ──
+    body.append("<section data-tab='recent'>")
     for b in BANDS:
-        members = banded[b]
-        if not members:
-            continue
-        opened = " open" if b in ("waiting", "today", "yesterday") else ""
+        members = sorted((r for r in rows if placed[r["name"]] == b),
+                         key=lambda r: "/".join([*above(r["name"]), r["name"]]))
+        opened = " open" if b in OPEN_BANDS else ""
+        hidden = "" if members else " hidden"
         cls = " waiting" if b == "waiting" else ""
-        body.append(f"<details class='band{cls}' data-band='{b}'{opened}>"
-                    f"<summary>{html.escape(b)}<span class='n'>{len(members)}</span></summary>")
-        for r in sorted(members, key=lambda r: recency(r["activity"]), reverse=True):
-            body.append(_card(r, ctx, now, children))
-        body.append("</details>")
+        body.append(f"<details class='band{cls}' data-band='{b}'{opened}{hidden}>"
+                    f"<summary>{html.escape(b)}<span class='n'>{len(members)}</span></summary>"
+                    "<div class='cards'>")
+        for r in members:
+            body.append(_card(r, ctx, now, above(r["name"]), show_path=True))
+        body.append("</div></details>")
 
     loose = listed(unattributed or [])
     if loose:
@@ -662,16 +805,45 @@ def render(
                     f"<summary>unattributed sessions<span class='n'>{len(loose)}</span></summary>"
                     + _unattributed(loose).replace("<h2 class='grp'>", "<h2 class='grp' hidden>", 1)
                     + "</details>")
+    body.append("</section>")
+
+    # ── Explore ──
+    # Grouped by kind as `orglens tree` groups: always under a top node,
+    # deeper down only where a node's units are of more than one kind.
+    def node(name: str, top: bool) -> str:
+        out = [f"<div class='node' data-unit='{_attr(name)}'>",
+               _card(by_name[name], ctx, now, above(name))]
+        kids = newest_first(shape.children.get(name, []))
+        if kids:
+            by_kind: dict[str, list[str]] = {}
+            for kid in kids:
+                by_kind.setdefault(by_name[kid].get("kind") or "", []).append(kid)
+            out.append("<div class='nested'>")
+            if top or len(by_kind) > 1:
+                for k in sorted(by_kind):
+                    out.append(f"<details class='kgroup' open><summary>{html.escape(k or '(no kind)')}"
+                               f"<span class='n'>{len(by_kind[k])}</span></summary>")
+                    out.extend(node(kid, False) for kid in by_kind[k])
+                    out.append("</details>")
+            else:
+                out.extend(node(kid, False) for kid in kids)
+            out.append("</div>")
+        out.append("</div>")
+        return "".join(out)
+
+    body.append("<section data-tab='explore'>")
+    body.extend(node(name, True) for name in newest_first(shape.top))
+    body.append("</section>")
 
     stamp = time.strftime("%Y-%m-%d %H:%M")
     return (
         "<!doctype html><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>orglens — where things stand</title>"
-        f"<style>{CSS}</style><main>"
+        f"<style>{CSS}</style><main data-tab='recent' data-by='session'>"
         "<h1>Where things stand</h1>"
         "<div class='sub'>Derived on render — plans and packets from the tree, "
-        "sessions and notes from scad. Nothing here is stored, so nothing here "
+        "sessions and memos from scad. Nothing here is stored, so nothing here "
         "can be stale.</div>"
         + "".join(body)
         + f"<footer>rendered {stamp} · links open {html.escape(ctx['base_url'])}"

@@ -62,14 +62,18 @@ def _preferred_format() -> str:
 
 
 def _output(packet: Path, writes: str) -> Path:
-    """The file a node writes. A name with a suffix is used as written, as
-    every workflow did before R24. A stem is the file that exists in any
-    format, else a new one in the grammar's format."""
-    if Path(writes).suffix in formats.SUFFIXES:
-        return packet / writes
+    """The file a node writes: the one that exists in any format, the
+    grammar's first, so `writes: draft.md` on a packet converted to org
+    writes `draft.org`, not a new `draft.md` beside it. With none yet, a
+    name with a suffix is used as written, as every workflow did before
+    R24, and a stem gets the grammar's format."""
     prefer = _preferred_format()
     found = formats.existing(packet, writes, prefer)
-    return found if found is not None else packet / f"{writes}{formats.get(prefer).suffix}"
+    if found is not None:
+        return found
+    if Path(writes).suffix in formats.SUFFIXES:
+        return packet / writes
+    return packet / f"{writes}{formats.get(prefer).suffix}"
 
 
 def _describe(packet: Path, pos: Position) -> dict:

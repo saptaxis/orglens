@@ -32,6 +32,15 @@ def _skip(data: dict) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _hide(data: dict) -> tuple[str, ...]:
+    """`hide:`, the units kept off the screen. A bare string is refused, as
+    for `skip:`."""
+    value = data.get("hide") or []
+    if not isinstance(value, list) or not all(isinstance(n, str) for n in value):
+        raise ValueError("hide must be a list of unit names")
+    return tuple(value)
+
+
 @dataclass
 class Config:
     roots: list[Path]
@@ -43,6 +52,12 @@ class Config:
     #: Folder names no walk enters (`skip.py`). The whole list: a config's
     #: `skip:` replaces the default rather than adding to it.
     skip: tuple[str, ...] = skip_rule.DEFAULT
+    #: Units kept off what is drawn on screen, each with its subtree
+    #: (`orglens hide`). A per-screen preference, so here and not in a
+    #: marker, which travels in git.
+    hide: tuple[str, ...] = ()
+    #: The file this was read from, which `hide` and `unhide` write back.
+    path: Path | None = None
     _config_dir: Path | None = None
 
     @classmethod
@@ -68,6 +83,8 @@ class Config:
             docs_base_url=(data.get("docs_base_url") or "http://localhost:8000").rstrip("/"),
             view_link=data.get("view_link", "served"),
             skip=_skip(data),
+            hide=_hide(data),
+            path=path,
             _config_dir=path.parent,
         )
 

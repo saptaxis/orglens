@@ -26,13 +26,34 @@ class Format:
     seed: Callable[[str, str], str]
 
 
+#: Brackets a sentence does not end inside.
+_OPEN, _CLOSE = "([{\"", ")]}\""
+
+
 def clean(raw: str) -> str:
-    """The status text without a trailing parenthetical or a comma clause.
+    """The status as one sentence of plain text: the first sentence, the
+    format's markup already taken out by its reader.
+
+    A status is one sentence (inwit's workflow), and a longer line is cut at
+    the end of its first one --- never inside brackets or quotes. Cutting at
+    the first comma, as this did, left "(sessions per unit" open, and
+    dropped "packaging in progress" from "Code complete, packaging in
+    progress". A final full stop goes, as it would in a list.
 
     Preserves the author's case. Lowercasing and re-capitalising turned
     "POC" into "Poc" and "PhysicsX" into "Physicsx".
     """
-    raw = raw.strip()
-    raw = re.sub(r"\s*\(.*\)\s*$", "", raw)
-    raw = re.sub(r",.*$", "", raw)
-    return raw.strip()
+    text = " ".join(raw.split())
+    depth, quoted = 0, False
+    for i, ch in enumerate(text):
+        if ch == '"':
+            quoted = not quoted
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth = max(depth - 1, 0)
+        elif (ch in ".?!" and not depth and not quoted
+              and text[i + 1:i + 2] == " " and not text[i + 2:i + 3].islower()):
+            text = text[:i + 1]
+            break
+    return text.rstrip(".").strip()

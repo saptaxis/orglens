@@ -89,7 +89,7 @@ def test_a_subprocess_that_cannot_start_yields_no_session_not_a_crash(tmp_path,
 def test_start_records_an_attribution(tmp_path, monkeypatch, two_root_tree_config):
     calls = {}
 
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False, from_id=None):
         calls["cwd"] = cwd
         calls["agent"] = agent
         return {"session_id": "sess-123"}
@@ -224,7 +224,7 @@ def _attributed_elsewhere(tmp_path, monkeypatch):
 
 
 def _spy(calls):
-    def fake(paths, name, sessions=None, notes=None):
+    def fake(paths, name, sessions=None, memos=None):
         calls[name] = sessions or []
         return activity.Activity()
     return fake
@@ -271,7 +271,7 @@ def test_start_prints_the_way_back_in(tmp_path, monkeypatch, two_root_tree_confi
     # scad launches detached and prints a pane; through orglens that pane
     # arrived on stderr with no attach command and no `resume` line, so an
     # agent that ran `start` had no idea the session was already running.
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False, from_id=None):
         return {"session_id": "sess-123", "tmux": "scad-cl-2347:0.0"}
     monkeypatch.setattr("orglens.cli._launch", fake_launch)
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
@@ -302,7 +302,7 @@ def test_launch_returns_the_record_not_only_the_id(tmp_path, monkeypatch):
 
 
 def _named(monkeypatch, tmp_path, seen, extra=()):
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False, from_id=None):
         seen.update(window=window, name=name)
         return {"session_id": "s1"}
     monkeypatch.setattr("orglens.cli._launch", fake_launch)
@@ -386,7 +386,7 @@ def test_window_and_name_are_passed_to_scad(tmp_path, monkeypatch,
     is what the window and the session are called."""
     seen = {}
 
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False, from_id=None):
         seen.update(window=window, name=name)
         return {"session_id": "s1"}
 
@@ -403,7 +403,7 @@ def test_no_name_leaves_the_session_unnamed(tmp_path, monkeypatch,
                                             two_root_tree_config):
     seen = {}
 
-    def fake_launch(cwd, agent, prompt, window=None, name=None):
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False, from_id=None):
         seen.update(window=window, name=name)
         return {"session_id": "s1"}
 
@@ -424,3 +424,113 @@ def test_the_launch_argv_carries_window_and_name(tmp_path, monkeypatch):
     monkeypatch.setattr("orglens.cli.subprocess.run", run)
     _launch(tmp_path, "claude", None, window="orglens", name="orglens")
     assert seen[0][-4:] == ["--window", "orglens", "--name", "orglens"]
+
+
+def test_split_is_passed_to_scad(tmp_path, monkeypatch, two_root_tree_config):
+    """A pane beside the one you typed in; scad does the splitting."""
+    seen = {}
+
+    def fake_launch(cwd, agent, prompt, window=None, name=None, split=False, from_id=None):
+        seen.update(window=window, split=split)
+        return {"session_id": "s1"}
+
+    monkeypatch.setattr("orglens.cli._launch", fake_launch)
+    monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+    result = CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens", "--split"])
+    assert result.exit_code == 0, result.output
+    assert seen == {"window": None, "split": True}
+
+
+def test_split_and_window_together_are_refused(tmp_path, monkeypatch,
+                                                two_root_tree_config):
+    monkeypatch.setattr("orglens.cli._launch", lambda *a, **k: {"session_id": "s1"})
+    result = CliRunner().invoke(cli, ["start", "orglens", "--home", "orglens",
+                                      "--split", "--window"])
+    assert result.exit_code != 0
+
+
+def test_launch_hands_split_to_scad(tmp_path, monkeypatch):
+    argvs = []
+
+    def run(argv, **kw):
+        argvs.append(argv)
+        return _fake_run(0, json.dumps({"session_id": "s"}))(argv, **kw)
+
+    monkeypatch.setattr("orglens.cli.subprocess.run", run)
+    _launch(tmp_path, "claude", None, split=True)
+    assert "--split" in argvs[0]
+
+
+class TestFrom:
+    """`start UNIT --from`: a fresh session that picks up one of the unit's.
+    scad writes the first turn; orglens picks the source by unit."""
+
+    def _setup(self, tmp_path, monkeypatch, rows):
+        from tests.conftest import export_row, fake_scad
+        home = tmp_path / "code" / "orglens"
+        monkeypatch.setattr("orglens.sessions.run_scad", fake_scad(
+            [export_row(i, str(home), n_turns=5, **kw) for i, kw in rows]))
+        monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "events")
+        seen = {}
+
+        def fake_launch(cwd, agent, prompt, window=None, name=None, split=False,
+                        from_id=None):
+            seen.update(cwd=cwd, prompt=prompt, from_id=from_id, name=name)
+            return {"session_id": "new-session"}
+        monkeypatch.setattr("orglens.cli._launch", fake_launch)
+        return seen
+
+    ROWS = [("1111aaaa-newest", {"ended": 9000_000, "name": "orglens-a-oct07"}),
+            ("2222bbbb-older", {"ended": 5000_000, "name": "orglens-b-oct05"})]
+
+    def test_bare_from_picks_up_the_units_newest(self, tmp_path, monkeypatch,
+                                                 two_root_tree_config):
+        seen = self._setup(tmp_path, monkeypatch, self.ROWS)
+        result = CliRunner().invoke(cli, ["start", "orglens", "--from"])
+        assert result.exit_code == 0, result.output
+        assert seen["from_id"] == "1111aaaa-newest"
+        # scad writes the first turn and works where the source ran.
+        assert seen["prompt"] is None and seen["cwd"] is None
+        assert "attributed session new-session to orglens" in result.output
+        assert events.attributions(root=tmp_path / "events")["new-session"] == "orglens"
+
+    def test_from_a_name_or_an_id(self, tmp_path, monkeypatch, two_root_tree_config):
+        seen = self._setup(tmp_path, monkeypatch, self.ROWS)
+        CliRunner().invoke(cli, ["start", "orglens", "--from", "orglens-b-oct05"])
+        assert seen["from_id"] == "2222bbbb-older"
+        CliRunner().invoke(cli, ["start", "orglens", "--from", "2222"])
+        assert seen["from_id"] == "2222bbbb-older"
+
+    def test_prompt_and_home_pass_through(self, tmp_path, monkeypatch, two_root_tree_config):
+        seen = self._setup(tmp_path, monkeypatch, self.ROWS)
+        CliRunner().invoke(cli, ["start", "orglens", "--from", "--home", "orglens",
+                                 "--prompt", "now the release"])
+        assert seen["prompt"] == "now the release"
+        assert seen["cwd"] is not None and seen["cwd"].name == "orglens"
+
+    def test_a_unit_with_no_sessions_has_nothing_to_pick_up(
+            self, tmp_path, monkeypatch, two_root_tree_config):
+        seen = self._setup(tmp_path, monkeypatch, [])
+        result = CliRunner().invoke(cli, ["start", "orglens", "--from"])
+        assert result.exit_code == 1 and "no sessions to pick up" in result.output
+        assert seen == {}
+
+    def test_dry_run_names_the_source(self, tmp_path, monkeypatch, two_root_tree_config):
+        seen = self._setup(tmp_path, monkeypatch, self.ROWS)
+        result = CliRunner().invoke(cli, ["start", "orglens", "--from", "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert "picks up: 1111aaaa orglens-a-oct07" in result.output
+        assert seen == {}
+
+
+def test_launch_hands_from_to_scad_and_leaves_the_directory_to_it(tmp_path, monkeypatch):
+    argvs = []
+
+    def run(argv, **kw):
+        argvs.append(argv)
+        return _fake_run(0, json.dumps({"session_id": "s"}))(argv, **kw)
+
+    monkeypatch.setattr("orglens.cli.subprocess.run", run)
+    _launch(None, "claude", None, from_id="1111aaaa-newest")
+    assert argvs[0][argvs[0].index("--from") + 1] == "1111aaaa-newest"
+    assert "--cwd" not in argvs[0] and "--prompt" not in argvs[0]

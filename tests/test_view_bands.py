@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from orglens.activity import Activity
-from orglens.view import band, clocks, render, stale
+from orglens.view import band, clocks, placing, render, stale
 
 CTX = {"docs_roots": [Path("/docs")], "base_url": "http://localhost"}
 NOW = 1_800_000_000
@@ -48,10 +48,10 @@ class TestClocks:
 class TestBand:
     def test_bands_by_the_newest_clock(self):
         assert band(Activity(last_session=NOW - 3 * H), now=NOW) == "today"
-        assert band(Activity(modified=NOW - 30 * H), now=NOW) == "yesterday"
-        assert band(Activity(touched=NOW - 4 * 24 * H), now=NOW) == "this week"
+        assert band(Activity(modified=NOW - 30 * H), now=NOW, by="edit") == "yesterday"
+        assert band(Activity(touched=NOW - 4 * 24 * H), now=NOW, by="edit") == "this week"
         assert band(Activity(last_session=NOW - 20 * 24 * H), now=NOW) == "this month"
-        assert band(Activity(modified=NOW - 90 * 24 * H), now=NOW) == "earlier"
+        assert band(Activity(modified=NOW - 90 * 24 * H), now=NOW, by="edit") == "earlier"
         assert band(Activity(), now=NOW) == "earlier"
 
     def test_waiting_is_its_own_band_whatever_the_clocks_say(self):
@@ -113,14 +113,6 @@ class TestPage:
         landed = render([("Projects", [_row("p", Activity(modified=NOW - H, last_session=NOW - 30 * 24 * H))])], CTX, now=NOW)
         assert "no session" in landed
 
-    def test_an_experiment_nests_under_its_programme(self):
-        rows = [_row("prog", Activity(last_session=NOW - H), kind="research-program"),
-                _row("expt-1", Activity(modified=NOW - 2 * H), kind="experiment", part_of="prog")]
-        page = render([("Research programs", [rows[0]]), ("Experiments", [rows[1]])], CTX, now=NOW)
-        prog_card = page[page.index("data-unit='prog'"):]
-        assert "data-unit='expt-1'" in prog_card
-        assert page.count("data-unit='expt-1'") == 1
-
     def test_units_naming_each_other_as_parents_both_stay_on_the_page(self):
         # A cycle has no top-level member, so nesting under parents drew
         # neither card. Each is a top-level card instead.
@@ -130,19 +122,138 @@ class TestPage:
         assert "data-unit='a'" in page
         assert "data-unit='b'" in page
 
-    def test_a_grandchild_is_drawn_inside_its_parents_card(self):
-        # organization > programme > experiment: the experiment is a card
-        # inside the programme's, which is inside the organisation's.
-        rows = [_row("org", Activity(last_session=NOW - H), kind="organization"),
-                _row("prog", Activity(last_session=NOW - H), kind="research-program", part_of="org"),
-                _row("expt", Activity(modified=NOW - 2 * H), kind="experiment", part_of="prog")]
-        page = render([("All", rows)], CTX, now=NOW)
-        assert page.count("data-unit='expt'") == 1
-        prog_card = page[page.index("data-unit='prog'"):]
-        assert "data-unit='expt'" in prog_card
-
-    def test_bands_older_than_yesterday_are_folded(self):
-        rows = [_row("a", Activity(last_session=NOW - H)), _row("b", Activity(modified=NOW - 10 * 24 * H))]
+    def test_bands_through_last_week_are_open_and_older_ones_folded(self):
+        rows = [_row("a", Activity(last_session=NOW - H)),
+                _row("b", Activity(last_session=NOW - 10 * 24 * H)),
+                _row("c", Activity(last_session=NOW - 20 * 24 * H))]
         page = render([("Projects", rows)], CTX, now=NOW)
         assert "<details class='band' data-band='today' open>" in page
+        assert "<details class='band' data-band='last week' open>" in page
         assert "<details class='band' data-band='this month'>" in page
+
+
+def _recent(page):
+    return page[page.index("<section data-tab='recent'>"):page.index("<section data-tab='explore'>")]
+
+
+def _explore(page):
+    return page[page.index("<section data-tab='explore'>"):]
+
+
+TREE = [
+    _row("org", Activity(last_session=NOW - 3 * H), kind="organization"),
+    _row("prog", Activity(last_session=NOW - 30 * H), kind="research", part_of="org"),
+    _row("expt", Activity(last_session=NOW - 2 * H), kind="experiment", part_of="prog"),
+    _row("alpha", Activity(last_session=NOW - 5 * H), part_of="org"),
+    _row("beta", Activity(last_session=NOW - H), part_of="org"),
+]
+
+
+class TestPlacing:
+    def test_by_session_ignores_a_newer_edit(self):
+        a = Activity(last_session=NOW - 5 * 24 * H, modified=NOW - H)
+        assert band(a, now=NOW, by="session") == "this week"
+        assert band(a, now=NOW, by="edit") == "today"
+
+    def test_a_unit_with_no_session_is_in_no_sessions_not_placed_by_its_edit(self):
+        """Placed by its edits, a unit nobody worked on filled "this week"
+        with the restructure's scripted rewrite."""
+        a = Activity(modified=NOW - 3 * H)
+        assert placing(a, "session", NOW) is None
+        assert band(a, now=NOW, by="session") == "no sessions"
+        assert band(a, now=NOW, by="edit") == "today"
+
+    def test_no_sessions_comes_last_and_folded(self):
+        rows = [_row("worked", Activity(last_session=NOW - 9000 * H)),
+                _row("never", Activity(modified=NOW - H))]
+        page = render([("All", rows)], CTX, now=NOW)
+        assert "<details class='band' data-band='no sessions'>" in page
+        assert page.index("data-band='earlier'") < page.index("data-band='no sessions'")
+        assert "data-bs='no sessions' data-be='today'" in page
+
+    def test_a_unit_with_no_edit_is_placed_by_its_session(self):
+        a = Activity(last_session=NOW - 3 * H)
+        assert placing(a, "edit", NOW) == ("session", NOW - 3 * H)
+
+    def test_waiting_comes_first_in_either_mode(self):
+        a = Activity(needs=[{"question": "q", "at": NOW - 9 * 24 * H}], modified=NOW - H)
+        assert band(a, now=NOW, by="edit") == "waiting"
+        assert band(a, now=NOW, by="session") == "waiting"
+
+    def test_last_week_is_seven_to_fourteen_days(self):
+        assert band(Activity(last_session=NOW - 8 * 24 * H), now=NOW) == "last week"
+        assert band(Activity(last_session=NOW - 15 * 24 * H), now=NOW) == "this month"
+
+    def test_every_card_carries_both_bands_and_both_lines(self):
+        page = render([("All", [_row("p", Activity(last_session=NOW - 5 * 24 * H,
+                                                    modified=NOW - H))])], CTX, now=NOW)
+        assert "data-bs='this week' data-be='today'" in page
+        card = _recent(page)
+        session = card[card.index("facts by-session"):card.index("facts by-edit")]
+        edit = card[card.index("facts by-edit"):]
+        assert session.index("session 5d ago") < session.index("edited 1h ago")
+        assert "<span class='placed'>session 5d ago" in session
+        assert "<span class='placed'>edited 1h ago" in edit
+
+
+class TestRecent:
+    def test_every_unit_is_its_own_card_banded_by_its_own_time(self):
+        """0.6.0 nested everything inside the organisations' cards, so the
+        page showed two."""
+        recent = _recent(render([("All", TREE)], CTX, now=NOW))
+        today = recent[recent.index("data-band='today'"):recent.index("data-band='yesterday'")]
+        yesterday = recent[recent.index("data-band='yesterday'"):recent.index("data-band='this week'")]
+        for name in ("org", "expt", "alpha", "beta"):
+            assert f"data-unit='{name}'" in today
+        assert "data-unit='prog'" in yesterday
+        assert recent.count("class='nested'") == 0
+
+    def test_each_card_shows_its_path_and_a_name_in_it_scopes(self):
+        recent = _recent(render([("All", TREE)], CTX, now=NOW))
+        card = recent[recent.index("data-unit='expt'"):]
+        assert "<a class='seg' data-scope='org'>org</a>" in card
+        assert "<a class='seg' data-scope='prog'>prog</a>" in card
+        assert "data-anc=' org prog expt '" in recent
+
+    def test_cards_in_a_band_are_sorted_by_path(self):
+        recent = _recent(render([("All", TREE)], CTX, now=NOW))
+        order = [recent.index(f"data-unit='{n}'") for n in ("org", "alpha", "beta", "expt")]
+        assert order == sorted(order)
+
+    def test_the_scope_filter_lists_every_unit_with_units_under_it(self):
+        page = render([("All", TREE)], CTX, now=NOW)
+        scope = page[page.index("<select id='scope'>"):page.index("</select>")]
+        assert "value='org'" in scope and "value='prog'" in scope
+        assert "value='expt'" not in scope and "value='alpha'" not in scope
+        assert scope.index("value='org'") < scope.index("value='prog'")
+
+
+class TestExplore:
+    def test_the_tree_nests_with_kinds_grouped_under_a_top_node(self):
+        explore = _explore(render([("All", TREE)], CTX, now=NOW))
+        assert explore.count("data-unit='expt' data-parent") == 1
+        prog = explore[explore.index("<div class='node' data-unit='prog'>"):]
+        assert "data-unit='expt'" in prog
+        groups = explore[explore.index("<div class='node' data-unit='org'>"):]
+        assert groups.index("<details class='kgroup' open><summary>project") \
+            < groups.index("data-unit='beta'")
+        assert "<summary>research" in groups
+
+    def test_siblings_are_sorted_by_recency(self):
+        explore = _explore(render([("All", TREE)], CTX, now=NOW))
+        assert explore.index("data-unit='beta'") < explore.index("data-unit='alpha'")
+
+    def test_a_single_kind_below_the_top_is_not_grouped(self):
+        explore = _explore(render([("All", TREE)], CTX, now=NOW))
+        prog = explore[explore.index("<div class='node' data-unit='prog'>"):]
+        prog = prog[:prog.index("data-unit='expt'")]
+        assert "kgroup" not in prog
+
+    def test_explore_cards_draw_no_path(self):
+        explore = _explore(render([("All", TREE)], CTX, now=NOW))
+        assert "class='seg'" not in explore
+
+    def test_both_tabs_are_on_the_page_recent_first(self):
+        page = render([("All", TREE)], CTX, now=NOW)
+        assert page.index("data-tab='recent'>Recent<") < page.index("data-tab='explore'>Explore<")
+        assert "<main data-tab='recent' data-by='session'>" in page

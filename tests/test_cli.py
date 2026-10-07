@@ -10,6 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from orglens.activity import Activity
+import orglens.sessions as sessions_mod
 from orglens.cli import _grouped, cli
 import yaml
 
@@ -176,10 +177,11 @@ class TestListCommand:
         assert "clipcompose" in result.output
         assert "physics-priors" not in result.output
 
-    def test_a_nested_unit_shows_what_it_is_part_of(self, runner, cli_env):
+    def test_a_nested_unit_is_listed_under_the_unit_at_the_top_of_its_branch(
+            self, runner, cli_env):
         result = runner.invoke(cli, ["list", "--type", "experiment"], env=cli_env)
         assert result.exit_code == 0
-        assert "[physics-priors]" in result.output
+        assert "physics-priors\n  experiment:\n    expt-1-agent-behavior" in result.output
 
     def test_an_unknown_kind_says_what_the_kinds_are(self, runner, cli_env):
         """This raised `KeyError: 'deck'` — the CLI never asked the grammar."""
@@ -489,6 +491,21 @@ class TestNewCommand:
         result = runner.invoke(cli, ["new", str(target), "--kind", "project"], env=cli_env)
         assert nav.read_text() == "title: Projects\nnav:\n  - clipcompose\n  - orglens\n  - test-tool\n"
         assert ".nav.yml" in result.output
+
+    def test_new_in_an_org_tree_leaves_a_parent_nav_alone(self, runner, tmp_path, units_tree):
+        """mkdocs renders markdown; a `.nav.yml` in an org tree is left from an
+        older site."""
+        default = Path(__file__).parent.parent / "orglens" / "grammars" / "default.yaml"
+        org = tmp_path / "org-grammar.yaml"
+        org.write_text(default.read_text().replace("format: md", "format: org"))
+        nav = units_tree / "projects" / ".nav.yml"
+        nav.write_text("title: Projects\nnav:\n  - clipcompose\n")
+        target = units_tree / "projects" / "test-tool"
+        result = runner.invoke(cli, ["new", str(target), "--kind", "project"],
+                               env=_roots_config(tmp_path, [units_tree], grammar_path=org))
+        assert result.exit_code == 0, result.output
+        assert nav.read_text() == "title: Projects\nnav:\n  - clipcompose\n"
+        assert ".nav.yml" not in result.output
 
     def test_new_leaves_a_parent_nav_with_a_glob_alone(self, runner, cli_env, units_tree):
         nav = units_tree / "projects" / ".nav.yml"
@@ -1114,6 +1131,69 @@ class TestAgainstTheSharedTwoRootFixture:
         assert "reelmill" in result.output
 
 
+class TestViewReindexes:
+    """The page is read to act on, so it is drawn from a fresh scad index."""
+
+    def _env(self, tmp_path):
+        home = tmp_path / "docs" / "projects" / "sample"
+        home.mkdir(parents=True)
+        (home / MARKER).write_text("home: sample\nunit: sample\nkind: project\n"
+                                   "homes:\n  - sample\n")
+        return _roots_config(tmp_path, [tmp_path / "docs"])
+
+    def _calls(self, monkeypatch, fail=None):
+        calls = []
+        monkeypatch.setattr("orglens.sessions.reindex",
+                            lambda: calls.append("reindex") or fail)
+        real = sessions_mod.run_scad
+
+        def ls(argv):
+            calls.append(" ".join(argv[:2]))
+            return real(argv)
+        monkeypatch.setattr("orglens.sessions.run_scad", ls)
+        return calls
+
+    def test_view_reindexes_before_reading_sessions(self, runner, tmp_path, monkeypatch):
+        calls = self._calls(monkeypatch)
+        result = runner.invoke(cli, ["view", "--out", str(tmp_path / "v.html"), "--no-open"],
+                               env=self._env(tmp_path))
+        assert result.exit_code == 0, result.output
+        assert calls[0] == "reindex" and "session ls" in calls
+
+    def test_no_reindex_skips_it(self, runner, tmp_path, monkeypatch):
+        calls = self._calls(monkeypatch)
+        runner.invoke(cli, ["view", "--out", str(tmp_path / "v.html"), "--no-open",
+                            "--no-reindex"], env=self._env(tmp_path))
+        assert "reindex" not in calls
+
+    def test_a_failed_reindex_still_draws_the_page(self, runner, tmp_path, monkeypatch):
+        self._calls(monkeypatch, fail="database is locked")
+        out = tmp_path / "v.html"
+        result = runner.invoke(cli, ["view", "--out", str(out), "--no-open"],
+                               env=self._env(tmp_path))
+        assert result.exit_code == 0
+        assert out.exists()
+        assert "database is locked" in result.output and "out of date" in result.output
+
+
+#: The real call, taken before the autouse fixture stands it in for a no-op.
+REINDEX = sessions_mod.reindex
+
+
+class TestReindexCall:
+    def test_no_scad_is_not_a_failure(self, monkeypatch):
+        def missing(*a, **k):
+            raise FileNotFoundError("scad")
+        monkeypatch.setattr("orglens.sessions.subprocess.run", missing)
+        assert REINDEX() is None
+
+    def test_a_failure_says_why(self, monkeypatch):
+        import subprocess as sp
+        monkeypatch.setattr("orglens.sessions.subprocess.run",
+                            lambda argv, **k: sp.CompletedProcess(argv, 1, "", "x\nlocked\n"))
+        assert REINDEX() == "locked"
+
+
 class TestViewCommand:
     def test_a_document_under_the_second_root_gets_a_served_link(self, runner, tmp_path):
         """`view` used to build its URL context from `config.docs_root` — the
@@ -1241,7 +1321,40 @@ class TestUnder:
         env = _chain_tree(tmp_path)
         result = runner.invoke(cli, ["list", "--under", "a"], env=env)
         assert result.exit_code == 0, result.output
-        assert _names_listed(result.output) == {"a", "b", "c"}
+        lines = [l for l in result.output.splitlines() if l.strip()]
+        assert lines[0].startswith("a  ")
+        assert {l.split()[0] for l in lines[2:]} == {"b"}
+        assert any(l.startswith("    b › c  ") for l in lines)
+        assert "d" not in {l.split()[0] for l in lines}
+
+    def test_list_blocks_by_the_top_of_the_tree_and_the_branchs_kind(
+            self, runner, tmp_path):
+        """An experiment under a research programme is listed under the
+        programme's kind, as `orglens tree` shows it, with its path."""
+        docs = tmp_path / "docs"
+        for name, kind, parent in (("org", "organization", None),
+                                   ("prog", "research", "org"),
+                                   ("expt", "experiment", "prog"),
+                                   ("proj", "project", "org"),
+                                   ("solo", "project", None)):
+            d = docs / name
+            d.mkdir(parents=True)
+            (d / ".orglens.yml").write_text(
+                f"home: {name}\nunit: {name}\nkind: {kind}\n"
+                + (f"part_of: {parent}\n" if parent else "")
+                + f"homes:\n  - {name}\n")
+            (d / "overview.md").write_text("# Overview\n")
+        result = runner.invoke(cli, ["list"], env=_roots_config(tmp_path, [docs]))
+        assert result.exit_code == 0, result.output
+        out = result.output
+        org = out[out.index("\norg"):]
+        assert "  research:\n" in org and "  project:\n" in org
+        research = org[org.index("  research:"):]
+        research = research[:research.index("  project:")] if "  project:" in research else research
+        assert "    prog  " in research and "    prog › expt  " in research
+        assert "  experiment:" not in out
+        # A unit alone at the top of the tree is grouped by kind, as before.
+        assert "Projects:\n  solo" in out
 
     def test_status_under_a_middle_unit(self, runner, tmp_path):
         env = _chain_tree(tmp_path)
