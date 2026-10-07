@@ -80,6 +80,46 @@ def run_scad(argv: list[str]) -> list[dict]:
     return rows if isinstance(rows, list) else []
 
 
+#: Older than this, a command that lists sessions says so.
+STALE_AFTER_S = 3600
+
+
+def index_status() -> dict | None:
+    """scad's `index status --json`: when its index was last refreshed,
+    without refreshing it. None when scad is missing, older than 0.9.0, or
+    fails: no answer is no warning."""
+    try:
+        done = subprocess.run(["scad", "index", "status", "--json"],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    try:
+        out = json.loads(done.stdout)
+    except ValueError:
+        return None
+    return out if isinstance(out, dict) else None
+
+
+def staleness() -> str | None:
+    """A line saying the index is behind, or None when it is fresh or
+    nobody can say. Nothing reindexes on a timer (scad's choice); a stale
+    index shows running sessions with no turns, and `resume` picks by it."""
+    status = index_status()
+    if status is None or "age_s" not in status:
+        return None
+    age = status.get("age_s")
+    if age is None:
+        return "scad has never indexed its sessions; run `scad reindex`."
+    if age <= STALE_AFTER_S:
+        return None
+    hours = age / 3600
+    when = f"{hours:.0f}h" if hours < 48 else f"{hours / 24:.0f}d"
+    return (f"scad's session index is {when} old, so recent sessions may be "
+            "missing or show no turns; run `scad reindex` (`orglens view` does).")
+
+
 def reindex() -> str | None:
     """Bring scad's session index up to date: `scad reindex`, incremental,
     about a second (measured 2026-10-06). Nothing runs it on a schedule, and

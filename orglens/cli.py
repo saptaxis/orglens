@@ -367,6 +367,7 @@ def _by_organisation(units: list, acts: dict, tree, top: str | None = None):
 def status(under: str | None):
     """Where everything stands — the authored line, dated, beside derived facts."""
     registry, _ = _load_registry()
+    _say_if_stale()
     units = _under(registry, under)
 
     every, by_unit = _sessions_by_unit(registry)
@@ -1363,6 +1364,7 @@ def sessions_cmd(unit_name: str | None, only_none: bool, everything: bool,
     an editor over the JSON. Neither proposes a unit; both only record.
     """
     registry, _ = _load_registry()
+    _say_if_stale()
     every = sessions.all_sessions(registry, EVENTS_DIR)
     short = sessions.short_ids([s.id for s in every])
 
@@ -1461,6 +1463,7 @@ def resume(target: str, name: str | None, prompt: str | None, print_only: bool):
     ran; orglens does no working-directory work of its own.
     """
     registry, _ = _load_registry()
+    _say_if_stale()
     every = sessions.all_sessions(registry, EVENTS_DIR)
 
     session, matches = (None, []) if name else _find_session(every, target)
@@ -1517,6 +1520,14 @@ def _name_the_others(unit: str, others: list, shown: int = 3) -> None:
     more = f" and {len(others) - shown} more" if len(others) > shown else ""
     click.echo(f"also {', '.join(names)}{more}; "
                f"pick one with: orglens resume {unit} NAME", err=True)
+
+
+def _say_if_stale() -> None:
+    """One line on stderr when scad's index is behind. Only the commands that
+    list or pick sessions ask; `view` reindexes instead."""
+    said = sessions.staleness()
+    if said:
+        click.echo(said, err=True)
 
 
 def _warn_if_held_twice(session) -> None:

@@ -684,3 +684,56 @@ def test_scads_own_words_come_back_when_it_refuses(monkeypatch):
                         lambda argv, **k: sp.CompletedProcess(argv, 1, "", "Error: run mv a b\n"))
     with pytest.raises(_sessions.ScadFailed, match="^Error: run mv a b$"):
         OR_SAY(["memos", "ls"])
+
+
+class TestStaleIndex:
+    """Nothing reindexes on a timer; the commands that list or pick sessions
+    say when scad's index is behind."""
+
+    def _age(self, monkeypatch, status):
+        monkeypatch.setattr("orglens.sessions.index_status", lambda: status)
+
+    def test_an_old_index_is_said_by_sessions_resume_and_status(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        home = tmp_path / "code" / "orglens"
+        _setup(tmp_path, monkeypatch, two_root_tree, [_row("abcd1234-full-id", str(home))])
+        monkeypatch.setattr("orglens.cli._scad", lambda argv: 0)
+        self._age(monkeypatch, {"indexed_at": "x", "age_s": 3 * 3600})
+        for argv in (["sessions", "orglens"], ["resume", "abcd1234"], ["status"]):
+            out = CliRunner().invoke(cli, argv).output
+            assert "index is 3h old" in out and "scad reindex" in out, argv
+
+    def test_a_fresh_index_says_nothing(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._age(monkeypatch, {"indexed_at": "x", "age_s": 600})
+        assert "reindex" not in CliRunner().invoke(cli, ["sessions", "orglens"]).output
+
+    def test_never_indexed_is_said(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._age(monkeypatch, {"indexed_at": None, "age_s": None})
+        assert "never indexed" in CliRunner().invoke(cli, ["sessions", "orglens"]).output
+
+    def test_an_old_scad_is_no_warning(
+        self, tmp_path, monkeypatch, two_root_tree, two_root_tree_config
+    ):
+        _setup(tmp_path, monkeypatch, two_root_tree, [])
+        self._age(monkeypatch, None)
+        assert "reindex" not in CliRunner().invoke(cli, ["sessions", "orglens"]).output
+
+
+INDEX_STATUS = _sessions.index_status
+
+
+def test_index_status_reads_scads_json_and_tolerates_an_old_scad(monkeypatch):
+    import subprocess as sp
+    monkeypatch.setattr("orglens.sessions.subprocess.run", lambda argv, **k: sp.CompletedProcess(
+        argv, 0, '{"indexed_at": "2026-10-07T10:53:02+05:30", "age_s": 412}', ""))
+    assert INDEX_STATUS()["age_s"] == 412
+    monkeypatch.setattr("orglens.sessions.subprocess.run", lambda argv, **k: sp.CompletedProcess(
+        argv, 2, "", "Error: No such command 'index'."))
+    assert INDEX_STATUS() is None

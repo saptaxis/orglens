@@ -21,6 +21,7 @@ def no_real_machine_state(tmp_path, monkeypatch):
     monkeypatch.setattr("orglens.sessions.run_scad", fake_scad())
     monkeypatch.setattr("orglens.sessions.run_scad_or_say", fake_scad())
     monkeypatch.setattr("orglens.sessions.reindex", lambda: None)
+    monkeypatch.setattr("orglens.sessions.index_status", lambda: None)
     monkeypatch.setattr("orglens.cli.EVENTS_DIR", tmp_path / "no-events")
     # Per-process caches: one command is one process, but the suite is one
     # process running hundreds of trees.
