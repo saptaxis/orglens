@@ -17,6 +17,13 @@
   kind declares, and `files`, every document by kind. A title is org's
   `#+TITLE:` or markdown's front matter `title:`, else the first heading.
   An editor can jump to a unit's documents from it without scanning.
+- The snapshot cache follows the tree. Each command, and each completion,
+  starts `orglens snapshot --if-stale` detached; it rebuilds only when the
+  tree changed, one at a time, and nothing waits on it. The answer in hand
+  may be one read behind.
+- `snapshot --check` also sees documents: one added, removed or renamed
+  under any home, and one the snapshot lists that was edited or deleted.
+  Before, only markers and driver documents counted. About 0.25 s more.
 - A snapshot finds each unit's documents once, not once per output: 4.4 s on
   the real tree, from 6 s.
 

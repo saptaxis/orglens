@@ -43,6 +43,8 @@ orglens snapshot --stdout --unit <name>         # one unit and everything under 
 orglens snapshot --json [--unit <name>]         # the same facts as data, to compose with
 ```
 
+Every other orglens command refreshes the snapshot in the background when the
+tree has moved, so it is rarely stale for long; `--check` is still the test.
 The snapshot is the tree as one document. `--type`/`--unit` narrow it; the
 unscoped one is 500+ lines. The grammar's own words for what may exist are in
 `references/grammar-reference.md`, generated, never restated here.

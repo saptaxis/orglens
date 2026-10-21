@@ -25,7 +25,7 @@ from pathlib import Path
 
 import click
 
-from orglens import (activity, check as check_module, complete, documents, formats,
+from orglens import (activity, check as check_module, complete, documents, formats, fresh,
                      hide as hide_mod, reference, sessions, tree as tree_mod, view)
 from orglens.config import ORGLENS_HOME, Config
 from orglens.declaration import MARKER
@@ -50,9 +50,12 @@ def _load_config() -> Config:
     return Config.current()
 
 
-def _load_registry() -> tuple[Registry, Config]:
-    """Load config + grammar + registry."""
+def _load_registry(refresh: bool = True) -> tuple[Registry, Config]:
+    """Load config + grammar + registry, and start a background refresh of
+    the snapshot cache if it has gone stale (`fresh`)."""
     config = _load_config()
+    if refresh:
+        fresh.later(config)
     return Registry(config.roots, config.load_grammar()), config
 
 
@@ -1017,23 +1020,34 @@ def check_cmd():
 @click.option("--stdout", is_flag=True, help="Print instead of writing")
 @click.option("--check", is_flag=True,
               help="Say whether the written snapshot is older than the tree; exit 1 if so.")
+@click.option("--if-stale", "if_stale", is_flag=True,
+              help="Write the snapshot only if --check would call it stale.")
 @click.option("--type", "kind", default=None, help="Only units of this kind.",
               shell_complete=complete.kinds)
 @click.option("--unit", "unit_name", default=None, help="Only this unit and the units under it.",
               shell_complete=complete.units)
 @click.option("--json", "as_json", is_flag=True,
               help="The same facts as data, for a program to compose with.")
-def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None,
-             as_json: bool):
+def snapshot(stdout: bool, check: bool, if_stale: bool, kind: str | None,
+             unit_name: str | None, as_json: bool):
     """Generate a snapshot of what is in the tree.
 
     `--type` and `--unit` narrow it; a narrowed snapshot goes to stdout,
     never to the cache, which always holds the whole tree.
     """
-    registry, config = _load_registry()
+    registry, config = _load_registry(refresh=False)
 
     if check:
         sys.exit(_snapshot_check(registry, config))
+    if if_stale:
+        # What the background refresh runs (`fresh.later`); it holds the
+        # lock until the snapshot is written.
+        try:
+            if fresh.stale(registry, config) is not None:
+                _write_snapshot(registry, config)
+        finally:
+            fresh.lock_path(config).unlink(missing_ok=True)
+        return
     if kind is not None and kind not in {u.kind for u in registry.units()}:
         _unknown("kind", kind, sorted({u.kind for u in registry.units()}))
     if as_json:
@@ -1059,38 +1073,12 @@ def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None,
 
 
 def _snapshot_check(registry: Registry, config: Config) -> int:
-    """Whether the snapshot predates any declaration or driver document.
-
-    Those are what the snapshot renders; a document deeper in a unit
-    changes nothing it shows. A missing snapshot is stale, not an error.
-    """
-    output = config.snapshot_path
-    if not output.exists():
-        click.echo(f"stale: no snapshot at {output}")
+    """Whether the written snapshot still matches the tree (`fresh.stale`)."""
+    why = fresh.stale(registry, config, lambda p: str(_relative(p, registry.roots)))
+    if why is not None:
+        click.echo(f"stale: {why}")
         return 1
-    data = config.snapshot_json_path
-    if not data.exists() or data.stat().st_mtime < output.stat().st_mtime:
-        click.echo(f"stale: {data} is missing or older than {output}; completion reads it")
-        return 1
-    written = output.stat().st_mtime
-    newest: tuple[float, Path] | None = None
-    for unit in registry.units():
-        candidates = [unit.declared_at / MARKER]
-        candidates += [f for p in unit.paths
-                       for d in registry.grammar.documents_for(unit.kind)
-                       if (f := formats.existing(p, d, registry.grammar.format)) is not None]
-        for path in candidates:
-            try:
-                mtime = path.stat().st_mtime
-            except OSError:
-                continue
-            if newest is None or mtime > newest[0]:
-                newest = (mtime, path)
-    if newest is not None and newest[0] > written:
-        shown = _relative(newest[1], registry.roots)
-        click.echo(f"stale: {shown} changed after the snapshot was written")
-        return 1
-    click.echo(f"fresh: {output}")
+    click.echo(f"fresh: {config.snapshot_path}")
     return 0
 
 
