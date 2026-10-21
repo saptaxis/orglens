@@ -1176,8 +1176,10 @@ def _refresh_snapshot(registry: Registry, config: Config):
 @click.option("--reindex/--no-reindex", default=True,
               help="Bring scad's session index up to date first (about a second).")
 @click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+@click.option("--json", "as_json", is_flag=True,
+              help="Print the page's rows as data instead of writing the page.")
 def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool,
-             show_hidden: bool):
+             show_hidden: bool, as_json: bool):
     """Render where every unit stands, and open it.
 
     Joins what the tree knows (plans, packets, uncommitted work) with what scad
@@ -1240,6 +1242,10 @@ def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool,
     ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url,
            "link": config.view_link,
            "hidden": len(hidden & {u.name for u in registry.units()})}
+    if as_json:
+        click.echo(json.dumps(view.data(groups, ctx, sessions.unattributed(every)),
+                              indent=2, default=str))
+        return
     page = view.render(groups, ctx, unattributed=sessions.unattributed(every))
     path = view.write(page, Path(out))
     click.echo(f"wrote {path}")

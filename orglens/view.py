@@ -711,6 +711,79 @@ def _chips(facet: str, values: list[tuple[str, str, int | None]], colour: bool =
     return "".join(out)
 
 
+def data(
+    groups: list[tuple[str, list[dict]]], ctx: dict, unattributed: list | None = None,
+    now: float | None = None,
+) -> dict:
+    """The page's rows as data, for a reader that draws its own (an Emacs
+    buffer): what `render` shows, placed the same way, nothing styled.
+
+    Units in Recent's order: by band, then by path. Each carries its band in
+    both modes, the clocks that place it, what is running and waiting, its
+    status line and its documents' paths; times are epoch seconds.
+    """
+    now = time.time() if now is None else now
+    rows = [r for _, group in groups for r in group]
+    shape = tree.build({r["name"]: r.get("part_of") for r in rows})
+
+    def above(name: str) -> list[str]:
+        out: list[str] = []
+        while name in shape.parent:
+            name = shape.parent[name]
+            out.insert(0, name)
+        return out
+
+    def unit(row: dict) -> dict:
+        a = row["activity"]
+        placed = placing(a, "session", now)
+        return {
+            "name": row["name"],
+            "kind": row.get("kind"),
+            "part_of": row.get("part_of"),
+            "above": above(row["name"]),
+            "path": str(row["path"]),
+            "status": row.get("why"),
+            "status_edited": row.get("why_edited"),
+            "status_stale": stale(a, row.get("why_edited"), now),
+            "band": {"session": band(a, now, "session"), "edit": band(a, now, "edit")},
+            "placed_by": {"clock": placed[0], "at": placed[1]} if placed else None,
+            "clocks": [{"clock": c, "at": at} for c, at in clocks(a, now)],
+            "live": a.live,
+            "waiting": a.needs,
+            "blocked": a.blocked,
+            "sessions": a.sessions,
+            "agents": a.agents,
+            "recent": a.recent,
+            "last_turn": a.last_turn,
+            "memos": a.memos,
+            "plan": a.plan,
+            "packets": a.packets,
+            "dirty": a.dirty,
+            "documents": {found[0].kind: [str(d.path) for d in found]
+                          for _, found in row.get("artifacts", []) if found},
+            "loose": [str(p) for p in row.get("docs", [])],
+        }
+
+    order = {b: i for i, b in enumerate(BANDS)}
+    units = sorted((unit(r) for r in rows),
+                   key=lambda u: (order[u["band"]["session"]], "/".join([*u["above"], u["name"]])))
+    return {
+        "rendered": int(now),
+        "bands": list(BANDS),
+        "running": sum(r["activity"].live_sessions for r in rows),
+        "waiting": sum(r["activity"].waiting for r in rows),
+        "hidden": ctx.get("hidden", 0),
+        "units": units,
+        "unattributed": [
+            {"id": s.id, "agent": s.agent, "name": s.label, "cwd": s.cwd,
+             "at": (s.when // 1000) if s.when else None, "turns": s.turns,
+             "live": s.live, "open": s.open,
+             "said": " ".join(((s.last_turn or {}).get("text") or "").split())[:160]}
+            for s in listed(unattributed or [])
+        ],
+    }
+
+
 def render(
     groups: list[tuple[str, list[dict]]], ctx: dict, unattributed: list | None = None,
     now: float | None = None,

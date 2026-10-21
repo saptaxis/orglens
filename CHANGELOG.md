@@ -10,6 +10,14 @@
   `where` shows them as `also:`, `list` in brackets, and `tree --json` and
   the snapshot carry them. `check` reports an alias claimed by two units.
 
+### View
+
+- `view --json` prints the page's rows as data instead of writing the page:
+  each unit's band in both modes, the clock that placed it and the others,
+  running and waiting sessions, the status line and whether it is stale,
+  memos, and document paths by kind, in Recent's order; then the
+  unattributed sessions. It reindexes scad first, as the page does.
+
 ### Snapshot
 
 - `snapshot.json` (and `snapshot --json`) gives each unit's documents with

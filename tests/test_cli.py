@@ -1166,6 +1166,15 @@ class TestViewReindexes:
                             "--no-reindex"], env=self._env(tmp_path))
         assert "reindex" not in calls
 
+    def test_json_prints_the_rows_and_writes_no_page(self, runner, tmp_path, monkeypatch):
+        self._calls(monkeypatch)
+        out = tmp_path / "v.html"
+        result = runner.invoke(cli, ["view", "--json", "--out", str(out)],
+                               env=self._env(tmp_path))
+        assert result.exit_code == 0, result.output
+        assert [u["name"] for u in json.loads(result.output)["units"]] == ["sample"]
+        assert not out.exists()
+
     def test_a_failed_reindex_still_draws_the_page(self, runner, tmp_path, monkeypatch):
         self._calls(monkeypatch, fail="database is locked")
         out = tmp_path / "v.html"
