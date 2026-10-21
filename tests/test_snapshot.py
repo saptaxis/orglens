@@ -192,3 +192,9 @@ class TestTitles:
         assert formats.title(tmp_path / "a.org") == "A"
         assert formats.title(tmp_path / "b.txt") is None
         assert formats.title(tmp_path / "gone.md") is None
+
+
+def test_each_unit_says_where_its_marker_is(registry, config, units_tree):
+    from orglens.snapshot import snapshot_data
+    units = {u["name"]: u for u in snapshot_data(registry, config)["units"]}
+    assert units["freightify"]["declared_at"] == str(units_tree / "clients/freightify")

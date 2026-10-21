@@ -146,6 +146,8 @@ def _unit_data(registry: Registry, unit) -> dict:
         "aliases": list(unit.aliases),
         "kind": unit.kind,
         "part_of": unit.part_of,
+        # The folder whose marker declared it: where `where` stops walking up.
+        "declared_at": str(unit.declared_at),
         "status": status.text if status else None,
         "homes": [str(p) for p in unit.paths],
         "contains": [c.name for c in registry.parts_of(unit)],
