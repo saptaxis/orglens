@@ -200,6 +200,9 @@ class Report:
     stale: list[Stale] = field(default_factory=list)
     #: Sessions with two live processes on one id.
     held: list[Held] = field(default_factory=list)
+    #: (name, the units it names): an alias that is another unit's name or
+    #: alias, so it resolves to the unit's own name first, or to neither.
+    clashes: list[tuple[str, list[str]]] = field(default_factory=list)
 
     def __bool__(self) -> bool:
         return bool(
@@ -219,6 +222,7 @@ class Report:
             or self.unlisted
             or self.stale
             or self.held
+            or self.clashes
         )
 
 
@@ -476,7 +480,22 @@ def run(registry: Registry, sessions: list | None = None) -> Report:
         unlisted=unlisted,
         stale=stale,
         held=held,
+        clashes=_clashes(units),
     )
+
+
+def _clashes(units: list) -> list[tuple[str, list[str]]]:
+    """Every alias claimed twice: by two units, or by a unit's alias and
+    another unit's name. A unit naming itself is not a clash."""
+    claims: dict[str, set[str]] = {}
+    for unit in units:
+        claims.setdefault(unit.name, set()).add(unit.name)
+    for unit in units:
+        for alias in unit.aliases:
+            claims.setdefault(alias, set()).add(unit.name)
+    aliased = {a for u in units for a in u.aliases}
+    return [(name, sorted(owners)) for name, owners in sorted(claims.items())
+            if name in aliased and len(owners) > 1]
 
 
 def _nav_omits(nav: Path, name: str) -> bool:

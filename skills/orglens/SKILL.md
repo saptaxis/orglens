@@ -61,6 +61,9 @@ orglens find spec --grep "x" --json             # path, kind, unit, matches
 orglens where [<name>]                          # roots, and which unit a name or this directory is
 ```
 
+A unit may answer to other names (`aliases:` in its marker; `where` shows
+them as `also:`); any of them works wherever a unit is asked for.
+
 The kind is the grammar's word for where to look; `--in` is the tree's word
 where the grammar has none yet. Fire several in one turn rather than scanning.
 `orglens tree [<unit>]` shows the units as a tree; `--under <unit>` on `list`,

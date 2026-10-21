@@ -33,6 +33,10 @@ class Marker:
     #: runtime; inventing one for a single consumer would be a translation
     #: layer nobody asked for.
     runtime: dict | None = None
+    #: Other names the person calls the unit by (`aliases: [scad]`). A name
+    #: resolves to the unit by any of them; the unit's own name is still
+    #: `unit:`, and every listing shows that one.
+    aliases: tuple[str, ...] = ()
 
     @property
     def declares(self) -> bool:
@@ -68,4 +72,15 @@ def read_marker(directory: Path) -> Marker | None:
         part_of=data.get("part_of"),
         homes=homes,
         runtime=data.get("runtime"),
+        aliases=_names(data.get("aliases")),
     )
+
+
+def _names(value) -> tuple[str, ...]:
+    """`aliases:` as a list, or one name written bare. Anything else is no
+    alias: a malformed key must not hide the unit."""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(v).strip() for v in value if str(v).strip())

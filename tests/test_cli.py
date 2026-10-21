@@ -1396,8 +1396,9 @@ class TestTreeCommand:
         result = runner.invoke(cli, ["tree", "b", "--json"], env=env)
         assert result.exit_code == 0, result.output
         assert json.loads(result.output) == [
-            {"name": "b", "kind": "project", "status": "b going", "children": [
-                {"name": "c", "kind": "project", "status": "c going", "children": []},
+            {"name": "b", "aliases": [], "kind": "project", "status": "b going", "children": [
+                {"name": "c", "aliases": [], "kind": "project", "status": "c going",
+                 "children": []},
             ]},
         ]
 

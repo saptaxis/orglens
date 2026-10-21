@@ -37,12 +37,19 @@ def _snapshot_data() -> dict:
 
 def unit_names() -> list[tuple[str, str]]:
     """Every unit in the snapshot, with its status line as the hint —
-    seeing it is most of what choosing between two units needs."""
+    seeing it is most of what choosing between two units needs. An alias is
+    offered too, its hint naming the unit it stands for."""
     out = {}
     for unit in _snapshot_data().get("units", []):
         name = str(unit.get("name") or "").strip()
-        if name:
-            out.setdefault(name, str(unit.get("status") or "")[:70])
+        if not name:
+            continue
+        status = str(unit.get("status") or "")
+        out.setdefault(name, status[:70])
+        for alias in unit.get("aliases") or []:
+            alias = str(alias).strip()
+            if alias:
+                out.setdefault(alias, f"{name}: {status}"[:70])
     return sorted(out.items())
 
 
@@ -190,6 +197,7 @@ def session_names_of_unit(ctx, param, incomplete):
     unit = params.get("target") or params.get("unit_name")
     if not unit:
         return []
+    unit = _canonical(unit)
     try:
         import time
         from orglens.events import attributions
@@ -216,6 +224,15 @@ def session_names_of_unit(ctx, param, incomplete):
                 "live" if row.get("live") else "", str(row["id"])[:8]]
         pairs.append((str(row["name"]), " · ".join(h for h in hint if h)))
     return _items(pairs, incomplete)
+
+
+def _canonical(name: str) -> str:
+    """The unit's own name for one typed as an alias, from the snapshot;
+    the attributions are written under the unit's name."""
+    for unit in _snapshot_data().get("units", []):
+        if name in (unit.get("aliases") or []):
+            return str(unit.get("name") or name)
+    return name
 
 
 def _age(seconds: float) -> str:

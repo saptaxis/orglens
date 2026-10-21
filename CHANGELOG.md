@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Units
+
+- A unit can answer to other names: `aliases: [scad]` in its marker. Every
+  command that takes a unit takes an alias, an exact alias before another
+  unit's prefix; completion offers aliases with the unit they stand for.
+  `where` shows them as `also:`, `list` in brackets, and `tree --json` and
+  the snapshot carry them. `check` reports an alias claimed by two units.
+
 ### Skills
 
 - `orglens-adapt` is no longer shipped. It reshaped a unit's driver document

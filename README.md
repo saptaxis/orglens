@@ -153,6 +153,7 @@ its documents:
 unit: lunar-lander
 kind: project
 part_of: physics-priors
+aliases: [lander]                      # other names it is called by
 homes:
   - lunar-lander                       # a code repository
   - docs/projects/lunar-lander         # its documents
@@ -162,6 +163,11 @@ homes:
 because of it. `part_of` is the only way one unit belongs to another. `homes` are
 named repositories, optionally with a path inside one — the marker's own
 directory is always a home whether or not it is listed.
+
+`aliases` are other names the unit answers to: every command that takes a unit
+takes an alias, completion offers them, and `list`, `where`, `tree --json` and
+the snapshot show them beside the unit's own name. `check` reports an alias
+another unit also claims, as its name or as an alias.
 
 Homes can be shared: one repository is a home of two units when both work in it,
 and each sees its own documents. Inside a shared home, `where` answers the first

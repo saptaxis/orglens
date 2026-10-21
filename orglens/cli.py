@@ -330,7 +330,8 @@ def list(kind_filter: str | None, under: str | None, show_hidden: bool):
             # The kind as markers write it, as `tree` shows it.
             click.echo(f"  {kind}:" if root else f"\n{_heading(kind)}:")
             for unit, path in members:
-                click.echo(f"{indent}{path}{_list_tail(registry, unit, acts)}")
+                also = f" [{', '.join(unit.aliases)}]" if unit.aliases else ""
+                click.echo(f"{indent}{path}{also}{_list_tail(registry, unit, acts)}")
     _say_hidden(left_out)
 
 
@@ -494,7 +495,8 @@ def tree_cmd(unit_name: str | None, as_json: bool, show_hidden: bool):
 
     if as_json:
         def node(name: str) -> dict:
-            return {"name": name, "kind": by_name[name].kind, "status": status_of(name)}
+            return {"name": name, "aliases": [*by_name[name].aliases],
+                    "kind": by_name[name].kind, "status": status_of(name)}
         tops = [start] if start is not None else shape.top
         click.echo(json.dumps([tree_mod.nested(shape, t, node) for t in tops], indent=2))
         return
@@ -889,6 +891,8 @@ def where_cmd(name: str | None):
             return
 
     click.echo(f"unit:   {unit.name}  ({unit.kind})")
+    if unit.aliases:
+        click.echo(f"also:   {', '.join(unit.aliases)}")
     if unit.part_of:
         click.echo(f"in:     {unit.part_of}")
 
@@ -951,6 +955,9 @@ def check_cmd():
     for kind in report.unmatched:
         glob = registry.grammar.artifact_types[kind].find
         click.echo(f"no {kind} found anywhere (looked for {glob})")
+
+    for name, owners in report.clashes:
+        click.echo(f"{name}: an alias claimed by more than one unit — {', '.join(owners)}")
 
     for dup in report.duplicates:
         shown = ", ".join(str(_relative(p, registry.roots)) for p in dup.paths)

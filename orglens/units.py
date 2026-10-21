@@ -33,6 +33,8 @@ class Unit:
     #: scad's own words for a container, passed through verbatim by
     #: `scadconfig.render`. `None` when the declaration carries none.
     runtime: dict | None = None
+    #: Other names it answers to, from the marker's `aliases:`.
+    aliases: tuple[str, ...] = ()
 
     @property
     def paths(self) -> list[Path]:
@@ -110,6 +112,7 @@ class Registry:
                     part_of=marker.part_of,
                     declared_at=candidate.path,
                     runtime=marker.runtime,
+                    aliases=marker.aliases,
                 )
             )
         self._units = sorted(found, key=lambda u: u.name)
@@ -153,15 +156,26 @@ class Registry:
             part_of=marker.part_of,
             declared_at=directory,
             runtime=marker.runtime,
+            aliases=marker.aliases,
         )
 
     def resolve(self, name: str) -> Unit:
-        """Resolve a partial name to a single unit."""
+        """Resolve a partial name to a single unit.
+
+        An alias is a name like any other: exactly first, the unit's name
+        before an alias, then by prefix and by substring over both. A unit
+        matching by two of its names is still one match.
+        """
         units = self.units()
+
+        def matching(test) -> list[Unit]:
+            return [u for u in units if any(test(n) for n in (u.name, *u.aliases))]
+
         for group in (
             [u for u in units if u.name == name],
-            [u for u in units if u.name.startswith(name)],
-            [u for u in units if name in u.name],
+            [u for u in units if name in u.aliases],
+            matching(lambda n: n.startswith(name)),
+            matching(lambda n: name in n),
         ):
             if len(group) == 1:
                 return group[0]

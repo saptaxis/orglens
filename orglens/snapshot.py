@@ -69,6 +69,8 @@ def generate_snapshot(
             status = _status_of(registry, unit)
             suffix = f" — {status.text}" if status else ""
             lines += [f"### {unit.name}{suffix}", ""]
+            if unit.aliases:
+                lines += ["Also: " + ", ".join(unit.aliases), ""]
             if unit.part_of:
                 lines += [f"In: {unit.part_of}", ""]
             lines += ["Homes: " + ", ".join(f"`{p}`" for p in unit.paths), ""]
@@ -142,6 +144,7 @@ def _unit_data(registry: Registry, unit) -> dict:
     status = _status_of(registry, unit)
     return {
         "name": unit.name,
+        "aliases": list(unit.aliases),
         "kind": unit.kind,
         "part_of": unit.part_of,
         "status": status.text if status else None,
