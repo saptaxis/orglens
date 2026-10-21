@@ -10,6 +10,16 @@
   `where` shows them as `also:`, `list` in brackets, and `tree --json` and
   the snapshot carry them. `check` reports an alias claimed by two units.
 
+### Snapshot
+
+- `snapshot.json` (and `snapshot --json`) gives each unit's documents with
+  their paths and titles: `drivers`, the driver document and the others its
+  kind declares, and `files`, every document by kind. A title is org's
+  `#+TITLE:` or markdown's front matter `title:`, else the first heading.
+  An editor can jump to a unit's documents from it without scanning.
+- A snapshot finds each unit's documents once, not once per output: 4.4 s on
+  the real tree, from 6 s.
+
 ### Skills
 
 - `orglens-adapt` is no longer shipped. It reshaped a unit's driver document

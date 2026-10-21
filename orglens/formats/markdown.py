@@ -28,6 +28,20 @@ def status(text: str) -> str | None:
     return clean(plain(match.group(1))) if match else None
 
 
+#: A front matter `title:`, then the first `# ` heading.
+FRONT = re.compile(r"\A---[ \t]*\n(.*?)\n---[ \t]*$", re.MULTILINE | re.DOTALL)
+FRONT_TITLE = re.compile(r"^title:[ \t]*['\"]?(.*?)['\"]?[ \t]*$", re.MULTILINE)
+HEADING = re.compile(r"^#[ \t]+(\S.*?)[ \t#]*$", re.MULTILINE)
+
+
+def title(text: str) -> str | None:
+    front = FRONT.match(text)
+    if front and (named := FRONT_TITLE.search(front.group(1))):
+        return plain(named.group(1)).strip() or None
+    match = HEADING.search(FENCE.sub("", text))
+    return plain(match.group(1)).strip() or None if match else None
+
+
 def stub(title: str, name: str, today: str) -> str:
     return (
         f"# {title}\n\n"
@@ -43,4 +57,5 @@ def seed(title: str, text: str) -> str:
     return f"# {title}\n" + (f"\n{text}\n" if text else "")
 
 
-FORMAT = Format(name="md", suffix=".md", status=status, stub=stub, seed=seed)
+FORMAT = Format(name="md", suffix=".md", status=status, stub=stub, seed=seed,
+                title=title)
