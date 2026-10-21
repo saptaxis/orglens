@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Emacs
+
+- `emacs/orglens.el`: units, their homes, and their documents with titles, in
+  Emacs, read from `snapshot.json` and never from the tree. Functions first
+  (`orglens-units`, `orglens-unit` by name or alias, `orglens-unit-at`,
+  `orglens-units-at`, `orglens-unit-above`, `orglens-unit-and-below`,
+  `orglens-files`, `orglens-title`); three commands bound to no key
+  (`orglens-find-unit`, `orglens-find-document`, `orglens-which-unit`). Each
+  read starts `snapshot --if-stale` in the background. Emacs 29 or later, no
+  packages. `bootstrap` prints the two lines for an init file.
+- The snapshot gives each unit's `declared_at`, the folder of its marker.
+
 ### Units
 
 - A unit can answer to other names: `aliases: [scad]` in its marker. Every

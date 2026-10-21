@@ -200,6 +200,9 @@ orglens reference --out <path>                  # regenerate the grammar referen
 `check` reports and never gates. Everything it names is a person's one line to
 add — a marker, a grammar word, a nav entry — not something to work around.
 
+In Emacs, `emacs/orglens.el` reads the same snapshot: `(orglens-unit-at FILE)`,
+`(orglens-files :unit U :kind K)` and the rest (README, *Emacs*).
+
 ## Flows
 
 **Start work on a unit:** `where <unit>` → `status | grep <unit>` → `start <unit> --home <name>`.

@@ -143,6 +143,42 @@ same way:
 Skills install as copies, so re-run `bootstrap` after editing a `SKILL.md`. See
 [`capabilities/README.md`](capabilities/README.md) for the capability layout.
 
+## Emacs
+
+`emacs/orglens.el` gives Emacs what orglens knows: the units, their homes, and
+their documents with titles. It reads the snapshot's data
+(`~/.orglens/cache/snapshot.json`, or beside the config `ORGLENS_CONFIG` names),
+never the tree, and starts `orglens snapshot --if-stale` in the background as
+it reads. Emacs 29 or later; no packages.
+
+```elisp
+(add-to-list 'load-path "~/code/orglens/emacs")   ; `bootstrap` prints this line
+(require 'orglens)
+```
+
+A unit is a plist (`:name :aliases :kind :part-of :dir :status :homes`).
+
+| Function | Gives |
+|---|---|
+| `(orglens-units)` | Every unit, by name |
+| `(orglens-unit NAME)` | One, by name or alias |
+| `(orglens-unit-homes NAME)` | Its homes |
+| `(orglens-unit-at FILE)` | The unit FILE belongs to, as `orglens where` answers |
+| `(orglens-units-at FILE)` | Every unit with a home holding FILE, deepest first |
+| `(orglens-unit-above NAME)`, `(orglens-unit-and-below NAME)` | Up and down the tree by `part_of` |
+| `(orglens-files :unit U :kind K)` | Document paths; `U` a name or a list, `K` a kind or `"driver"` |
+| `(orglens-title FILE)` | A listed document's title |
+
+Three commands, bound to no key: `orglens-find-unit` opens a unit's driver
+document, `orglens-find-document` one of its documents by kind and title, and
+`orglens-which-unit` says which unit the current file is in. Everything else
+— agenda files, perspectives, capture — is the person's configuration, built
+from the functions:
+
+```elisp
+(setq org-agenda-files (orglens-files :unit "orglens" :kind "plan"))
+```
+
 ## Declaring a unit
 
 A unit is one body of effort with a goal — a project, a client engagement, a
