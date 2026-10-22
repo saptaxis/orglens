@@ -21,6 +21,10 @@
   unit's prefix; completion offers aliases with the unit they stand for.
   `where` shows them as `also:`, `list` in brackets, and `tree --json` and
   the snapshot carry them. `check` reports an alias claimed by two units.
+- `where NAME` answers only the unit: no roots and no `here:`. It gives a
+  `marker:` line, and each home carries its commit state on its own line
+  (`repos:` is gone), naming the repository when the home sits inside a
+  larger one. Bare `where` counts the roots; `--roots` lists them.
 
 ### View
 

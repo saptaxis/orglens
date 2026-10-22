@@ -60,7 +60,7 @@ orglens find doc <unit> --in notes              # a folder the grammar has no na
 orglens find plan --since 2w                    # touched lately
 orglens find article --waiting                  # packets with a gate open, and the question
 orglens find spec --grep "x" --json             # path, kind, unit, matches
-orglens where [<name>]                          # roots, and which unit a name or this directory is
+orglens where [<name>]                          # which unit a name or this directory is; marker, homes, uncommitted
 ```
 
 A unit may answer to other names (`aliases:` in its marker; `where` shows

@@ -828,89 +828,100 @@ ABSENT = ("is under none of your roots on this machine — "
 
 
 def _home_line(home) -> str:
-    shown = str(home.path) if home.path is not None else "absent"
-    return f"{home.name:<40} {shown:<32} ({home.how})"
+    """One home: where it is, how it resolved, and whether its files are
+    safely committed.
 
-
-def _repo_line(home) -> str:
-    """Whether this home's files are safely committed, and where.
-
-    Anything that rewrites a unit's documents checks this first: git is the
-    whole backup model, and it only works if the current version is in it. A unit can
-    span several repositories now, so this is one line per home rather than
-    the single `repo:` line `where` used to print — dropping that block
-    silently turned the safety gate into a no-op, since empty output reads
-    as clean.
+    Anything that rewrites a unit's documents checks the last part first:
+    git is the whole backup model, and it only works if the current version
+    is in it. A unit spans several repositories, so each home says so for
+    itself; an empty answer would read as clean. The repository is named
+    only when it is not the home itself (a folder inside a larger repo).
     """
     if home.path is None:
-        return f"{home.name:<40} ({ABSENT})"
+        return f"{home.name:<40} absent ({ABSENT})"
+    head = f"{home.name:<40} {str(home.path):<32} ({home.how})"
     root = activity._repo_root(home.path)
     if root is None:
-        return f"{home.name:<40} none — nothing is backing this up"
+        return f"{head}  (none — nothing is backing this up)"
     dirty = activity._dirty(root, home.path)
     status = f"{dirty} uncommitted" if dirty else "clean"
-    return f"{home.name:<40} {str(root):<32} ({status})"
+    if Path(root).resolve() != Path(home.path).resolve():
+        status += f", in the {Path(root).name} repo"
+    return f"{head}  ({status})"
 
 
-@cli.command(name="where")
-@click.argument("name", required=False, shell_complete=complete.units)
-def where_cmd(name: str | None):
-    """Announce which roots, and which unit a name or this directory is in.
-
-    Everything else assumes an answer to this. Anything acting on a unit — a
-    skill restructuring a document, a check on whether work is committed —
-    needs an absolute path and knows what it is acting on, and guessing
-    either fails silently rather than loudly.
-    """
-    registry, _ = _load_registry()
-
-    source = os.environ.get("ORGLENS_CONFIG") or str(ORGLENS_HOME / "config.yaml")
-    click.echo(f"roots:  {registry.roots[0]}  (config: {source})")
-    for extra in registry.roots[1:]:
-        click.echo(f"        {extra}")
-
-    here = Path.cwd().resolve()
-    shown_here = None
-    for root in registry.roots:
-        try:
-            shown_here = here.relative_to(Path(root).expanduser().resolve())
-            break
-        except ValueError:
-            continue
-    click.echo(
-        f"here:   {shown_here}" if shown_here is not None else "here:   outside the roots"
-    )
-
-    if name:
-        try:
-            unit = registry.resolve(name)
-        except ValueError as exc:
-            click.echo(str(exc), err=True)
-            sys.exit(1)
-    else:
-        unit = registry.at(here)
-        if unit is None:
-            click.echo("unit:   none — this directory is not inside a declared unit")
-            return
-
+def _show_unit(unit: Unit) -> None:
+    """The unit, what it is part of, its marker and its homes."""
     click.echo(f"unit:   {unit.name}  ({unit.kind})")
     if unit.aliases:
         click.echo(f"also:   {', '.join(unit.aliases)}")
     if unit.part_of:
         click.echo(f"in:     {unit.part_of}")
-
+    click.echo(f"marker: {unit.declared_at / MARKER}")
     if not unit.homes:
         click.echo("homes:  (none declared)")
         return
-
     first, *rest = unit.homes
     click.echo(f"homes:  {_home_line(first)}")
     for home in rest:
         click.echo(f"        {_home_line(home)}")
 
-    click.echo(f"repos:  {_repo_line(first)}")
-    for home in rest:
-        click.echo(f"        {_repo_line(home)}")
+
+def _unit_named_or_here(registry: Registry, name: str | None) -> Unit | None:
+    """The unit a name resolves to, exiting on a bad name; or the unit this
+    directory is in, None when it is in none."""
+    if not name:
+        return registry.at(Path.cwd().resolve())
+    try:
+        return registry.resolve(name)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+
+@cli.command(name="where")
+@click.argument("name", required=False, shell_complete=complete.units)
+@click.option("--roots", "all_roots", is_flag=True, help="List every root.")
+def where_cmd(name: str | None, all_roots: bool):
+    """Announce which unit a name or this directory is in, and its homes.
+
+    Everything else assumes an answer to this. Anything acting on a unit — a
+    skill restructuring a document, a check on whether work is committed —
+    needs an absolute path and knows what it is acting on, and guessing
+    either fails silently rather than loudly. Named, it answers only that;
+    bare, it first says which config and roots it is reading and where this
+    directory stands among them.
+    """
+    registry, _ = _load_registry()
+
+    if not name or all_roots:
+        source = os.environ.get("ORGLENS_CONFIG") or str(ORGLENS_HOME / "config.yaml")
+        roots = registry.roots
+        if all_roots or len(roots) == 1:
+            click.echo(f"roots:  {roots[0]}  (config: {source})")
+            for extra in roots[1:]:
+                click.echo(f"        {extra}")
+        else:
+            click.echo(f"roots:  {len(roots)}, --roots lists them  (config: {source})")
+
+    if not name:
+        here = Path.cwd().resolve()
+        shown_here = None
+        for root in registry.roots:
+            try:
+                shown_here = here.relative_to(Path(root).expanduser().resolve())
+                break
+            except ValueError:
+                continue
+        click.echo(
+            f"here:   {shown_here}" if shown_here is not None else "here:   outside the roots"
+        )
+
+    unit = _unit_named_or_here(registry, name)
+    if unit is None:
+        click.echo("unit:   none — this directory is not inside a declared unit")
+        return
+    _show_unit(unit)
 
 
 @cli.command(name="check")
