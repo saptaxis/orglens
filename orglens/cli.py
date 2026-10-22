@@ -28,7 +28,7 @@ import click
 from orglens import (activity, check as check_module, complete, documents, formats, fresh,
                      hide as hide_mod, reference, sessions, tree as tree_mod, view)
 from orglens.config import ORGLENS_HOME, Config
-from orglens.declaration import MARKER
+from orglens.declaration import MARKER, read_marker
 from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
                             this_machine)
 from orglens.homes import Home, repo_of
@@ -922,6 +922,62 @@ def where_cmd(name: str | None, all_roots: bool):
         click.echo("unit:   none — this directory is not inside a declared unit")
         return
     _show_unit(unit)
+
+
+@cli.command(name="marker")
+@click.argument("name", required=False, shell_complete=complete.units)
+@click.option("--edit", is_flag=True,
+              help="Open it in $VISUAL or $EDITOR, then check what was saved.")
+def marker_cmd(name: str | None, edit: bool):
+    """Print a unit's marker, the `.orglens.yml` that declares it.
+
+    With no name, the unit this directory is in. `--edit` opens the file in
+    the terminal's editor and, once it closes, reads it back: a marker that
+    no longer parses drops its unit from the tree without a word anywhere
+    else, so this is where it is said.
+    """
+    registry, _ = _load_registry()
+    unit = _unit_named_or_here(registry, name)
+    if unit is None:
+        click.echo("not inside a declared unit; name one", err=True)
+        sys.exit(1)
+    path = unit.declared_at / MARKER
+
+    if not edit:
+        click.echo(f"# {path}")
+        click.echo(path.read_text(), nl=False)
+        return
+
+    click.edit(filename=str(path))
+    problems = _marker_problems(path)
+    if problems:
+        for problem in problems:
+            click.echo(f"{path}: {problem}", err=True)
+        sys.exit(1)
+    registry, _ = _load_registry()
+    marker = read_marker(path.parent)
+    _show_unit(registry.resolve(marker.unit))
+
+
+def _marker_problems(path: Path) -> list[str]:
+    """What is wrong with a marker just saved, as the tree will read it."""
+    import yaml
+    try:
+        data = yaml.safe_load(path.read_text())
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        return [f"does not parse, so its unit is gone from the tree: {exc}"]
+    if not isinstance(data, dict) or not data.get("unit"):
+        return ["has no `unit:`, so it declares nothing"]
+    units = _load_registry(refresh=False)[0].units()
+    names = {u.name for u in units} | {a for u in units for a in u.aliases}
+    problems = []
+    if data.get("part_of") and data["part_of"] not in names:
+        problems.append(f"part_of: {data['part_of']} names no unit")
+    for alias, owners in check_module._clashes(units):
+        if data["unit"] in owners:
+            problems.append(f"{alias}: an alias claimed by more than one unit — "
+                            f"{', '.join(owners)}")
+    return problems
 
 
 @cli.command(name="check")

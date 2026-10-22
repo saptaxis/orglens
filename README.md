@@ -122,6 +122,7 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 | `orglens dismiss SESSION-ID\|--under PATH [--why TEXT]` | Say a session, or every unclaimed one under a path, belongs to no unit |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
 | `orglens where [NAME] [--roots]` | Which unit a name or this directory resolves to: its marker, and each home with how it resolved and what is uncommitted. Bare, it first says which config, how many roots (`--roots` lists them), and where this directory stands |
+| `orglens marker [UNIT] [--edit]` | Print a unit's `.orglens.yml`; `--edit` opens it in `$VISUAL` or `$EDITOR`, then says if what was saved no longer parses, names an unknown `part_of`, or claims a taken alias |
 | `orglens hide UNIT...`, `orglens unhide UNIT...\|--all` | Keep units off the screen, each with what is under it, until unhidden: a `hide:` list in the config. `view`, `tree`, `list`, `status` and `sessions` leave them out and say how many (`--show-hidden` for one run); `--json`, `snapshot`, `find` and `where` keep them, and naming a hidden unit shows it |
 | `orglens workflow next\|done\|note\|goto PACKET` | Run a capability's workflow over a packet, one pass at a time, with a human between. See `capabilities/tutorial/README.md` |
 

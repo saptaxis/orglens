@@ -61,6 +61,7 @@ orglens find plan --since 2w                    # touched lately
 orglens find article --waiting                  # packets with a gate open, and the question
 orglens find spec --grep "x" --json             # path, kind, unit, matches
 orglens where [<name>]                          # which unit a name or this directory is; marker, homes, uncommitted
+orglens marker [<unit>] [--edit]                # print the unit's .orglens.yml, or edit it and check it
 ```
 
 A unit may answer to other names (`aliases:` in its marker; `where` shows

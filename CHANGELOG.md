@@ -21,6 +21,10 @@
   unit's prefix; completion offers aliases with the unit they stand for.
   `where` shows them as `also:`, `list` in brackets, and `tree --json` and
   the snapshot carry them. `check` reports an alias claimed by two units.
+- `orglens marker [UNIT]` prints the unit's marker; `--edit` opens it in
+  `$VISUAL` or `$EDITOR` and reads it back, saying when it no longer
+  parses (which drops the unit from the tree), names an unknown
+  `part_of`, or claims a taken alias.
 - `where NAME` answers only the unit: no roots and no `here:`. It gives a
   `marker:` line, and each home carries its commit state on its own line
   (`repos:` is gone), naming the repository when the home sits inside a
