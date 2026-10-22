@@ -73,7 +73,7 @@ def generate_snapshot(
                 lines += ["Also: " + ", ".join(unit.aliases), ""]
             if unit.part_of:
                 lines += [f"In: {unit.part_of}", ""]
-            lines += ["Homes: " + ", ".join(f"`{p}`" for p in unit.paths), ""]
+            lines += ["Homes: " + ", ".join(f"`{p}`" for p in unit.every_path), ""]
 
             children = registry.parts_of(unit)
             if children:
@@ -149,7 +149,7 @@ def _unit_data(registry: Registry, unit) -> dict:
         # The folder whose marker declared it: where `where` stops walking up.
         "declared_at": str(unit.declared_at),
         "status": status.text if status else None,
-        "homes": [str(p) for p in unit.paths],
+        "homes": [str(p) for p in unit.every_path],
         "contains": [c.name for c in registry.parts_of(unit)],
         "directories": [d.name for d in documents.subdirectories(unit)],
         "documents": [d.name for d in documents.loose(unit)],

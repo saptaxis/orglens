@@ -839,7 +839,8 @@ def _home_line(home) -> str:
     """
     if home.path is None:
         return f"{home.name:<40} absent ({ABSENT})"
-    head = f"{home.name:<40} {str(home.path):<32} ({home.how})"
+    how = f"{home.how}, data" if home.data else home.how
+    head = f"{home.name:<40} {str(home.path):<32} ({how})"
     root = activity._repo_root(home.path)
     if root is None:
         return f"{head}  (none — nothing is backing this up)"
@@ -970,7 +971,8 @@ def _marker_problems(path: Path) -> list[str]:
         return ["has no `unit:`, so it declares nothing"]
     units = _load_registry(refresh=False)[0].units()
     names = {u.name for u in units} | {a for u in units for a in u.aliases}
-    problems = []
+    problems = [f"homes entry {entry} is not a home (a name, or `name: data`)"
+                for entry in read_marker(path.parent).bad_homes]
     if data.get("part_of") and data["part_of"] not in names:
         problems.append(f"part_of: {data['part_of']} names no unit")
     for alias, owners in check_module._clashes(units):
@@ -1028,6 +1030,10 @@ def check_cmd():
 
     for name, owners in report.clashes:
         click.echo(f"{name}: an alias claimed by more than one unit — {', '.join(owners)}")
+
+    for name, entry in report.bad_homes:
+        click.echo(f"{name}: homes entry {entry} is not a home "
+                   "(a name, or `name: data`)")
 
     for dup in report.duplicates:
         shown = ", ".join(str(_relative(p, registry.roots)) for p in dup.paths)

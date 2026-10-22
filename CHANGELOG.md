@@ -21,6 +21,12 @@
   unit's prefix; completion offers aliases with the unit they stand for.
   `where` shows them as `also:`, `list` in brackets, and `tree --json` and
   the snapshot carry them. `check` reports an alias claimed by two units.
+- A home written `- name: data` under `homes:` holds data, not documents.
+  It is one of the unit's homes everywhere (`where` marks it, `config`
+  mounts it, the snapshot lists it) and is never searched: `find`,
+  `status`, `view`, the snapshot and its staleness check leave it out.
+  `check` and `marker --edit` report a `homes:` entry that is neither a
+  name nor `name: data`.
 - `orglens marker [UNIT]` prints the unit's marker; `--edit` opens it in
   `$VISUAL` or `$EDITOR` and reads it back, saying when it no longer
   parses (which drops the unit from the tree), names an unknown

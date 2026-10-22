@@ -66,6 +66,8 @@ orglens marker [<unit>] [--edit]                # print the unit's .orglens.yml,
 
 A unit may answer to other names (`aliases:` in its marker; `where` shows
 them as `also:`); any of them works wherever a unit is asked for.
+A home marked `data` (`- name: data` under `homes:`) is the unit's but never
+searched: `find` returns nothing from it; look there by path from `where`.
 
 The kind is the grammar's word for where to look; `--in` is the tree's word
 where the grammar has none yet. Fire several in one turn rather than scanning.

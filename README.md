@@ -194,12 +194,20 @@ aliases: [lander]                      # other names it is called by
 homes:
   - lunar-lander                       # a code repository
   - docs/projects/lunar-lander         # its documents
+  - lunar-lander-runs: data            # its data: never searched for documents
 ```
 
 `kind` is a label used for grouping and display; nothing behaves differently
 because of it. `part_of` is the only way one unit belongs to another. `homes` are
 named repositories, optionally with a path inside one — the marker's own
 directory is always a home whether or not it is listed.
+
+A home written `name: data` holds data rather than documents: run outputs, a
+dataset, book text. It is found like any home and is the unit's everywhere
+(`where` marks it `data`, `config` mounts it, sessions started in it count for
+the unit, the snapshot and `orglens-unit-homes` list it), but `find`, `status`,
+`view` and the snapshot never search it, so a repository of thousands of files
+costs nothing. Its repository still has to be under a root to be found.
 
 `aliases` are other names the unit answers to: every command that takes a unit
 takes an alias, completion offers them, and `list`, `where`, `tree --json` and
