@@ -25,10 +25,10 @@ from pathlib import Path
 
 import click
 
-from orglens import (activity, check as check_module, complete, documents, formats,
+from orglens import (activity, check as check_module, complete, documents, formats, fresh,
                      hide as hide_mod, reference, sessions, tree as tree_mod, view)
 from orglens.config import ORGLENS_HOME, Config
-from orglens.declaration import MARKER
+from orglens.declaration import MARKER, read_marker
 from orglens.events import (ATTRIBUTED, DISMISSED, EVENTS_DIR, Event, append,
                             this_machine)
 from orglens.homes import Home, repo_of
@@ -50,9 +50,12 @@ def _load_config() -> Config:
     return Config.current()
 
 
-def _load_registry() -> tuple[Registry, Config]:
-    """Load config + grammar + registry."""
+def _load_registry(refresh: bool = True) -> tuple[Registry, Config]:
+    """Load config + grammar + registry, and start a background refresh of
+    the snapshot cache if it has gone stale (`fresh`)."""
     config = _load_config()
+    if refresh:
+        fresh.later(config)
     return Registry(config.roots, config.load_grammar()), config
 
 
@@ -330,7 +333,8 @@ def list(kind_filter: str | None, under: str | None, show_hidden: bool):
             # The kind as markers write it, as `tree` shows it.
             click.echo(f"  {kind}:" if root else f"\n{_heading(kind)}:")
             for unit, path in members:
-                click.echo(f"{indent}{path}{_list_tail(registry, unit, acts)}")
+                also = f" [{', '.join(unit.aliases)}]" if unit.aliases else ""
+                click.echo(f"{indent}{path}{also}{_list_tail(registry, unit, acts)}")
     _say_hidden(left_out)
 
 
@@ -494,7 +498,8 @@ def tree_cmd(unit_name: str | None, as_json: bool, show_hidden: bool):
 
     if as_json:
         def node(name: str) -> dict:
-            return {"name": name, "kind": by_name[name].kind, "status": status_of(name)}
+            return {"name": name, "aliases": [*by_name[name].aliases],
+                    "kind": by_name[name].kind, "status": status_of(name)}
         tops = [start] if start is not None else shape.top
         click.echo(json.dumps([tree_mod.nested(shape, t, node) for t in tops], indent=2))
         return
@@ -823,87 +828,158 @@ ABSENT = ("is under none of your roots on this machine — "
 
 
 def _home_line(home) -> str:
-    shown = str(home.path) if home.path is not None else "absent"
-    return f"{home.name:<40} {shown:<32} ({home.how})"
+    """One home: where it is, how it resolved, and whether its files are
+    safely committed.
 
-
-def _repo_line(home) -> str:
-    """Whether this home's files are safely committed, and where.
-
-    `orglens-adapt`'s precondition is exactly this: git is the whole backup
-    model, and it only works if the current version is in it. A unit can
-    span several repositories now, so this is one line per home rather than
-    the single `repo:` line `where` used to print — dropping that block
-    silently turned the safety gate into a no-op, since empty output reads
-    as clean.
+    Anything that rewrites a unit's documents checks the last part first:
+    git is the whole backup model, and it only works if the current version
+    is in it. A unit spans several repositories, so each home says so for
+    itself; an empty answer would read as clean. The repository is named
+    only when it is not the home itself (a folder inside a larger repo).
     """
     if home.path is None:
-        return f"{home.name:<40} ({ABSENT})"
+        return f"{home.name:<40} absent ({ABSENT})"
+    how = f"{home.how}, data" if home.data else home.how
+    head = f"{home.name:<40} {str(home.path):<32} ({how})"
     root = activity._repo_root(home.path)
     if root is None:
-        return f"{home.name:<40} none — nothing is backing this up"
+        return f"{head}  (none — nothing is backing this up)"
     dirty = activity._dirty(root, home.path)
     status = f"{dirty} uncommitted" if dirty else "clean"
-    return f"{home.name:<40} {str(root):<32} ({status})"
+    if Path(root).resolve() != Path(home.path).resolve():
+        status += f", in the {Path(root).name} repo"
+    return f"{head}  ({status})"
 
 
-@cli.command(name="where")
-@click.argument("name", required=False, shell_complete=complete.units)
-def where_cmd(name: str | None):
-    """Announce which roots, and which unit a name or this directory is in.
-
-    Everything else assumes an answer to this. Anything acting on a unit — a
-    skill restructuring a document, a check on whether work is committed —
-    needs an absolute path and knows what it is acting on, and guessing
-    either fails silently rather than loudly.
-    """
-    registry, _ = _load_registry()
-
-    source = os.environ.get("ORGLENS_CONFIG") or str(ORGLENS_HOME / "config.yaml")
-    click.echo(f"roots:  {registry.roots[0]}  (config: {source})")
-    for extra in registry.roots[1:]:
-        click.echo(f"        {extra}")
-
-    here = Path.cwd().resolve()
-    shown_here = None
-    for root in registry.roots:
-        try:
-            shown_here = here.relative_to(Path(root).expanduser().resolve())
-            break
-        except ValueError:
-            continue
-    click.echo(
-        f"here:   {shown_here}" if shown_here is not None else "here:   outside the roots"
-    )
-
-    if name:
-        try:
-            unit = registry.resolve(name)
-        except ValueError as exc:
-            click.echo(str(exc), err=True)
-            sys.exit(1)
-    else:
-        unit = registry.at(here)
-        if unit is None:
-            click.echo("unit:   none — this directory is not inside a declared unit")
-            return
-
+def _show_unit(unit: Unit) -> None:
+    """The unit, what it is part of, its marker and its homes."""
     click.echo(f"unit:   {unit.name}  ({unit.kind})")
+    if unit.aliases:
+        click.echo(f"also:   {', '.join(unit.aliases)}")
     if unit.part_of:
         click.echo(f"in:     {unit.part_of}")
-
+    click.echo(f"marker: {unit.declared_at / MARKER}")
     if not unit.homes:
         click.echo("homes:  (none declared)")
         return
-
     first, *rest = unit.homes
     click.echo(f"homes:  {_home_line(first)}")
     for home in rest:
         click.echo(f"        {_home_line(home)}")
 
-    click.echo(f"repos:  {_repo_line(first)}")
-    for home in rest:
-        click.echo(f"        {_repo_line(home)}")
+
+def _unit_named_or_here(registry: Registry, name: str | None) -> Unit | None:
+    """The unit a name resolves to, exiting on a bad name; or the unit this
+    directory is in, None when it is in none."""
+    if not name:
+        return registry.at(Path.cwd().resolve())
+    try:
+        return registry.resolve(name)
+    except ValueError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+
+@cli.command(name="where")
+@click.argument("name", required=False, shell_complete=complete.units)
+@click.option("--roots", "all_roots", is_flag=True, help="List every root.")
+def where_cmd(name: str | None, all_roots: bool):
+    """Announce which unit a name or this directory is in, and its homes.
+
+    Everything else assumes an answer to this. Anything acting on a unit — a
+    skill restructuring a document, a check on whether work is committed —
+    needs an absolute path and knows what it is acting on, and guessing
+    either fails silently rather than loudly. Named, it answers only that;
+    bare, it first says which config and roots it is reading and where this
+    directory stands among them.
+    """
+    registry, _ = _load_registry()
+
+    if not name or all_roots:
+        source = os.environ.get("ORGLENS_CONFIG") or str(ORGLENS_HOME / "config.yaml")
+        roots = registry.roots
+        if all_roots or len(roots) == 1:
+            click.echo(f"roots:  {roots[0]}  (config: {source})")
+            for extra in roots[1:]:
+                click.echo(f"        {extra}")
+        else:
+            click.echo(f"roots:  {len(roots)}, --roots lists them  (config: {source})")
+
+    if not name:
+        here = Path.cwd().resolve()
+        shown_here = None
+        for root in registry.roots:
+            try:
+                shown_here = here.relative_to(Path(root).expanduser().resolve())
+                break
+            except ValueError:
+                continue
+        click.echo(
+            f"here:   {shown_here}" if shown_here is not None else "here:   outside the roots"
+        )
+
+    unit = _unit_named_or_here(registry, name)
+    if unit is None:
+        click.echo("unit:   none — this directory is not inside a declared unit")
+        return
+    _show_unit(unit)
+
+
+@cli.command(name="marker")
+@click.argument("name", required=False, shell_complete=complete.units)
+@click.option("--edit", is_flag=True,
+              help="Open it in $VISUAL or $EDITOR, then check what was saved.")
+def marker_cmd(name: str | None, edit: bool):
+    """Print a unit's marker, the `.orglens.yml` that declares it.
+
+    With no name, the unit this directory is in. `--edit` opens the file in
+    the terminal's editor and, once it closes, reads it back: a marker that
+    no longer parses drops its unit from the tree without a word anywhere
+    else, so this is where it is said.
+    """
+    registry, _ = _load_registry()
+    unit = _unit_named_or_here(registry, name)
+    if unit is None:
+        click.echo("not inside a declared unit; name one", err=True)
+        sys.exit(1)
+    path = unit.declared_at / MARKER
+
+    if not edit:
+        click.echo(f"# {path}")
+        click.echo(path.read_text(), nl=False)
+        return
+
+    click.edit(filename=str(path))
+    problems = _marker_problems(path)
+    if problems:
+        for problem in problems:
+            click.echo(f"{path}: {problem}", err=True)
+        sys.exit(1)
+    registry, _ = _load_registry()
+    marker = read_marker(path.parent)
+    _show_unit(registry.resolve(marker.unit))
+
+
+def _marker_problems(path: Path) -> list[str]:
+    """What is wrong with a marker just saved, as the tree will read it."""
+    import yaml
+    try:
+        data = yaml.safe_load(path.read_text())
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        return [f"does not parse, so its unit is gone from the tree: {exc}"]
+    if not isinstance(data, dict) or not data.get("unit"):
+        return ["has no `unit:`, so it declares nothing"]
+    units = _load_registry(refresh=False)[0].units()
+    names = {u.name for u in units} | {a for u in units for a in u.aliases}
+    problems = [f"homes entry {entry} is not a home (a name, or `name: data`)"
+                for entry in read_marker(path.parent).bad_homes]
+    if data.get("part_of") and data["part_of"] not in names:
+        problems.append(f"part_of: {data['part_of']} names no unit")
+    for alias, owners in check_module._clashes(units):
+        if data["unit"] in owners:
+            problems.append(f"{alias}: an alias claimed by more than one unit — "
+                            f"{', '.join(owners)}")
+    return problems
 
 
 @cli.command(name="check")
@@ -951,6 +1027,13 @@ def check_cmd():
     for kind in report.unmatched:
         glob = registry.grammar.artifact_types[kind].find
         click.echo(f"no {kind} found anywhere (looked for {glob})")
+
+    for name, owners in report.clashes:
+        click.echo(f"{name}: an alias claimed by more than one unit — {', '.join(owners)}")
+
+    for name, entry in report.bad_homes:
+        click.echo(f"{name}: homes entry {entry} is not a home "
+                   "(a name, or `name: data`)")
 
     for dup in report.duplicates:
         shown = ", ".join(str(_relative(p, registry.roots)) for p in dup.paths)
@@ -1010,23 +1093,34 @@ def check_cmd():
 @click.option("--stdout", is_flag=True, help="Print instead of writing")
 @click.option("--check", is_flag=True,
               help="Say whether the written snapshot is older than the tree; exit 1 if so.")
+@click.option("--if-stale", "if_stale", is_flag=True,
+              help="Write the snapshot only if --check would call it stale.")
 @click.option("--type", "kind", default=None, help="Only units of this kind.",
               shell_complete=complete.kinds)
 @click.option("--unit", "unit_name", default=None, help="Only this unit and the units under it.",
               shell_complete=complete.units)
 @click.option("--json", "as_json", is_flag=True,
               help="The same facts as data, for a program to compose with.")
-def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None,
-             as_json: bool):
+def snapshot(stdout: bool, check: bool, if_stale: bool, kind: str | None,
+             unit_name: str | None, as_json: bool):
     """Generate a snapshot of what is in the tree.
 
     `--type` and `--unit` narrow it; a narrowed snapshot goes to stdout,
     never to the cache, which always holds the whole tree.
     """
-    registry, config = _load_registry()
+    registry, config = _load_registry(refresh=False)
 
     if check:
         sys.exit(_snapshot_check(registry, config))
+    if if_stale:
+        # What the background refresh runs (`fresh.later`); it holds the
+        # lock until the snapshot is written.
+        try:
+            if fresh.stale(registry, config) is not None:
+                _write_snapshot(registry, config)
+        finally:
+            fresh.lock_path(config).unlink(missing_ok=True)
+        return
     if kind is not None and kind not in {u.kind for u in registry.units()}:
         _unknown("kind", kind, sorted({u.kind for u in registry.units()}))
     if as_json:
@@ -1052,38 +1146,12 @@ def snapshot(stdout: bool, check: bool, kind: str | None, unit_name: str | None,
 
 
 def _snapshot_check(registry: Registry, config: Config) -> int:
-    """Whether the snapshot predates any declaration or driver document.
-
-    Those are what the snapshot renders; a document deeper in a unit
-    changes nothing it shows. A missing snapshot is stale, not an error.
-    """
-    output = config.snapshot_path
-    if not output.exists():
-        click.echo(f"stale: no snapshot at {output}")
+    """Whether the written snapshot still matches the tree (`fresh.stale`)."""
+    why = fresh.stale(registry, config, lambda p: str(_relative(p, registry.roots)))
+    if why is not None:
+        click.echo(f"stale: {why}")
         return 1
-    data = config.snapshot_json_path
-    if not data.exists() or data.stat().st_mtime < output.stat().st_mtime:
-        click.echo(f"stale: {data} is missing or older than {output}; completion reads it")
-        return 1
-    written = output.stat().st_mtime
-    newest: tuple[float, Path] | None = None
-    for unit in registry.units():
-        candidates = [unit.declared_at / MARKER]
-        candidates += [f for p in unit.paths
-                       for d in registry.grammar.documents_for(unit.kind)
-                       if (f := formats.existing(p, d, registry.grammar.format)) is not None]
-        for path in candidates:
-            try:
-                mtime = path.stat().st_mtime
-            except OSError:
-                continue
-            if newest is None or mtime > newest[0]:
-                newest = (mtime, path)
-    if newest is not None and newest[0] > written:
-        shown = _relative(newest[1], registry.roots)
-        click.echo(f"stale: {shown} changed after the snapshot was written")
-        return 1
-    click.echo(f"fresh: {output}")
+    click.echo(f"fresh: {config.snapshot_path}")
     return 0
 
 
@@ -1181,8 +1249,10 @@ def _refresh_snapshot(registry: Registry, config: Config):
 @click.option("--reindex/--no-reindex", default=True,
               help="Bring scad's session index up to date first (about a second).")
 @click.option("--show-hidden", is_flag=True, help=SHOW_HIDDEN_HELP)
+@click.option("--json", "as_json", is_flag=True,
+              help="Print the page's rows as data instead of writing the page.")
 def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool,
-             show_hidden: bool):
+             show_hidden: bool, as_json: bool):
     """Render where every unit stands, and open it.
 
     Joins what the tree knows (plans, packets, uncommitted work) with what scad
@@ -1245,6 +1315,10 @@ def view_cmd(out: str, do_open: bool, base_url: str | None, reindex: bool,
     ctx = {"docs_roots": registry.roots, "base_url": base_url or config.docs_base_url,
            "link": config.view_link,
            "hidden": len(hidden & {u.name for u in registry.units()})}
+    if as_json:
+        click.echo(json.dumps(view.data(groups, ctx, sessions.unattributed(every)),
+                              indent=2, default=str))
+        return
     page = view.render(groups, ctx, unattributed=sessions.unattributed(every))
     path = view.write(page, Path(out))
     click.echo(f"wrote {path}")

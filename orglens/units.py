@@ -12,7 +12,7 @@ worklist, and it is why nothing goes dark while the tree is half declared.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from orglens.declaration import MARKER, read_marker
@@ -33,10 +33,19 @@ class Unit:
     #: scad's own words for a container, passed through verbatim by
     #: `scadconfig.render`. `None` when the declaration carries none.
     runtime: dict | None = None
+    #: Other names it answers to, from the marker's `aliases:`.
+    aliases: tuple[str, ...] = ()
 
     @property
     def paths(self) -> list[Path]:
-        """Every home present on this machine. Absent homes are ordinary."""
+        """Every home present on this machine that holds its work: what is
+        searched for documents, activity and status. Absent homes are
+        ordinary; a data home is left out."""
+        return [h.path for h in self.homes if h.path is not None and not h.data]
+
+    @property
+    def every_path(self) -> list[Path]:
+        """Every home present on this machine, data homes too."""
         return [h.path for h in self.homes if h.path is not None]
 
 
@@ -83,7 +92,10 @@ class Registry:
         "find" every unrelated directory sharing that name as a contested
         match that never actually occurred.
         """
-        homes = tuple(resolve_home(name, self._scan()) for name in marker.homes)
+        homes = tuple(
+            replace(home, data=True) if home.name in marker.data_homes else home
+            for home in (resolve_home(name, self._scan()) for name in marker.homes)
+        )
         declaring = marker.path.resolve()
         if any(h.path is not None and h.path.resolve() == declaring for h in homes):
             return homes
@@ -110,6 +122,7 @@ class Registry:
                     part_of=marker.part_of,
                     declared_at=candidate.path,
                     runtime=marker.runtime,
+                    aliases=marker.aliases,
                 )
             )
         self._units = sorted(found, key=lambda u: u.name)
@@ -153,15 +166,26 @@ class Registry:
             part_of=marker.part_of,
             declared_at=directory,
             runtime=marker.runtime,
+            aliases=marker.aliases,
         )
 
     def resolve(self, name: str) -> Unit:
-        """Resolve a partial name to a single unit."""
+        """Resolve a partial name to a single unit.
+
+        An alias is a name like any other: exactly first, the unit's name
+        before an alias, then by prefix and by substring over both. A unit
+        matching by two of its names is still one match.
+        """
         units = self.units()
+
+        def matching(test) -> list[Unit]:
+            return [u for u in units if any(test(n) for n in (u.name, *u.aliases))]
+
         for group in (
             [u for u in units if u.name == name],
-            [u for u in units if u.name.startswith(name)],
-            [u for u in units if name in u.name],
+            [u for u in units if name in u.aliases],
+            matching(lambda n: n.startswith(name)),
+            matching(lambda n: name in n),
         ):
             if len(group) == 1:
                 return group[0]
@@ -230,7 +254,7 @@ class Registry:
         are excluded.
         """
         owned = {u.declared_at.resolve() for u in self.units()} | {
-            p.resolve() for u in self.units() for p in u.paths
+            p.resolve() for u in self.units() for p in u.every_path
         }
         found: list[Path] = []
         for candidate in self._scan():

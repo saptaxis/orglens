@@ -35,6 +35,9 @@ class Home:
     name: str
     path: Path | None
     how: str  # marker | remote | name | absent | declaring
+    #: Holds data, not documents (`- name: data` in the marker): the unit's,
+    #: but never searched.
+    data: bool = False
 
 
 def repo_of(name: str) -> str:

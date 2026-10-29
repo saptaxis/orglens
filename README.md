@@ -110,9 +110,9 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 | `orglens new PATH [--kind KIND] [--part-of UNIT] [--home NAME]` | Create a unit: a directory, the declaration that names it, and a stub driver document in the grammar's format, and every other file the kind's `structure:` declares, seeded with its title and what it is for. `--home` is repeatable |
 | `orglens declare PATH [--yes] [--part-of UNIT]` | Declare an existing directory as a unit, proposed from what it looks like; asks for the parent when the folder sits inside a unit |
 | `orglens check` | Report where the tree has drifted: missing driver documents and declared files, undeclared folders, homes under no root, a `part_of` naming no unit or a cycle, a folder disagreeing with its marker, weak or shared homes, kinds that match nothing, folders of documents the grammar has no word for, a document written in two formats side by side. Reports only — never gates |
-| `orglens snapshot [--stdout] [--check] [--json]` | Generate a topology snapshot (markdown), with the same facts as JSON beside it for completion; `--json` prints the data instead. `--check` says whether the written one is older than any declaration or driver document, or the JSON lags it, exit 1 if so |
+| `orglens snapshot [--stdout] [--check] [--json]` | Generate a topology snapshot (markdown), with the same facts as JSON beside it for completion and editors: each unit's marker folder (`declared_at`), driver documents, and every document by kind, each with its path and title; `--json` prints the data instead. `--check` says whether the tree changed since it was written (a declaration, a document added, edited or removed, or the JSON lagging), exit 1 if so; `--if-stale` writes it only then. Other commands, and completion, start `--if-stale` in the background, so the cache follows the tree one read behind |
 | `orglens reference [--out PATH]` | Render the grammar as the skill's vocabulary reference |
-| `orglens view` | Render where everything stands as a page, and open it. *Recent*: a card per unit at any depth, with its path, banded by when it last moved (by session or by edit), waiting first. *Explore*: the same cards as the tree. Filter by band, kind, agent, scope or text. Reindexes scad first (`--no-reindex` to skip) |
+| `orglens view [--json]` | Render where everything stands as a page, and open it; `--json` prints the rows instead (each unit's bands, clocks, running and waiting sessions, status line, memos and document paths, in Recent's order) for a program that draws its own page. *Recent*: a card per unit at any depth, with its path, banded by when it last moved (by session or by edit), waiting first. *Explore*: the same cards as the tree. Filter by band, kind, agent, scope or text. Reindexes scad first (`--no-reindex` to skip) |
 | `orglens start UNIT [--home NAME] [--prompt TEXT] [--agent NAME] [--window\|--split] [--about WORDS] [--name TEXT] [--from [NAME\|ID]] [--dry-run]` | Start a session for a unit, attributed before its first turn; `--window` puts it in the tmux you are in, `--split` in a pane beside this one, and the session is named `unit[-context]-sepDD`. `--from` makes it a fresh session that picks up one of the unit's, the newest or the one named, through `scad session launch --from` |
 | `orglens sessions [UNIT] [--none] [--all] [--json]` | A unit's sessions, or every unit's grouped, newest first; `--none` lists the ones belonging to no unit |
 | `orglens sessions --triage [--one-by-one]`, `--groups`, `--from FILE` | Decide the unclaimed sessions by directory, one at a time, or from a `--none --json` file you edited |
@@ -121,14 +121,14 @@ point at the served site at `docs_base_url` (`http://localhost:8000`).
 | `orglens attribute SESSION-ID UNIT [--why TEXT]` | Say which unit a session was for, after the fact |
 | `orglens dismiss SESSION-ID\|--under PATH [--why TEXT]` | Say a session, or every unclaimed one under a path, belongs to no unit |
 | `orglens config UNIT [--workdir NAME] [--out PATH]` | Render a unit's homes into the scad config for a container |
-| `orglens where [NAME]` | Which roots are configured, and which unit a name or this directory resolves to |
+| `orglens where [NAME] [--roots]` | Which unit a name or this directory resolves to: its marker, and each home with how it resolved and what is uncommitted. Bare, it first says which config, how many roots (`--roots` lists them), and where this directory stands |
+| `orglens marker [UNIT] [--edit]` | Print a unit's `.orglens.yml`; `--edit` opens it in `$VISUAL` or `$EDITOR`, then says if what was saved no longer parses, names an unknown `part_of`, or claims a taken alias |
 | `orglens hide UNIT...`, `orglens unhide UNIT...\|--all` | Keep units off the screen, each with what is under it, until unhidden: a `hide:` list in the config. `view`, `tree`, `list`, `status` and `sessions` leave them out and say how many (`--show-hidden` for one run); `--json`, `snapshot`, `find` and `where` keep them, and naming a hidden unit shows it |
 | `orglens workflow next\|done\|note\|goto PACKET` | Run a capability's workflow over a packet, one pass at a time, with a human between. See `capabilities/tutorial/README.md` |
 
 ## Skills
 
-orglens ships `orglens` and `orglens-adapt` as agent skills. `bootstrap` installs
-them:
+orglens ships `orglens` as an agent skill. `bootstrap` installs it:
 
 ```bash
 ./bootstrap
@@ -144,6 +144,42 @@ same way:
 Skills install as copies, so re-run `bootstrap` after editing a `SKILL.md`. See
 [`capabilities/README.md`](capabilities/README.md) for the capability layout.
 
+## Emacs
+
+`emacs/orglens.el` gives Emacs what orglens knows: the units, their homes, and
+their documents with titles. It reads the snapshot's data
+(`~/.orglens/cache/snapshot.json`, or beside the config `ORGLENS_CONFIG` names),
+never the tree, and starts `orglens snapshot --if-stale` in the background as
+it reads. Emacs 29 or later; no packages.
+
+```elisp
+(add-to-list 'load-path "~/code/orglens/emacs")   ; `bootstrap` prints this line
+(require 'orglens)
+```
+
+A unit is a plist (`:name :aliases :kind :part-of :dir :status :homes`).
+
+| Function | Gives |
+|---|---|
+| `(orglens-units)` | Every unit, by name |
+| `(orglens-unit NAME)` | One, by name or alias |
+| `(orglens-unit-homes NAME)` | Its homes |
+| `(orglens-unit-at FILE)` | The unit FILE belongs to, as `orglens where` answers |
+| `(orglens-units-at FILE)` | Every unit with a home holding FILE, deepest first |
+| `(orglens-unit-above NAME)`, `(orglens-unit-and-below NAME)` | Up and down the tree by `part_of` |
+| `(orglens-files :unit U :kind K)` | Document paths; `U` a name or a list, `K` a kind or `"driver"` |
+| `(orglens-title FILE)` | A listed document's title |
+
+Three commands, bound to no key: `orglens-find-unit` opens a unit's driver
+document, `orglens-find-document` one of its documents by kind and title, and
+`orglens-which-unit` says which unit the current file is in. Everything else
+— agenda files, perspectives, capture — is the person's configuration, built
+from the functions:
+
+```elisp
+(setq org-agenda-files (orglens-files :unit "orglens" :kind "plan"))
+```
+
 ## Declaring a unit
 
 A unit is one body of effort with a goal — a project, a client engagement, a
@@ -154,15 +190,29 @@ its documents:
 unit: lunar-lander
 kind: project
 part_of: physics-priors
+aliases: [lander]                      # other names it is called by
 homes:
   - lunar-lander                       # a code repository
   - docs/projects/lunar-lander         # its documents
+  - lunar-lander-runs: data            # its data: never searched for documents
 ```
 
 `kind` is a label used for grouping and display; nothing behaves differently
 because of it. `part_of` is the only way one unit belongs to another. `homes` are
 named repositories, optionally with a path inside one — the marker's own
 directory is always a home whether or not it is listed.
+
+A home written `name: data` holds data rather than documents: run outputs, a
+dataset, book text. It is found like any home and is the unit's everywhere
+(`where` marks it `data`, `config` mounts it, sessions started in it count for
+the unit, the snapshot and `orglens-unit-homes` list it), but `find`, `status`,
+`view` and the snapshot never search it, however many files it holds. Its
+repository still has to be under a root to be found.
+
+`aliases` are other names the unit answers to: every command that takes a unit
+takes an alias, completion offers them, and `list`, `where`, `tree --json` and
+the snapshot show them beside the unit's own name. `check` reports an alias
+another unit also claims, as its name or as an alias.
 
 Homes can be shared: one repository is a home of two units when both work in it,
 and each sees its own documents. Inside a shared home, `where` answers the first

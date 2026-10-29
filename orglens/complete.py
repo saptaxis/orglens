@@ -9,8 +9,9 @@ reading `orglens list` first.
 the roots would put a 2-second pause on a keystroke, which is worse than no
 completion at all: the shell would appear to hang. So unit names and kinds
 come out of the snapshot's data (`~/.orglens/cache/snapshot.json`, written
-beside the markdown snapshot), which the snapshot command already keeps, and a missing or stale snapshot completes
-to nothing rather than to a wait. Session ids come from scad's export,
+beside the markdown snapshot). A missing snapshot completes to nothing rather
+than to a wait, and a stale one completes from what it has while a refresh
+runs behind it (`fresh`). Session ids come from scad's export,
 capped, because there is no cache for those and the export is one call.
 
 Nothing here raises. A completer that fails takes the shell's prompt with
@@ -26,23 +27,35 @@ SESSION_CAP = 300
 
 
 def _snapshot_data() -> dict:
+    """The cache as it is, with a refresh started behind it when it has gone
+    stale (`fresh`): this answer may be one read behind, the next is not."""
     try:
         import json
+        from orglens import fresh
         from orglens.config import Config
 
-        return json.loads(Config.current().snapshot_json_path.read_text())
+        config = Config.current()
+        fresh.later(config)
+        return json.loads(config.snapshot_json_path.read_text())
     except Exception:
         return {}
 
 
 def unit_names() -> list[tuple[str, str]]:
     """Every unit in the snapshot, with its status line as the hint —
-    seeing it is most of what choosing between two units needs."""
+    seeing it is most of what choosing between two units needs. An alias is
+    offered too, its hint naming the unit it stands for."""
     out = {}
     for unit in _snapshot_data().get("units", []):
         name = str(unit.get("name") or "").strip()
-        if name:
-            out.setdefault(name, str(unit.get("status") or "")[:70])
+        if not name:
+            continue
+        status = str(unit.get("status") or "")
+        out.setdefault(name, status[:70])
+        for alias in unit.get("aliases") or []:
+            alias = str(alias).strip()
+            if alias:
+                out.setdefault(alias, f"{name}: {status}"[:70])
     return sorted(out.items())
 
 
@@ -190,6 +203,7 @@ def session_names_of_unit(ctx, param, incomplete):
     unit = params.get("target") or params.get("unit_name")
     if not unit:
         return []
+    unit = _canonical(unit)
     try:
         import time
         from orglens.events import attributions
@@ -216,6 +230,15 @@ def session_names_of_unit(ctx, param, incomplete):
                 "live" if row.get("live") else "", str(row["id"])[:8]]
         pairs.append((str(row["name"]), " · ".join(h for h in hint if h)))
     return _items(pairs, incomplete)
+
+
+def _canonical(name: str) -> str:
+    """The unit's own name for one typed as an alias, from the snapshot;
+    the attributions are written under the unit's name."""
+    for unit in _snapshot_data().get("units", []):
+        if name in (unit.get("aliases") or []):
+            return str(unit.get("name") or name)
+    return name
 
 
 def _age(seconds: float) -> str:

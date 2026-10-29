@@ -23,9 +23,9 @@ lives in its own venv, and the CLI is `orglens` on PATH).
 Never `ls`, `find`, `glob` or `tree` the documents tree to discover units,
 homes, plans, specs or logs, and never `cat` a sibling's document to learn a
 shape. `orglens list`, `find`, `sessions` and the snapshot answer the first;
-this card and `orglens-adapt` answer the second. A scan sees folders, not
-declarations, and a folder is not a unit until a marker says so. A document's
-*contents* you read directly, once you know its path.
+this card and `references/grammar-reference.md` answer the second. A scan
+sees folders, not declarations, and a folder is not a unit until a marker says
+so. A document's *contents* you read directly, once you know its path.
 </HARD-GATE>
 
 ## Not for
@@ -43,6 +43,8 @@ orglens snapshot --stdout --unit <name>         # one unit and everything under 
 orglens snapshot --json [--unit <name>]         # the same facts as data, to compose with
 ```
 
+Every other orglens command refreshes the snapshot in the background when the
+tree has changed, so it may be one read behind; `--check` is still the test.
 The snapshot is the tree as one document. `--type`/`--unit` narrow it; the
 unscoped one is 500+ lines. The grammar's own words for what may exist are in
 `references/grammar-reference.md`, generated, never restated here.
@@ -58,8 +60,15 @@ orglens find doc <unit> --in notes              # a folder the grammar has no na
 orglens find plan --since 2w                    # touched lately
 orglens find article --waiting                  # packets with a gate open, and the question
 orglens find spec --grep "x" --json             # path, kind, unit, matches
-orglens where [<name>]                          # roots, and which unit a name or this directory is
+orglens where [<name>]                          # which unit a name or this directory is; marker, homes, uncommitted
+orglens where --roots                           # every root, listed; bare `where` gives only their count
+orglens marker [<unit>] [--edit]                # print the unit's .orglens.yml, or edit it and check it
 ```
+
+A unit may answer to other names (`aliases:` in its marker; `where` shows
+them as `also:`); any of them works wherever a unit is asked for.
+A home marked `data` (`- name: data` under `homes:`) is the unit's but never
+searched: `find` returns nothing from it; look there by path from `where`.
 
 The kind is the grammar's word for where to look; `--in` is the tree's word
 where the grammar has none yet. Fire several in one turn rather than scanning.
@@ -77,11 +86,10 @@ orglens new <path> --kind project [--part-of <unit>] [--home <name>]
 ```
 
 `new` makes the directory, its marker, a stub driver document (the grammar's
-name for it, in the grammar's format; status line, *What it is*, *State tracking*), every other file the kind's `structure:` declares (seeded with a title and what it is for), and adds the unit to the parent's
-`.nav.yml` when that lists children by name. It prints the next steps. The path
+name for it, in the grammar's format; status line, *What it is*, *State tracking*), every other file the kind's `structure:` declares (seeded with a title and what it is for), and, in a markdown tree, adds the unit to the
+parent's `.nav.yml` when that lists children by name. It prints the next steps. The path
 given is exactly where it lands; `--home` is repeatable and names another place
-the work lives (a code repository). Then write the driver document — `orglens-adapt`
-is the skill for shaping one. Documents are written by hand, following the
+the work lives (a code repository). Then write the driver document. Documents are written by hand, following the
 reference's naming; nothing parses a filename.
 
 **A parent is the person's to state.** `part_of` puts a unit in the tree, and
@@ -188,12 +196,16 @@ The tutorial at `capabilities/tutorial/README.md` walks all of it.
 ```bash
 orglens check                                   # drift: missing driver docs, undeclared folders, homes under no root, part_of naming no unit or a cycle, a folder disagreeing with its marker, weak or shared homes, a unit its parent nav omits, folders the grammar has no word for, a document in two formats
 orglens view                                    # the page: Recent (cards banded by time) and Explore (the tree); filter by scope, kind, agent, text
+orglens view --json                             # the same rows as data: bands, clocks, what runs and waits
 orglens config <unit> [--workdir <repo>]        # the repos: block scad reads for a container
 orglens reference --out <path>                  # regenerate the grammar reference
 ```
 
 `check` reports and never gates. Everything it names is a person's one line to
 add — a marker, a grammar word, a nav entry — not something to work around.
+
+In Emacs, `emacs/orglens.el` reads the same snapshot: `(orglens-unit-at FILE)`,
+`(orglens-files :unit U :kind K)` and the rest (README, *Emacs*).
 
 ## Flows
 

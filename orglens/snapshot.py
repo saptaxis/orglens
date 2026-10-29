@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from orglens import documents
+from orglens import documents, formats
 from orglens.config import Config
 from orglens.state import unit_status
 from orglens.units import Registry
@@ -69,9 +69,11 @@ def generate_snapshot(
             status = _status_of(registry, unit)
             suffix = f" — {status.text}" if status else ""
             lines += [f"### {unit.name}{suffix}", ""]
+            if unit.aliases:
+                lines += ["Also: " + ", ".join(unit.aliases), ""]
             if unit.part_of:
                 lines += [f"In: {unit.part_of}", ""]
-            lines += ["Homes: " + ", ".join(f"`{p}`" for p in unit.paths), ""]
+            lines += ["Homes: " + ", ".join(f"`{p}`" for p in unit.every_path), ""]
 
             children = registry.parts_of(unit)
             if children:
@@ -87,8 +89,7 @@ def generate_snapshot(
             if loose_docs:
                 lines += ["**Documents:** " + ", ".join(f"`{d}`" for d in loose_docs), ""]
 
-            for artifact_kind in registry.grammar.artifact_types:
-                held = documents.find(registry, artifact_kind, unit)
+            for artifact_kind, held in _held(registry, unit).items():
                 if held:
                     lines.append(f"**{artifact_kind.title()}s:** {len(held)}")
                     lines += [f"- `{a.name}`" for a in held[-3:]]
@@ -142,19 +143,54 @@ def _unit_data(registry: Registry, unit) -> dict:
     status = _status_of(registry, unit)
     return {
         "name": unit.name,
+        "aliases": list(unit.aliases),
         "kind": unit.kind,
         "part_of": unit.part_of,
+        # The folder whose marker declared it: where `where` stops walking up.
+        "declared_at": str(unit.declared_at),
         "status": status.text if status else None,
-        "homes": [str(p) for p in unit.paths],
+        "homes": [str(p) for p in unit.every_path],
         "contains": [c.name for c in registry.parts_of(unit)],
         "directories": [d.name for d in documents.subdirectories(unit)],
         "documents": [d.name for d in documents.loose(unit)],
-        "artifacts": {
-            artifact_kind: [a.name for a in held]
-            for artifact_kind in registry.grammar.artifact_types
-            if (held := documents.find(registry, artifact_kind, unit))
-        },
+        "artifacts": {kind: [a.name for a in held]
+                      for kind, held in _held(registry, unit).items() if held},
+        # Where to jump, and what to call it: an editor picks a unit's
+        # documents by kind and by title from here, never by sweeping.
+        "drivers": _drivers(registry, unit),
+        "files": {kind: [_file(a.path) for a in held]
+                  for kind, held in _held(registry, unit).items() if held},
     }
+
+
+def _held(registry: Registry, unit) -> dict:
+    """Each kind's documents in a unit, found once per registry: the
+    markdown and the JSON are written in one run, and each wants all of
+    them."""
+    cache = registry.__dict__.setdefault("_held", {})
+    if unit.name not in cache:
+        cache[unit.name] = {kind: documents.find(registry, kind, unit)
+                            for kind in registry.grammar.artifact_types}
+    return cache[unit.name]
+
+
+def _drivers(registry: Registry, unit) -> list[dict]:
+    """The driver document and the others the kind declares, as found in
+    the first home that has each, driver first."""
+    out = []
+    for name in registry.grammar.documents_for(unit.kind):
+        for home in unit.paths:
+            if (path := formats.existing(home, name, registry.grammar.format)) is not None:
+                out.append({"name": formats.stem(name), **_file(path)})
+                break
+    return out
+
+
+def _file(path: Path) -> dict:
+    """A document's path and title. A directory (a packet) has no title of
+    its own."""
+    return {"path": str(path),
+            "title": None if path.is_dir() else formats.title(path)}
 
 
 def _heading(kind: str) -> str:

@@ -17,7 +17,10 @@ FORMATS: dict[str, Format] = {f.name: f for f in (markdown.FORMAT, org.FORMAT)}
 SUFFIXES: tuple[str, ...] = tuple(f.suffix for f in FORMATS.values())
 
 __all__ = ["Format", "FORMATS", "SUFFIXES", "get", "of", "is_document",
-           "stem", "ordered", "existing", "file_globs"]
+           "stem", "ordered", "existing", "file_globs", "title"]
+
+#: A title is near the top; a document is not read past this.
+TITLE_READ = 8192
 
 
 def get(name: str) -> Format:
@@ -69,6 +72,19 @@ def existing(directory: Path, name: str, prefer: str = "md") -> Path | None:
         if path.is_file():
             return path
     return None
+
+
+def title(path: Path) -> str | None:
+    """A document's title, read from its head, or None: not a document, no
+    title in it, or unreadable."""
+    fmt = of(path)
+    if fmt is None:
+        return None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return fmt.title(f.read(TITLE_READ))
+    except OSError:
+        return None
 
 
 def file_globs(pattern: str) -> list[str]:

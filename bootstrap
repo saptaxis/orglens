@@ -254,4 +254,11 @@ else
 fi
 
 echo
-echo "done. \`orglens where\` will tell you which roots it can see."
+# orglens.el is read from the checkout, so an edit needs no reinstall. The
+# init file is the person's: say the lines, never write them.
+echo "emacs: orglens.el is at $HERE/emacs; to use it, add to your init:"
+echo "      (add-to-list 'load-path \"$HERE/emacs\")"
+echo "      (require 'orglens)"
+
+echo
+echo "done. \`orglens where --roots\` lists the roots it can see."

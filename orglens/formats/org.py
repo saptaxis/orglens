@@ -57,6 +57,18 @@ def status(text: str) -> str | None:
     return clean(plain(match.group(1))) if match else None
 
 
+#: `#+TITLE:`, then the first heading, its keyword and tags left out.
+TITLE = re.compile(r"^#\+TITLE:[ \t]*(\S.*?)[ \t]*$", re.IGNORECASE | re.MULTILINE)
+HEADING = re.compile(r"^\*+[ \t]+(?:(?:TODO|NEXT|IN-PROGRESS|WAITING|DONE|CANCELLED)[ \t]+)?"
+                     r"(\S.*?)(?:[ \t]+:[\w@#%:]+:)?[ \t]*$", re.MULTILINE)
+
+
+def title(text: str) -> str | None:
+    text = BLOCK.sub("", text)
+    match = TITLE.search(text) or HEADING.search(text)
+    return plain(match.group(1)).strip() or None if match else None
+
+
 def stub(title: str, name: str, today: str) -> str:
     return (
         f"#+TITLE: {title}\n"
@@ -72,4 +84,5 @@ def seed(title: str, text: str) -> str:
     return f"#+TITLE: {title}\n" + (f"\n{text}\n" if text else "")
 
 
-FORMAT = Format(name="org", suffix=".org", status=status, stub=stub, seed=seed)
+FORMAT = Format(name="org", suffix=".org", status=status, stub=stub, seed=seed,
+                title=title)

@@ -145,3 +145,56 @@ class TestWriting:
         generate_snapshot(registry, config, output_path=out)
 
         assert out.read_text().startswith("# Topology Snapshot")
+
+
+class TestDocumentsAndTitles:
+    """`snapshot.json` says where each document is and what it is called, so
+    an editor jumps to one without sweeping the tree."""
+
+    def test_each_kind_lists_its_paths_and_titles(self, registry, config, units_tree):
+        from orglens.snapshot import snapshot_data
+        units = {u["name"]: u for u in snapshot_data(registry, config)["units"]}
+        plans = units["expt-1-agent-behavior"]["files"]["plan"]
+        plan = units_tree / "research/physics-priors/expt-1-agent-behavior/plans"
+        assert plans == [
+            {"path": str(plan / "01-testbed-Feb032026.md"), "title": "01 — Testbed"},
+            {"path": str(plan / "02-data-collection-Feb062026.md"), "title": "02 — Data"},
+        ]
+
+    def test_the_driver_comes_first_under_its_own_name(self, registry, config, units_tree):
+        from orglens.snapshot import snapshot_data
+        units = {u["name"]: u for u in snapshot_data(registry, config)["units"]}
+        assert units["freightify"]["drivers"] == [{
+            "name": "overview",
+            "path": str(units_tree / "clients/freightify/overview.md"),
+            "title": "Overview",
+        }]
+
+
+class TestTitles:
+    def test_org_takes_the_title_keyword_then_the_first_heading(self):
+        from orglens.formats import org
+        assert org.title("#+title: orglens --- Backlog\n* Not this\n") == "orglens — Backlog"
+        assert org.title("text\n** TODO The =big= one :feat:\n") == "The big one"
+        assert org.title("#+begin_src org\n#+TITLE: an example\n#+end_src\n* Real\n") == "Real"
+        assert org.title("no heading at all\n") is None
+
+    def test_markdown_takes_front_matter_then_the_first_h1(self):
+        from orglens.formats import markdown
+        assert markdown.title('---\ntitle: "Hi there"\n---\n# Not this\n') == "Hi there"
+        assert markdown.title("```\n# an example\n```\n## sub\n# **Real** one\n") == "Real one"
+        assert markdown.title("plain text\n") is None
+
+    def test_a_file_is_read_by_its_suffix(self, tmp_path):
+        from orglens import formats
+        (tmp_path / "a.org").write_text("#+TITLE: A\n")
+        (tmp_path / "b.txt").write_text("# B\n")
+        assert formats.title(tmp_path / "a.org") == "A"
+        assert formats.title(tmp_path / "b.txt") is None
+        assert formats.title(tmp_path / "gone.md") is None
+
+
+def test_each_unit_says_where_its_marker_is(registry, config, units_tree):
+    from orglens.snapshot import snapshot_data
+    units = {u["name"]: u for u in snapshot_data(registry, config)["units"]}
+    assert units["freightify"]["declared_at"] == str(units_tree / "clients/freightify")

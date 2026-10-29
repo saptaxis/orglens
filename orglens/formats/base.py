@@ -24,6 +24,8 @@ class Format:
     #: (title, what it is for) -> a file a kind's `structure:` declares,
     #: seeded by `new` so whoever opens it knows what goes there.
     seed: Callable[[str, str], str]
+    #: The document's text -> its title as plain text, or None.
+    title: Callable[[str], str | None]
 
 
 #: Brackets a sentence does not end inside.

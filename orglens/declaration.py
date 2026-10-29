@@ -33,6 +33,16 @@ class Marker:
     #: runtime; inventing one for a single consumer would be a translation
     #: layer nobody asked for.
     runtime: dict | None = None
+    #: Other names the person calls the unit by (`aliases: [scad]`). A name
+    #: resolves to the unit by any of them; the unit's own name is still
+    #: `unit:`, and every listing shows that one.
+    aliases: tuple[str, ...] = ()
+    #: Homes written `- name: data`: the unit's, shown and mounted like any
+    #: other, but holding data rather than documents, so never searched.
+    data_homes: tuple[str, ...] = ()
+    #: `homes:` entries that are neither a name nor `name: data`, as written.
+    #: Left out of `homes`; `check` reports them.
+    bad_homes: tuple[str, ...] = ()
 
     @property
     def declares(self) -> bool:
@@ -53,7 +63,7 @@ def read_marker(directory: Path) -> Marker | None:
         return None
 
     home = data.get("home")
-    homes = tuple(data.get("homes") or ())
+    homes, data_homes, bad_homes = _homes(data.get("homes"))
     # The declaring home is one of the unit's homes whether or not it was
     # listed: it is the directory the declaration was found in, which is a
     # fact about the filesystem rather than something a human should restate.
@@ -68,4 +78,37 @@ def read_marker(directory: Path) -> Marker | None:
         part_of=data.get("part_of"),
         homes=homes,
         runtime=data.get("runtime"),
+        aliases=_names(data.get("aliases")),
+        data_homes=data_homes,
+        bad_homes=bad_homes,
     )
+
+
+def _homes(value) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """`homes:` as (every name, the ones marked data, entries not understood).
+
+    An entry is a name, or a one-key mapping `name: data`. Every other
+    reader of `homes` sees names only.
+    """
+    names, data, bad = [], [], []
+    for entry in value if isinstance(value, list) else []:
+        if isinstance(entry, str):
+            names.append(entry)
+        elif (isinstance(entry, dict) and len(entry) == 1
+              and isinstance(name := next(iter(entry)), str)
+              and entry[name] == "data"):
+            names.append(name)
+            data.append(name)
+        else:
+            bad.append(str(entry))
+    return tuple(names), tuple(data), tuple(bad)
+
+
+def _names(value) -> tuple[str, ...]:
+    """`aliases:` as a list, or one name written bare. Anything else is no
+    alias: a malformed key must not hide the unit."""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(v).strip() for v in value if str(v).strip())

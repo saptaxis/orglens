@@ -726,7 +726,7 @@ def _git(*args, cwd):
 
 
 class TestWhereReportsCommitStatus:
-    """`orglens-adapt`'s safety gate depends on this: it must see uncommitted
+    """A skill that rewrites a unit's documents depends on this: it must see uncommitted
     paths or "no repository" before rewriting a driver document. The old
     single-repo `repo:` line was dropped when a unit grew several homes, so
     neither string it looked for could ever appear — the gate always
@@ -1166,6 +1166,15 @@ class TestViewReindexes:
                             "--no-reindex"], env=self._env(tmp_path))
         assert "reindex" not in calls
 
+    def test_json_prints_the_rows_and_writes_no_page(self, runner, tmp_path, monkeypatch):
+        self._calls(monkeypatch)
+        out = tmp_path / "v.html"
+        result = runner.invoke(cli, ["view", "--json", "--out", str(out)],
+                               env=self._env(tmp_path))
+        assert result.exit_code == 0, result.output
+        assert [u["name"] for u in json.loads(result.output)["units"]] == ["sample"]
+        assert not out.exists()
+
     def test_a_failed_reindex_still_draws_the_page(self, runner, tmp_path, monkeypatch):
         self._calls(monkeypatch, fail="database is locked")
         out = tmp_path / "v.html"
@@ -1396,8 +1405,9 @@ class TestTreeCommand:
         result = runner.invoke(cli, ["tree", "b", "--json"], env=env)
         assert result.exit_code == 0, result.output
         assert json.loads(result.output) == [
-            {"name": "b", "kind": "project", "status": "b going", "children": [
-                {"name": "c", "kind": "project", "status": "c going", "children": []},
+            {"name": "b", "aliases": [], "kind": "project", "status": "b going", "children": [
+                {"name": "c", "aliases": [], "kind": "project", "status": "c going",
+                 "children": []},
             ]},
         ]
 

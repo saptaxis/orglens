@@ -31,7 +31,7 @@ ENGINE = ROOT / "orglens"
 #: drift they would otherwise be blamed for.
 FACE = ("cli.py", "check.py", "complete.py", "config.py", "declaration.py",
         "documents.py",
-        "events.py", "grammar.py", "hide.py", "homes.py", "propose.py", "reference.py",
+        "events.py", "fresh.py", "grammar.py", "hide.py", "homes.py", "propose.py", "reference.py",
         "scadconfig.py", "sessions.py", "skip.py", "snapshot.py", "state.py", "tree.py", "units.py",
         "workflow/definition.py", "workflow/session.py", "workflow/cli.py")
 
@@ -110,7 +110,7 @@ def test_every_module_in_the_face_is_accounted_for():
     """A new module in the vocabulary face joins the check, or the check rots."""
     present = {
         str(p.relative_to(ENGINE)) for p in (*ENGINE.glob("*.py"), *ENGINE.glob("workflow/*.py"))
-        if p.name not in ("__init__.py", "activity.py", "view.py")
+        if p.name not in ("__init__.py", "__main__.py", "activity.py", "view.py")
     }
     assert present == set(FACE), (
         "modules in the vocabulary face but not checked: "

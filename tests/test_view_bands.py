@@ -257,3 +257,38 @@ class TestExplore:
         page = render([("All", TREE)], CTX, now=NOW)
         assert page.index("data-tab='recent'>Recent<") < page.index("data-tab='explore'>Explore<")
         assert "<main data-tab='recent' data-by='session'>" in page
+
+
+class TestData:
+    """`view --json`: the page's rows as data, placed as the page places them."""
+
+    def _data(self):
+        from orglens.view import data
+        rows = [
+            _row("org", Activity(last_session=NOW - 20 * 24 * H), kind="organization"),
+            _row("quiet", Activity(modified=NOW - 3 * H), part_of="org", why="Going",
+                 why_age=NOW - 40 * 24 * H),
+            _row("asks", Activity(needs=[{"question": "which?", "at": NOW - H}],
+                                  last_session=NOW - H), part_of="org"),
+        ]
+        return data([("x", rows)], {**CTX, "hidden": 2}, now=NOW)
+
+    def test_units_come_in_recents_order_with_both_bands(self):
+        d = self._data()
+        assert [u["name"] for u in d["units"]] == ["asks", "org", "quiet"]
+        quiet = d["units"][2]
+        assert quiet["band"] == {"session": "no sessions", "edit": "today"}
+        assert quiet["above"] == ["org"]
+        assert quiet["status"] == "Going" and quiet["status_stale"] is True
+
+    def test_what_is_waiting_and_the_totals(self):
+        d = self._data()
+        asks = d["units"][0]
+        assert asks["placed_by"] == {"clock": "waiting", "at": NOW - H}
+        assert asks["waiting"] == [{"question": "which?", "at": NOW - H}]
+        assert (d["waiting"], d["running"], d["hidden"]) == (1, 0, 2)
+        assert d["bands"][0] == "waiting"
+
+    def test_it_is_plain_json(self):
+        import json
+        assert json.loads(json.dumps(self._data()))["units"]

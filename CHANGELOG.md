@@ -1,5 +1,95 @@
 # Changelog
 
+## [0.8.0] — 2026-10-29
+
+Units of work in Emacs, from a snapshot that now keeps itself current and
+carries every unit's documents with their titles. A unit can answer to other
+names, a home can hold data that is never searched, and `marker` prints or
+edits a unit's declaration. Needs nothing new of scad.
+
+`where NAME` prints differently: no `roots:` or `here:` lines, a `marker:`
+line, and no `repos:` block; each home's commit state is on its own line,
+with the wording unchanged (`N uncommitted`, `clean`, `none — nothing is
+backing this up`). A script that read `repos:` reads the home lines instead.
+
+### Emacs
+
+- `emacs/orglens.el`: units, their homes, and their documents with titles, in
+  Emacs, read from `snapshot.json` and never from the tree. Functions first
+  (`orglens-units`, `orglens-unit` by name or alias, `orglens-unit-at`,
+  `orglens-units-at`, `orglens-unit-above`, `orglens-unit-and-below`,
+  `orglens-files`, `orglens-title`); three commands bound to no key
+  (`orglens-find-unit`, `orglens-find-document`, `orglens-which-unit`). Each
+  read starts `snapshot --if-stale` in the background. Emacs 29 or later, no
+  packages. `bootstrap` prints the two lines for an init file.
+
+### Units
+
+- A unit can answer to other names: `aliases: [scad]` in its marker. Every
+  command that takes a unit takes an alias, an exact alias before another
+  unit's prefix; completion offers aliases with the unit they stand for.
+  `where` shows them as `also:`, `list` in brackets, and `tree --json` and
+  the snapshot carry them. `check` reports an alias claimed by two units.
+- A home written `- name: data` under `homes:` holds data, not documents.
+  It is one of the unit's homes everywhere (`where` marks it, `config`
+  mounts it, the snapshot lists it) and is never searched: `find`,
+  `status`, `view`, the snapshot and its staleness check leave it out.
+  `check` and `marker --edit` report a `homes:` entry that is neither a
+  name nor `name: data`.
+- `orglens marker [UNIT]` prints the unit's marker; `--edit` opens it in
+  `$VISUAL` or `$EDITOR` and reads it back, saying when it no longer
+  parses (which drops the unit from the tree), names an unknown
+  `part_of`, or claims a taken alias.
+- `where NAME` answers only the unit: no roots and no `here:`. It gives a
+  `marker:` line, and each home carries its commit state on its own line
+  (`repos:` is gone), naming the repository when the home sits inside a
+  larger one. Bare `where` counts the roots; `--roots` lists them.
+
+### View
+
+- `view --json` prints the page's rows as data instead of writing the page:
+  each unit's band in both modes, the clock that placed it and the others,
+  running and waiting sessions, the status line and whether it is stale,
+  memos, and document paths by kind, in Recent's order; then the
+  unattributed sessions. It reindexes scad first, as the page does.
+
+### Snapshot
+
+- `snapshot.json` (and `snapshot --json`) gives each unit's documents with
+  their paths and titles: `drivers`, the driver document and the others its
+  kind declares, and `files`, every document by kind. A title is org's
+  `#+TITLE:` or markdown's front matter `title:`, else the first heading.
+  An editor can jump to a unit's documents from it without scanning.
+- The snapshot cache follows the tree. Each command, and each completion,
+  starts `orglens snapshot --if-stale` detached; it rebuilds only when the
+  tree changed, one at a time, and nothing waits on it. The answer in hand
+  may be one read behind.
+- `snapshot --check` also sees documents: one added, removed or renamed
+  under any home, and one the snapshot lists that was edited or deleted.
+  Before, only markers and driver documents counted. About 0.25 s more.
+- The snapshot gives each unit's `declared_at`, the folder of its marker.
+- A snapshot finds each unit's documents once, not once per output: 4.4 s on
+  the real tree, from 6 s.
+
+### Not yet
+
+- The cache follows the tree one read behind, not live: the first read
+  after a change answers from the old snapshot while the rebuild runs. A
+  file watcher was left out on purpose.
+- A data home is never searched, but its repository must still be under a
+  root to be found, and listing it walks its folders once per command
+  (0.06 s for a repository of 892 folders).
+- `marker --edit` checks parsing, `part_of`, aliases and `homes:` entries;
+  an unknown `kind` or a home that resolves nowhere is still `check`'s to
+  report.
+- orglens.el is tested in batch Emacs 31.1 on macOS only.
+
+### Skills
+
+- `orglens-adapt` is no longer shipped. It reshaped a unit's driver document
+  to inwit's conventions, which are not orglens's; the skill card and the
+  grammar reference say what orglens needs of a document.
+
 ## [0.7.0] — 2026-10-07
 
 Needs scad 0.9.0 or later for memos and the index's age, and scad 0.10.0 or
