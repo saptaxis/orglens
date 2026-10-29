@@ -1,6 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [0.8.0] — 2026-10-29
+
+Units of work in Emacs, from a snapshot that now keeps itself current and
+carries every unit's documents with their titles. A unit can answer to other
+names, a home can hold data that is never searched, and `marker` prints or
+edits a unit's declaration. Needs nothing new of scad.
+
+`where NAME` prints differently: no `roots:` or `here:` lines, a `marker:`
+line, and no `repos:` block; each home's commit state is on its own line,
+with the wording unchanged (`N uncommitted`, `clean`, `none — nothing is
+backing this up`). A script that read `repos:` reads the home lines instead.
 
 ### Emacs
 
@@ -12,7 +22,6 @@
   (`orglens-find-unit`, `orglens-find-document`, `orglens-which-unit`). Each
   read starts `snapshot --if-stale` in the background. Emacs 29 or later, no
   packages. `bootstrap` prints the two lines for an init file.
-- The snapshot gives each unit's `declared_at`, the folder of its marker.
 
 ### Units
 
@@ -58,13 +67,27 @@
 - `snapshot --check` also sees documents: one added, removed or renamed
   under any home, and one the snapshot lists that was edited or deleted.
   Before, only markers and driver documents counted. About 0.25 s more.
+- The snapshot gives each unit's `declared_at`, the folder of its marker.
 - A snapshot finds each unit's documents once, not once per output: 4.4 s on
   the real tree, from 6 s.
+
+### Not yet
+
+- The cache follows the tree one read behind, not live: the first read
+  after a change answers from the old snapshot while the rebuild runs. A
+  file watcher was left out on purpose.
+- A data home is never searched, but its repository must still be under a
+  root to be found, and listing it walks its folders once per command
+  (0.06 s for a repository of 892 folders).
+- `marker --edit` checks parsing, `part_of`, aliases and `homes:` entries;
+  an unknown `kind` or a home that resolves nowhere is still `check`'s to
+  report.
+- orglens.el is tested in batch Emacs 31.1 on macOS only.
 
 ### Skills
 
 - `orglens-adapt` is no longer shipped. It reshaped a unit's driver document
-  to one tree's conventions, which are not orglens's; the skill card and the
+  to inwit's conventions, which are not orglens's; the skill card and the
   grammar reference say what orglens needs of a document.
 
 ## [0.7.0] — 2026-10-07

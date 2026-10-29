@@ -2,7 +2,7 @@
 
 ;; Author: Vignesh Saptarishi
 ;; URL: https://github.com/saptaxis/orglens
-;; Version: 0.1
+;; Version: 0.8.0
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: outlines, files, tools
 

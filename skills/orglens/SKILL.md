@@ -23,9 +23,9 @@ lives in its own venv, and the CLI is `orglens` on PATH).
 Never `ls`, `find`, `glob` or `tree` the documents tree to discover units,
 homes, plans, specs or logs, and never `cat` a sibling's document to learn a
 shape. `orglens list`, `find`, `sessions` and the snapshot answer the first;
-this card and `references/grammar-reference.md` answer the second. A scan sees folders, not
-declarations, and a folder is not a unit until a marker says so. A document's
-*contents* you read directly, once you know its path.
+this card and `references/grammar-reference.md` answer the second. A scan
+sees folders, not declarations, and a folder is not a unit until a marker says
+so. A document's *contents* you read directly, once you know its path.
 </HARD-GATE>
 
 ## Not for
@@ -44,7 +44,7 @@ orglens snapshot --json [--unit <name>]         # the same facts as data, to com
 ```
 
 Every other orglens command refreshes the snapshot in the background when the
-tree has moved, so it is rarely stale for long; `--check` is still the test.
+tree has changed, so it may be one read behind; `--check` is still the test.
 The snapshot is the tree as one document. `--type`/`--unit` narrow it; the
 unscoped one is 500+ lines. The grammar's own words for what may exist are in
 `references/grammar-reference.md`, generated, never restated here.
@@ -61,6 +61,7 @@ orglens find plan --since 2w                    # touched lately
 orglens find article --waiting                  # packets with a gate open, and the question
 orglens find spec --grep "x" --json             # path, kind, unit, matches
 orglens where [<name>]                          # which unit a name or this directory is; marker, homes, uncommitted
+orglens where --roots                           # every root, listed; bare `where` gives only their count
 orglens marker [<unit>] [--edit]                # print the unit's .orglens.yml, or edit it and check it
 ```
 

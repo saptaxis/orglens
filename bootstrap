@@ -261,4 +261,4 @@ echo "      (add-to-list 'load-path \"$HERE/emacs\")"
 echo "      (require 'orglens)"
 
 echo
-echo "done. \`orglens where\` will tell you which roots it can see."
+echo "done. \`orglens where --roots\` lists the roots it can see."
